@@ -84,7 +84,7 @@ backend/.env
 *credentials*
 *secret*
 *.p12
-.env.example
+!backend/.env.example
 
 # Build
 build/
