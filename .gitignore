@@ -77,6 +77,15 @@ desktop.ini
 !package-lock.json
 !tsconfig.json
 
+# Arquivos sensíveis adicionais
+backend/.env
+*.pem
+*.key
+*credentials*
+*secret*
+*.p12
+.env.example
+
 # Build
 build/
 dist/

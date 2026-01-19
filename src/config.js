@@ -15,7 +15,7 @@ const NGROK_API_URL = 'https://automacaolab.ngrok.dev';
 const LOCAL_API_URL = 'http://localhost:5000';
 
 // Configurar qual URL usar
-const USE_NGROK = true; // Mude para false para usar localhost
+const USE_NGROK = false; // Mude para false para usar localhost
 
 // URL base da API (selecionada automaticamente)
 export const API_BASE_URL = USE_NGROK ? NGROK_API_URL : LOCAL_API_URL;

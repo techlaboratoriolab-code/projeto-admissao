@@ -7,8 +7,7 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import requests
 import json
-from datetime import datetime
-import mysql.connector
+from datetime import datetime, timedelta
 import os
 import sys
 from dotenv import load_dotenv
@@ -19,7 +18,8 @@ from vertexai.generative_models import GenerativeModel, Part
 import logging
 from logging.handlers import RotatingFileHandler
 
-load_dotenv()
+# Carregar variáveis de ambiente do arquivo .env na pasta backend
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 # Configurar encoding UTF-8 para o console do Windows (evita erros com emojis)
 if sys.platform == 'win32':
@@ -160,14 +160,6 @@ APLIS_USERNAME = "api.lab"
 APLIS_PASSWORD = "nintendo64"
 APLIS_HEADERS = {"Content-Type": "application/json"}
 
-# Configurações MySQL
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD'),
-    'database': os.getenv('DB_NAME', 'bancodedados')
-}
-
 # Configurações AWS S3
 S3_CONFIG = {
     'aws_access_key_id': os.getenv('AWS_ACCESS_KEY_ID'),
@@ -175,16 +167,6 @@ S3_CONFIG = {
     'region_name': os.getenv('AWS_REGION', 'sa-east-1')
 }
 S3_BUCKET = os.getenv('S3_BUCKET_NAME', 'aplis2')
-
-
-def get_db_connection():
-    """Cria conexão com MySQL"""
-    try:
-        conn = mysql.connector.connect(**DB_CONFIG)
-        return conn
-    except Exception as e:
-        print(f"Erro ao conectar ao banco: {e}")
-        return None
 
 
 def get_s3_client():
@@ -197,225 +179,317 @@ def get_s3_client():
         return None
 
 
-def salvar_admissao_aplis(dados_admissao):
+def fazer_requisicao_aplis(cmd, dat):
     """
-    Salva uma admissão/requisição no apLIS
+    Função genérica para fazer requisições ao apLIS usando a metodologia requisicaoListar
+
+    Args:
+        cmd (str): Comando a executar (ex: "requisicaoListar", "admissaoSalvar")
+        dat (dict): Dados a enviar no campo "dat"
+
+    Returns:
+        dict: Resposta da API apLIS
     """
     payload = {
         "ver": 1,
-        "cmd": "admissaoSalvar",
-        "dat": dados_admissao
+        "cmd": cmd,
+        "dat": dat
     }
 
     data = json.dumps(payload)
+    logger.debug(f"[apLIS] Enviando requisição: {cmd}")
+    logger.debug(f"[apLIS] Payload: {json.dumps(payload, indent=2, ensure_ascii=False)[:500]}")
 
     try:
         response = requests.post(
             APLIS_URL,
             auth=(APLIS_USERNAME, APLIS_PASSWORD),
             headers=APLIS_HEADERS,
-            data=data,
-            timeout=30
+            data=data
         )
 
-        response.raise_for_status()
-        return response.json()
+        logger.info(f"[apLIS] Status Code: {response.status_code}")
 
-    except requests.exceptions.Timeout:
-        return {"erro": "Timeout ao conectar com apLIS", "sucesso": 0}
+        try:
+            resposta_json = response.json()
+            logger.debug(f"[apLIS] Resposta JSON: {json.dumps(resposta_json, indent=2, ensure_ascii=False)[:500]}")
+
+            if resposta_json.get("dat") and resposta_json["dat"].get("sucesso") == 1:
+                logger.info(f"[apLIS] Requisição bem-sucedida para comando: {cmd}")
+                return resposta_json
+            else:
+                logger.warning(f"[apLIS] Resposta com sucesso != 1: {resposta_json}")
+                return resposta_json
+
+        except ValueError:
+            logger.error(f"[apLIS] Resposta não está em JSON: {response.text}")
+            return {"erro": "Resposta inválida do apLIS", "texto": response.text, "sucesso": 0, "dat": {}}
+
     except requests.exceptions.RequestException as e:
-        return {"erro": f"Erro na requisição: {str(e)}", "sucesso": 0}
-    except ValueError:
-        return {"erro": "Resposta inválida do apLIS", "texto": response.text, "sucesso": 0}
+        logger.error(f"[apLIS] Erro na requisição: {str(e)}")
+        return {"erro": f"Erro na requisição: {str(e)}", "sucesso": 0, "dat": {}}
+    except Exception as e:
+        logger.error(f"[apLIS] Erro inesperado: {str(e)}")
+        return {"erro": f"Erro inesperado: {str(e)}", "sucesso": 0, "dat": {}}
+
+
+def salvar_admissao_aplis(dados_admissao):
+    """
+    Salva uma admissão/requisição no apLIS usando a nova metodologia genérica
+    """
+    logger.info(f"[Admissão] Salvando admissão com dados: {len(str(dados_admissao))} bytes")
+    return fazer_requisicao_aplis("admissaoSalvar", dados_admissao)
+
+
+def listar_requisicoes_aplis(id_evento, periodo_ini, periodo_fim, ordenar="IdRequisicao"):
+    """
+    Lista requisições do apLIS usando requisicaoListar
+    
+    Args:
+        id_evento (str): ID do evento
+        periodo_ini (str): Data inicial (YYYY-MM-DD)
+        periodo_fim (str): Data final (YYYY-MM-DD)
+        ordenar (str): Campo para ordenação (padrão: IdRequisicao)
+    
+    Returns:
+        dict: Resposta com requisições
+    """
+    dat = {
+        "ordenar": ordenar,
+        "idEvento": str(id_evento),
+        "periodoIni": periodo_ini,
+        "periodoFim": periodo_fim
+    }
+    
+    logger.info(f"[Listagem] Listando requisições do evento {id_evento} de {periodo_ini} a {periodo_fim}")
+    return fazer_requisicao_aplis("requisicaoListar", dat)
+
+
+@app.route('/api/requisicoes/listar', methods=['POST'])
+def listar_requisicoes():
+    """
+    Lista requisições do apLIS usando a metodologia requisicaoListar
+    
+    Exemplo de requisição:
+    {
+        "idEvento": "50",
+        "periodoIni": "2026-01-15",
+        "periodoFim": "2026-01-15",
+        "ordenar": "IdRequisicao"
+    }
+    """
+    try:
+        dados = request.json
+        
+        id_evento = dados.get('idEvento')
+        periodo_ini = dados.get('periodoIni')
+        periodo_fim = dados.get('periodoFim')
+        ordenar = dados.get('ordenar', 'IdRequisicao')
+        
+        if not all([id_evento, periodo_ini, periodo_fim]):
+            return jsonify({
+                "sucesso": 0,
+                "erro": "Campos obrigatórios: idEvento, periodoIni, periodoFim"
+            }), 400
+        
+        logger.info(f"[Listagem] Requisição de listagem: evento={id_evento}, período={periodo_ini} a {periodo_fim}")
+        
+        resposta = listar_requisicoes_aplis(id_evento, periodo_ini, periodo_fim, ordenar)
+        
+        return jsonify({
+            "sucesso": 1 if resposta.get("dat", {}).get("sucesso") == 1 else 0,
+            "dados": resposta.get("dat", {}),
+            "mensagem": "Listagem obtida com sucesso" if resposta.get("dat", {}).get("sucesso") == 1 else "Erro ao listar"
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"[Listagem] Erro: {str(e)}")
+        return jsonify({
+            "sucesso": 0,
+            "erro": f"Erro ao listar requisições: {str(e)}"
+        }), 500
 
 
 @app.route('/api/requisicao/<cod_requisicao>', methods=['GET'])
 def buscar_requisicao(cod_requisicao):
     """
-    Busca dados completos de uma requisição (paciente + imagens)
+    Busca dados completos de uma requisição diretamente do apLIS
+    Usando a nova metodologia requisicaoListar - sem dependência de banco local
     """
     try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"erro": "Erro ao conectar ao banco de dados"}), 500
+        logger.info(f"[Buscar] Buscando requisição: {cod_requisicao}")
 
-        cursor = conn.cursor(dictionary=True)
+        # Buscar no apLIS usando requisicaoListar com filtro por código
+        # Usar período amplo para garantir que encontramos a requisição
+        hoje = datetime.now()
+        periodo_fim = hoje.strftime("%Y-%m-%d")
+        periodo_ini = (hoje - timedelta(days=365)).strftime("%Y-%m-%d")  # Buscar último ano
 
-        # Buscar dados da requisição e paciente
-        query = """
-        SELECT
-            r.IdRequisicao,
-            r.CodRequisicao,
-            r.CodPaciente,
-            r.DtaColeta,
-            r.IdConvenio,
-            r.IdLocalOrigem,
-            r.IdFontePagadora,
-            r.CodMedico,
-            r.NumGuiaConvenio,
-            r.IndicacaoClinica,
-            p.NomPaciente,
-            p.DtaNascimento,
-            p.Sexo,
-            p.CPF,
-            p.RGNumero,
-            p.NumEndereco,
-            p.ComEndereco,
-            t.NumTelefone as TelCelular,
-            c.Cep as CEP,
-            c.DesEndereco as Logradouro,
-            c.Bairro,
-            c.Cidade,
-            c.Estado as UF,
-            m.NomMedico,
-            m.CRM as CRMMedico,
-            m.CRMUF as UFMedico
-        FROM requisicao r
-        LEFT JOIN paciente p ON r.CodPaciente = p.CodPaciente
-        LEFT JOIN medico m ON r.CodMedico = m.CodMedico
-        LEFT JOIN telefone t ON t.Origem = 1 AND t.CodOrigem = p.CodPaciente
-        LEFT JOIN cep c ON c.CodCep = p.CodCEP
-        WHERE r.CodRequisicao = %s
-        """
-
-        cursor.execute(query, (cod_requisicao,))
-        requisicao = cursor.fetchone()
-
-        if not requisicao:
-            cursor.close()
-            conn.close()
-            return jsonify({"erro": "Requisição não encontrada"}), 404
-
-        # Buscar imagens da requisição
-        query_imagens = """
-        SELECT
-            IdRequisicaoImagem,
-            NomArquivo,
-            ExtArquivo,
-            Tipo,
-            DtaImg
-        FROM requisicaoimagem
-        WHERE IdRequisicao = %s AND Inativo = 0
-        ORDER BY Tipo, DtaImg
-        """
-
-        cursor.execute(query_imagens, (requisicao['IdRequisicao'],))
-        imagens_db = cursor.fetchall()
-
-        print(f"DEBUG: Encontradas {len(imagens_db)} imagens para IdRequisicao={requisicao['IdRequisicao']}")
-
-        # Buscar URLs assinadas do S3
-        s3_client = get_s3_client()
-        imagens = []
-
-        if s3_client and imagens_db:
-            for img in imagens_db:
-                nome_arquivo = img['NomArquivo']
-                extensao = img['ExtArquivo']
-
-                # Adicionar extensão se necessário (manter MAIÚSCULA/minúscula original)
-                if extensao and not nome_arquivo.endswith(f'.{extensao}'):
-                    # Verificar se já tem a extensão em qualquer case
-                    has_extension = False
-                    if '.' in nome_arquivo:
-                        existing_ext = nome_arquivo.split('.')[-1]
-                        if existing_ext.upper() == extensao.upper():
-                            has_extension = True
-                            nome_completo = nome_arquivo
-
-                    if not has_extension:
-                        nome_completo = f"{nome_arquivo}.{extensao}"
-                else:
-                    nome_completo = nome_arquivo
-
-                # Determinar prefixo baseado no código da requisição
-                cod_req = requisicao['CodRequisicao']
-                prefixo_lab = cod_req[:4] if len(cod_req) >= 4 else '0040'
-                caminho_s3 = f"lab/Arquivos/Foto/{prefixo_lab}/{nome_completo}"
-
-                print(f"DEBUG: Processando imagem: {caminho_s3}")
-                try:
-                    # Caminho local temporário para salvar a imagem
-                    arquivo_local = os.path.join(TEMP_IMAGES_DIR, nome_completo)
-
-                    # Baixar do S3 se ainda não existe localmente
-                    if not os.path.exists(arquivo_local):
-                        print(f"DEBUG: Baixando imagem do S3: {caminho_s3}")
-                        s3_client.download_file(S3_BUCKET, caminho_s3, arquivo_local)
-                        print(f"DEBUG: Imagem salva em: {arquivo_local}")
-                    else:
-                        print(f"DEBUG: Imagem já existe localmente: {arquivo_local}")
-
-                    # URL dinâmica para servir a imagem (funciona com localhost e ngrok)
-                    # Pega o host da requisição atual
-                    base_url = request.host_url.rstrip('/')
-                    url_local = f"{base_url}/api/imagem/{nome_completo}"
-
-                    imagens.append({
-                        'id': img['IdRequisicaoImagem'],
-                        'nome': nome_completo,
-                        'tipo': img['Tipo'],
-                        'url': url_local,
-                        'dataCadastro': img['DtaImg'].isoformat() if img['DtaImg'] else None
-                    })
-                except Exception as e:
-                    print(f"ERRO ao processar imagem {nome_completo}: {e}")
-        else:
-            print(f"DEBUG: S3 Client: {s3_client is not None}, Imagens DB: {len(imagens_db) if imagens_db else 0}")
-
-        cursor.close()
-        conn.close()
-
-        # Montar resposta
-        resultado = {
-            "requisicao": {
-                "codRequisicao": requisicao['CodRequisicao'],
-                "dtaColeta": requisicao['DtaColeta'].isoformat() if requisicao['DtaColeta'] else None,
-                "numGuia": requisicao['NumGuiaConvenio'],
-                "dadosClinicos": requisicao['IndicacaoClinica'],
-                "idConvenio": requisicao['IdConvenio'],
-                "idLocalOrigem": requisicao['IdLocalOrigem'],
-                "idFontePagadora": requisicao['IdFontePagadora'],
-                "idMedico": requisicao['CodMedico']
-            },
-            "paciente": {
-                "idPaciente": requisicao['CodPaciente'],
-                "nome": requisicao['NomPaciente'],
-                "dtaNasc": requisicao['DtaNascimento'].isoformat() if requisicao['DtaNascimento'] else None,
-                "sexo": requisicao['Sexo'],
-                "cpf": requisicao['CPF'],
-                "rg": requisicao['RGNumero'],
-                "telCelular": requisicao['TelCelular'],
-                "endereco": {
-                    "cep": requisicao['CEP'],
-                    "logradouro": requisicao['Logradouro'],
-                    "numEndereco": requisicao['NumEndereco'],
-                    "bairro": requisicao['Bairro'],
-                    "cidade": requisicao['Cidade'],
-                    "uf": requisicao['UF']
-                }
-            },
-            "convenio": {
-                "nome": f"Convênio ID {requisicao['IdConvenio']}" if requisicao['IdConvenio'] else "Não informado"
-            },
-            "fontePagadora": {
-                "nome": f"Fonte Pagadora ID {requisicao['IdFontePagadora']}" if requisicao['IdFontePagadora'] else "Não informado"
-            },
-            "medico": {
-                "nome": requisicao['NomMedico'],
-                "crm": requisicao['CRMMedico'],
-                "uf": requisicao['UFMedico']
-            },
-            "localOrigem": {
-                "nome": f"Local ID {requisicao['IdLocalOrigem']}" if requisicao['IdLocalOrigem'] else "Não informado"
-            },
-            "imagens": imagens
+        dat = {
+            "ordenar": "CodRequisicao",
+            "idEvento": "50",  # ID do evento padrão
+            "periodoIni": periodo_ini,
+            "periodoFim": periodo_fim,
+            "codRequisicao": cod_requisicao
         }
 
-        return jsonify(resultado), 200
+        resposta = fazer_requisicao_aplis("requisicaoListar", dat)
 
+        # Verificar se encontrou a requisição
+        if resposta.get("dat", {}).get("sucesso") != 1:
+            logger.warning(f"[Buscar] Requisição {cod_requisicao} não encontrada no apLIS")
+            logger.debug(f"[Buscar] Resposta completa: {resposta}")
+            return jsonify({
+                "sucesso": 0,
+                "erro": "Requisição não encontrada",
+                "codRequisicao": cod_requisicao,
+                "detalhes": resposta
+            }), 404
+
+        # Dados retornados pelo apLIS (vem em formato de lista)
+        dados_resposta = resposta.get("dat", {})
+        lista_requisicoes = dados_resposta.get("lista", [])
+
+        if not lista_requisicoes or len(lista_requisicoes) == 0:
+            logger.warning(f"[Buscar] Nenhuma requisição encontrada na lista para: {cod_requisicao}")
+            return jsonify({
+                "sucesso": 0,
+                "erro": "Requisição não encontrada",
+                "codRequisicao": cod_requisicao
+            }), 404
+
+        # Pegar o primeiro item da lista (deve ser a requisição buscada)
+        dados_aplis = lista_requisicoes[0]
+        logger.info(f"[Buscar] Requisição encontrada no apLIS: {cod_requisicao}")
+        logger.debug(f"[Buscar] Dados da requisição: {dados_aplis}")
+
+        # Buscar imagens da AWS S3 e baixar localmente (método original)
+        imagens = []
+        s3_client = get_s3_client()
+
+        if s3_client:
+            try:
+                # Determinar prefixo baseado no código da requisição (ex: 0040 dos primeiros 4 dígitos)
+                prefixo_lab = cod_requisicao[:4] if len(cod_requisicao) >= 4 else '0040'
+                # IMPORTANTE: Buscar apenas imagens que começam com o código completo da requisição
+                caminho_s3_base = f"lab/Arquivos/Foto/{prefixo_lab}/{cod_requisicao}"
+
+                logger.info(f"[S3] Buscando imagens em: {caminho_s3_base}")
+
+                # Listar objetos no S3 com o prefixo (apenas imagens dessa requisição específica)
+                response_s3 = s3_client.list_objects_v2(
+                    Bucket=S3_BUCKET,
+                    Prefix=caminho_s3_base
+                )
+
+                if 'Contents' in response_s3:
+                    for obj in response_s3['Contents']:
+                        key = obj['Key']
+                        filename = key.split('/')[-1]
+
+                        # Pular se for pasta vazia
+                        if not filename:
+                            continue
+
+                        # FILTRO ADICIONAL: Verificar se o nome do arquivo começa com o código da requisição
+                        if not filename.startswith(cod_requisicao):
+                            logger.debug(f"[S3] Pulando arquivo que não pertence a esta requisição: {filename}")
+                            continue
+
+                        try:
+                            # Caminho local temporário
+                            arquivo_local = os.path.join(TEMP_IMAGES_DIR, filename)
+
+                            # Baixar do S3 se não existe localmente
+                            if not os.path.exists(arquivo_local):
+                                logger.info(f"[S3] Baixando: {key}")
+                                s3_client.download_file(S3_BUCKET, key, arquivo_local)
+                                logger.info(f"[S3] Salvo em: {arquivo_local}")
+                            else:
+                                logger.debug(f"[S3] Já existe localmente: {filename}")
+
+                            # URL dinâmica local (funciona com localhost e ngrok)
+                            base_url = request.host_url.rstrip('/')
+                            url_local = f"{base_url}/api/imagem/{filename}"
+
+                            imagens.append({
+                                "nome": filename,
+                                "url": url_local,
+                                "tamanho": obj['Size'],
+                                "dataCadastro": obj['LastModified'].isoformat()
+                            })
+
+                        except Exception as e:
+                            logger.error(f"[S3] Erro ao processar {filename}: {e}")
+
+                    logger.info(f"[S3] Encontradas {len(imagens)} imagens para requisição {cod_requisicao}")
+                else:
+                    logger.info(f"[S3] Nenhuma imagem encontrada em {caminho_s3_base}")
+
+            except Exception as e:
+                logger.error(f"[S3] Erro ao buscar imagens: {str(e)}")
+        else:
+            logger.warning("[S3] Cliente S3 não disponível - imagens não serão carregadas")
+
+        # Montar resposta estruturada
+        resultado = {
+            "sucesso": 1,
+            "requisicao": {
+                "codRequisicao": dados_aplis.get("CodRequisicao"),
+                "idRequisicao": dados_aplis.get("IdRequisicao"),
+                "dtaColeta": dados_aplis.get("DtaColeta") or dados_aplis.get("DtaPrevista"),
+                "numGuia": dados_aplis.get("NumGuiaConvenio") or dados_aplis.get("NumExterno"),
+                "dadosClinicos": dados_aplis.get("IndicacaoClinica"),
+                "idConvenio": dados_aplis.get("IdConvenio"),
+                "idLocalOrigem": dados_aplis.get("IdLocalOrigem"),
+                "idFontePagadora": dados_aplis.get("IdFontePagadora"),
+                "idMedico": dados_aplis.get("CodMedico")
+            },
+            "paciente": {
+                "idPaciente": dados_aplis.get("CodPaciente"),
+                "nome": dados_aplis.get("NomPaciente"),
+                "dtaNasc": dados_aplis.get("DtaNascimento"),
+                "sexo": dados_aplis.get("Sexo"),
+                "cpf": dados_aplis.get("CPF"),
+                "rg": dados_aplis.get("RGNumero"),
+                "telCelular": dados_aplis.get("NumTelefone"),
+                "endereco": {
+                    "cep": dados_aplis.get("CEP"),
+                    "logradouro": dados_aplis.get("DesEndereco"),
+                    "numEndereco": dados_aplis.get("NumEndereco"),
+                    "bairro": dados_aplis.get("Bairro"),
+                    "cidade": dados_aplis.get("Cidade"),
+                    "uf": dados_aplis.get("Estado")
+                }
+            },
+            "medico": {
+                "nome": dados_aplis.get("NomMedico"),
+                "crm": dados_aplis.get("CRM"),
+                "uf": dados_aplis.get("CRMUF")
+            },
+            "convenio": {
+                "nome": dados_aplis.get("NomeConvenio", f"Convênio ID {dados_aplis.get('IdConvenio')}")
+            },
+            "fontePagadora": {
+                "nome": dados_aplis.get("NomeFontePagadora", f"Fonte Pagadora ID {dados_aplis.get('IdFontePagadora')}")
+            },
+            "localOrigem": {
+                "nome": dados_aplis.get("NomeLocalOrigem", f"Local ID {dados_aplis.get('IdLocalOrigem')}")
+            },
+            "imagens": imagens,  # Imagens do S3
+            "totalImagens": len(imagens),
+            "dadosAplis": dados_resposta  # Incluir todos os dados brutos para referência
+        }
+
+        logger.info(f"[Buscar] Resposta formatada para: {cod_requisicao} ({len(imagens)} imagens)")
+        return jsonify(resultado), 200
+        
     except Exception as e:
-        return jsonify({"erro": f"Erro ao buscar requisição: {str(e)}"}), 500
+        logger.error(f"[Buscar] Erro ao buscar requisição {cod_requisicao}: {str(e)}")
+        return jsonify({
+            "sucesso": 0,
+            "erro": f"Erro ao buscar requisição: {str(e)}"
+        }), 500
 
 
 @app.route('/api/admissao/salvar', methods=['POST'])
@@ -528,6 +602,7 @@ def index():
         "endpoints": {
             "health": "/api/health",
             "teste_aplis": "/api/admissao/teste",
+            "listar_requisicoes": "/api/requisicoes/listar (POST) - Nova metodologia requisicaoListar",
             "buscar_requisicao": "/api/requisicao/<codigo>",
             "salvar_admissao": "/api/admissao/salvar (POST)",
             "validar_dados": "/api/admissao/validar (POST)",
@@ -536,7 +611,8 @@ def index():
             "buscar_exames": "/api/exames/buscar-por-nome (POST)",
             "servir_imagem": "/api/imagem/<filename>"
         },
-        "documentacao": "Veja README.md para mais informações"
+        "documentacao": "Veja README.md para mais informações",
+        "nota": "API agora usa metodologia requisicaoListar do apiaplisreduzido"
     }), 200
 
 
@@ -1406,10 +1482,7 @@ def consolidar_resultados():
                         nomes_exames.append(exame)
 
                 if nomes_exames:
-                    # Buscar IDs no banco
-                    conn = get_db_connection()
-                    cursor = conn.cursor(dictionary=True)
-
+                    # Enriquecer exames usando mapeamento automático (sem banco de dados)
                     exames_enriquecidos = []
                     for idx, nome_exame in enumerate(nomes_exames):
                         nome_limpo = nome_exame.strip().upper()
@@ -1441,12 +1514,9 @@ def consolidar_resultados():
 
                         exames_enriquecidos.append(exame_enriquecido)
 
-                    cursor.close()
-                    conn.close()
-
                     # Substituir lista original pela enriquecida
                     resultado_consolidado["requisicoes"][0]["requisicao"]["itens_exame"] = exames_enriquecidos
-                    print(f"[CONSOLIDAR]  Exames enriquecidos com IDs do banco de dados")
+                    print(f"[CONSOLIDAR]  Exames enriquecidos com mapeamento automático (sem banco de dados)")
             else:
                 print(f"[CONSOLIDAR]  AVISO: itens_exame está vazio ou não é uma lista válida!")
         else:
@@ -1594,9 +1664,6 @@ def buscar_exames_por_nome():
 
         print(f"[BUSCAR EXAMES] Buscando IDs para {len(nomes_exames)} exames...")
 
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
-
         resultados = []
 
         for nome_exame in nomes_exames:
@@ -1629,9 +1696,6 @@ def buscar_exames_por_nome():
                     "mensagem": f"Exame '{nome_exame}' não identificado por categoria"
                 })
                 print(f"[BUSCAR EXAMES]  Não identificado: {nome_exame} (categoria: {tipo_identificado})")
-
-        cursor.close()
-        conn.close()
 
         # Contar quantos foram encontrados
         encontrados = sum(1 for r in resultados if r['encontrado'])
@@ -1700,6 +1764,7 @@ if __name__ == '__main__':
     logger.info("Endpoints disponiveis:")
     logger.info("  GET  /api/health                 - Status do servidor")
     logger.info("  GET  /api/admissao/teste         - Testar conexao com apLIS")
+    logger.info("  POST /api/requisicoes/listar     - Listar requisicoes (nova metodologia)")
     logger.info("  GET  /api/requisicao/<cod>       - Buscar requisicao com dados e imagens")
     logger.info("  GET  /api/imagem/<filename>      - Servir imagem temporaria")
     logger.info("  POST /api/admissao/salvar        - Salvar admissao")
@@ -1707,6 +1772,11 @@ if __name__ == '__main__':
     logger.info("  POST /api/ocr/processar          - Processar OCR em imagem")
     logger.info("  POST /api/consolidar-resultados  - Consolidar resultados OCR")
     logger.info("  POST /api/exames/buscar-por-nome - Buscar IDs de exames")
+    logger.info("")
+    logger.info("METODOLOGIA ATUALIZADA:")
+    logger.info("  - Usando fazer_requisicao_aplis() para todas as chamadas ao apLIS")
+    logger.info("  - Suporte a requisicaoListar para listagem de requisições")
+    logger.info("  - Logging detalhado de todas as requisições e respostas")
     logger.info("")
     logger.info("CORS configurado para aceitar requisicoes de qualquer origem")
     logger.info("URLs dinamicas habilitadas (funciona com localhost e ngrok)")
