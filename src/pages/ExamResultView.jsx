@@ -8,7 +8,7 @@ const ExamResultView = () => {
   const [examResultImage, setExamResultImage] = useState(null);
 
   return (
-    <div className="medical-system-layout">
+    <div className="flex w-full min-h-screen max-md:flex-col">
       <PatientCard patient={patientData} />
       <DocumentViewer
         documentType="exam-result"

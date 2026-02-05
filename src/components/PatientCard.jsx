@@ -26,22 +26,36 @@ const PatientCard = ({ patient, onPatientUpdate }) => {
   };
 
   return (
-    <div className="patient-card">
+    <div className="w-[420px] h-screen bg-white dark:bg-neutral-800 p-6 overflow-y-auto shadow-[2px_0_12px_rgba(0,0,0,0.08)] dark:shadow-[2px_0_12px_rgba(0,0,0,0.3)] sticky top-0 scrollbar-custom max-xl:w-[400px] max-lg:w-[350px] max-md:w-full max-md:h-auto max-md:max-h-[50vh] max-md:p-5 transition-colors">
       {/* Logo LAB */}
-      <div className="lab-logo">LAB</div>
+      <div className="w-[100px] h-[50px] bg-secondary rounded-md flex items-center justify-center text-white font-bold text-xl mb-5 max-sm:w-20 max-sm:h-10 max-sm:text-base">
+        LAB
+      </div>
 
       {/* Botão de edição */}
-      <div className="card-actions">
+      <div className="mb-5">
         {!isEditing ? (
-          <button className="btn-edit-card" onClick={handleEdit} title="Editar dados do paciente">
+          <button
+            className="px-5 py-2.5 bg-blue-500 text-white border-0 rounded-md text-sm font-semibold cursor-pointer transition-colors hover:bg-blue-600"
+            onClick={handleEdit}
+            title="Editar dados do paciente"
+          >
             Editar
           </button>
         ) : (
-          <div className="edit-actions">
-            <button className="btn-save-card" onClick={handleSave} title="Salvar alterações">
+          <div className="flex gap-2">
+            <button
+              className="px-5 py-2.5 bg-success text-white border-0 rounded-md text-sm font-semibold cursor-pointer transition-colors hover:bg-success-dark"
+              onClick={handleSave}
+              title="Salvar alterações"
+            >
               Salvar
             </button>
-            <button className="btn-cancel-card" onClick={handleCancel} title="Cancelar edição">
+            <button
+              className="px-5 py-2.5 bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 border-0 rounded-md text-sm font-semibold cursor-pointer transition-colors hover:bg-neutral-300 dark:hover:bg-neutral-600"
+              onClick={handleCancel}
+              title="Cancelar edição"
+            >
               Cancelar
             </button>
           </div>
@@ -49,27 +63,47 @@ const PatientCard = ({ patient, onPatientUpdate }) => {
       </div>
 
       {/* Dados do Paciente */}
-      <section className="section">
-        <h2 className="section-title">DADOS DO PACIENTE</h2>
-        <div className="info-group">
-          <label className="info-label">Nome Completo</label>
+      <section className="mb-4">
+        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">DADOS DO PACIENTE</h2>
+
+        {/* ID do Paciente */}
+        {(patient?.idPaciente || isEditing) && (
+          <div className="mb-3.5 p-2.5 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded">
+            <label className="block text-[11px] font-medium text-blue-700 dark:text-blue-400 mb-1 uppercase tracking-wide">ID do Paciente</label>
+            {isEditing ? (
+              <input
+                type="text"
+                className="w-full px-3.5 py-2.5 text-sm border-2 border-blue-300 dark:border-blue-700 rounded-md transition-all bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-blue-600 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
+                value={editedData.idPaciente || ''}
+                onChange={(e) => handleChange('idPaciente', e.target.value)}
+                placeholder="ID do paciente"
+              />
+            ) : (
+              <p className="text-sm font-bold text-blue-900 dark:text-blue-300">{patient.idPaciente}</p>
+            )}
+          </div>
+        )}
+
+        <div className="mb-3.5">
+          <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">Nome Completo</label>
           {isEditing ? (
             <input
               type="text"
-              className="info-input"
+              className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
               value={editedData.name || ''}
               onChange={(e) => handleChange('name', e.target.value)}
             />
           ) : (
-            <p className="info-value name">{patient?.name || '{paciente.nome_completo}'}</p>
+            <p className="text-sm font-semibold text-[#1a1a1a] dark:text-neutral-100">{patient?.name || '{paciente.nome_completo}'}</p>
           )}
         </div>
-        <div className="info-group">
-          <label className="info-label">Data de Nascimento</label>
+
+        <div className="mb-3.5">
+          <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">Data de Nascimento</label>
           {isEditing ? (
             <input
               type="date"
-              className="info-input"
+              className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
               value={editedData.birthDate ? editedData.birthDate.split('/').reverse().join('-') : ''}
               onChange={(e) => {
                 const dataBr = e.target.value.split('-').reverse().join('/');
@@ -77,129 +111,286 @@ const PatientCard = ({ patient, onPatientUpdate }) => {
               }}
             />
           ) : (
-            <p className="info-value">{patient?.birthDate || '{paciente.data_nascimento}'}</p>
+            <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.birthDate || '{paciente.data_nascimento}'}</p>
           )}
         </div>
-        <div className="info-group">
-          <label className="info-label">Idade</label>
-          <p className="info-value">{patient?.age || '{paciente.idade}'}</p>
+
+        <div className="mb-3.5">
+          <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">Idade</label>
+          <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.age || '{paciente.idade}'}</p>
         </div>
-        <div className="info-group">
-          <label className="info-label">CPF</label>
+
+        <div className="mb-3.5">
+          <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">CPF</label>
           {isEditing ? (
             <input
               type="text"
-              className="info-input"
+              className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
               value={editedData.cpf || ''}
               onChange={(e) => handleChange('cpf', e.target.value)}
               placeholder="000.000.000-00"
             />
           ) : (
-            <p className="info-value">{patient?.cpf || 'Não informado'}</p>
+            <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.cpf || 'Não informado'}</p>
           )}
         </div>
-        <div className="info-group">
-          <label className="info-label">RG</label>
+
+        <div className="mb-3.5">
+          <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">RG</label>
           {isEditing ? (
             <input
               type="text"
-              className="info-input"
+              className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
               value={editedData.rg || ''}
               onChange={(e) => handleChange('rg', e.target.value)}
             />
           ) : (
-            <p className="info-value">{patient?.rg || 'Não informado'}</p>
+            <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.rg || 'Não informado'}</p>
           )}
         </div>
-        <div className="info-group">
-          <label className="info-label">Telefone</label>
+
+        <div className="mb-3.5">
+          <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">Telefone</label>
           {isEditing ? (
             <input
               type="text"
-              className="info-input"
+              className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
               value={editedData.phone || ''}
               onChange={(e) => handleChange('phone', e.target.value)}
               placeholder="(00) 00000-0000"
             />
           ) : (
-            <p className="info-value">{patient?.phone || 'Não informado'}</p>
+            <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.phone || 'Não informado'}</p>
           )}
         </div>
-        <div className="info-group">
-          <label className="info-label">Endereço</label>
+
+        <div className="mb-3.5">
+          <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">E-mail</label>
+          {isEditing ? (
+            <input
+              type="email"
+              className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+              value={editedData.email || ''}
+              onChange={(e) => handleChange('email', e.target.value)}
+              placeholder="email@exemplo.com"
+            />
+          ) : (
+            <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.email || 'Não informado'}</p>
+          )}
+        </div>
+
+        <div className="mb-3.5">
+          <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">Nº Carteirinha</label>
+          {isEditing ? (
+            <input
+              type="text"
+              className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+              value={editedData.insuranceCardNumber || ''}
+              onChange={(e) => handleChange('insuranceCardNumber', e.target.value)}
+              placeholder="000000000000000"
+            />
+          ) : (
+            <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.insuranceCardNumber || 'Não informado'}</p>
+          )}
+        </div>
+
+        <div className="mb-3.5">
+          <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">Nº Guia Convênio</label>
+          {isEditing ? (
+            <input
+              type="text"
+              className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+              value={editedData.numGuia || ''}
+              onChange={(e) => handleChange('numGuia', e.target.value)}
+              placeholder="Número da guia"
+            />
+          ) : (
+            <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.numGuia || 'Não informado'}</p>
+          )}
+        </div>
+
+        <div className="mb-3.5">
+          <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">Endereço</label>
           {isEditing ? (
             <textarea
-              className="info-textarea"
+              className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 resize-y min-h-[60px] focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
               value={editedData.address || ''}
               onChange={(e) => handleChange('address', e.target.value)}
               rows="2"
             />
           ) : (
-            <p className="info-value">{patient?.address || 'Não informado'}</p>
+            <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.address || 'Não informado'}</p>
+          )}
+        </div>
+
+        <div className="mb-3.5">
+          <label className="block text-sm font-semibold text-[#1e40af] dark:text-blue-400 mb-1">Exames</label>
+          {isEditing ? (
+            <textarea
+              className="w-full px-3 py-3 text-base border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 resize-y min-h-[120px] leading-relaxed focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+              value={editedData.exams || ''}
+              onChange={(e) => handleChange('exams', e.target.value)}
+              rows="6"
+              placeholder="Digite os nomes dos exames separados por vírgula"
+            />
+          ) : (
+            <p className="text-base leading-relaxed whitespace-pre-wrap dark:text-neutral-300">{patient?.exams || 'Não informado'}</p>
           )}
         </div>
       </section>
 
-      <div className="divider"></div>
+      <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-4"></div>
 
       {/* Requisição */}
-      <section className="section">
-        <h2 className="section-title">Requisição</h2>
-        <p className="prontuario-number">{patient?.recordNumber || '{requisicao.numero}'}</p>
+      <section className="mb-4">
+        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">Requisição</h2>
+        {isEditing ? (
+          <input
+            type="text"
+            className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+            value={editedData.recordNumber || ''}
+            onChange={(e) => handleChange('recordNumber', e.target.value)}
+            placeholder="Número da requisição"
+          />
+        ) : (
+          <p className="text-2xl font-bold text-secondary dark:text-blue-400">{patient?.recordNumber || '{requisicao.numero}'}</p>
+        )}
       </section>
 
-      <div className="divider"></div>
+      <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-4"></div>
 
       {/* Local de origem */}
-      <section className="section">
-        <h2 className="section-title">Local de origem</h2>
-        <p className="info-value">{patient?.origin || '{requisicao.local_origem}'}</p>
+      <section className="mb-4">
+        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">Local de origem</h2>
+        {isEditing ? (
+          <input
+            type="text"
+            className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+            value={editedData.origin || ''}
+            onChange={(e) => handleChange('origin', e.target.value)}
+            placeholder="Local de origem"
+          />
+        ) : (
+          <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.origin || '{requisicao.local_origem}'}</p>
+        )}
       </section>
 
-      <div className="divider"></div>
+      <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-4"></div>
 
       {/* Fonte pagadora */}
-      <section className="section">
-        <h2 className="section-title">Fonte pagadora</h2>
-        <p className="info-value">{patient?.payingSource || '{requisicao.fonte_pagadora}'}</p>
+      <section className="mb-4">
+        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">Fonte pagadora</h2>
+        {isEditing ? (
+          <input
+            type="text"
+            className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+            value={editedData.payingSource || ''}
+            onChange={(e) => handleChange('payingSource', e.target.value)}
+            placeholder="Fonte pagadora"
+          />
+        ) : (
+          <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.payingSource || '{requisicao.fonte_pagadora}'}</p>
+        )}
       </section>
 
-      <div className="divider"></div>
+      <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-4"></div>
 
       {/* Convênio */}
-      <section className="section">
-        <h2 className="section-title">CONVÊNIO</h2>
-        <p className="info-value">{patient?.insurance || '{convenio.nome}'}</p>
+      <section className="mb-4">
+        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">CONVÊNIO</h2>
+        {isEditing ? (
+          <input
+            type="text"
+            className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+            value={editedData.insurance || ''}
+            onChange={(e) => handleChange('insurance', e.target.value)}
+            placeholder="Convênio"
+          />
+        ) : (
+          <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.insurance || '{convenio.nome}'}</p>
+        )}
       </section>
 
-      <div className="divider"></div>
+      <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-4"></div>
 
       {/* Médico Solicitante */}
-      <section className="section">
-        <h2 className="section-title">MÉDICO SOLICITANTE</h2>
-        <p className="info-value doctor-name">{patient?.doctorName || '{medico.nome_completo}'}</p>
-        <p className="info-crm">{patient?.doctorCRM || '{medico.crm}'}</p>
+      <section className="mb-4">
+        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">MÉDICO SOLICITANTE</h2>
+        {isEditing ? (
+          <>
+            <input
+              type="text"
+              className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 mb-2 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+              value={editedData.doctorName || ''}
+              onChange={(e) => handleChange('doctorName', e.target.value)}
+              placeholder="Nome do médico"
+            />
+            <input
+              type="text"
+              className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+              value={editedData.doctorCRM || ''}
+              onChange={(e) => handleChange('doctorCRM', e.target.value)}
+              placeholder="CRM do médico"
+            />
+          </>
+        ) : (
+          <>
+            <p className="text-sm font-semibold text-[#1a1a1a] dark:text-neutral-100 mb-1">{patient?.doctorName || '{medico.nome_completo}'}</p>
+            <p className="text-xs text-gray-500 dark:text-neutral-400 uppercase tracking-wide">{patient?.doctorCRM || '{medico.crm}'}</p>
+          </>
+        )}
       </section>
 
-      <div className="divider"></div>
+      <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-4"></div>
 
       {/* Atendimento */}
-      <section className="section">
-        <h2 className="section-title">ATENDIMENTO</h2>
-        <div className="info-group">
-          <label className="info-label">Data da Coleta</label>
-          <p className="info-value">{patient?.collectionDate || '{atendimento.data_coleta}'}</p>
+      <section className="mb-4">
+        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">ATENDIMENTO</h2>
+        <div className="mb-3.5">
+          <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">Data da Coleta</label>
+          {isEditing ? (
+            <input
+              type="date"
+              className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+              value={editedData.collectionDate ? editedData.collectionDate.split('/').reverse().join('-') : ''}
+              onChange={(e) => {
+                const dataBr = e.target.value.split('-').reverse().join('/');
+                handleChange('collectionDate', dataBr);
+              }}
+            />
+          ) : (
+            <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.collectionDate || '{atendimento.data_coleta}'}</p>
+          )}
         </div>
       </section>
 
-      <div className="divider"></div>
+      <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-4"></div>
 
       {/* Status */}
-      <section className="section">
-        <h2 className="section-title">STATUS</h2>
-        <div className={`status-badge ${patient?.status || 'released'}`}>
-          <span>{patient?.statusText || '{laudo.status}'}</span>
-        </div>
+      <section className="mb-4">
+        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">STATUS</h2>
+        {isEditing ? (
+          <select
+            className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+            value={editedData.status || ''}
+            onChange={(e) => handleChange('status', e.target.value)}
+          >
+            <option value="">Selecionar</option>
+            <option value="released">Liberado</option>
+            <option value="pending">Pendente</option>
+            <option value="rejected">Rejeitado</option>
+            <option value="cancelled">Cancelado</option>
+          </select>
+        ) : (
+          <div className={`inline-flex items-center justify-center px-4 py-1.5 rounded-md text-xs font-semibold ${
+            patient?.status === 'released' ? 'bg-success-light text-success-dark' :
+            patient?.status === 'pending' ? 'bg-yellow-100 text-warning' :
+            patient?.status === 'processing' ? 'bg-blue-100 text-blue-600' :
+            'bg-gray-100 text-gray-600'
+          }`}>
+            <span>{patient?.statusText || '{laudo.status}'}</span>
+          </div>
+        )}
       </section>
     </div>
   );

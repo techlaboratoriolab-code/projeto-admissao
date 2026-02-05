@@ -6,22 +6,22 @@ const DocumentViewer = ({ documentType, imageUrl, placeholderText }) => {
       case 'medical-order':
         return {
           label: '📋 Pedido Médico',
-          className: 'badge-medical-order'
+          className: 'bg-secondary/10 text-secondary'
         };
       case 'report':
         return {
           label: '📄 Laudo',
-          className: 'badge-report'
+          className: 'bg-success/10 text-success-dark'
         };
       case 'exam-result':
         return {
           label: '🔬 Resultado Exame',
-          className: 'badge-exam'
+          className: 'bg-purple-100 text-purple-800'
         };
       default:
         return {
           label: '📋 Documento',
-          className: 'badge-default'
+          className: 'bg-gray-100 text-gray-600'
         };
     }
   };
@@ -29,26 +29,26 @@ const DocumentViewer = ({ documentType, imageUrl, placeholderText }) => {
   const badge = getDocumentBadge();
 
   return (
-    <div className="document-viewer">
+    <div className="flex-1 p-6 bg-neutral-50">
       {/* Header */}
-      <header className="document-header">
-        <h1 className="document-title">DOCUMENTOS E EXAMES</h1>
-        <div className={`document-badge ${badge.className}`}>
+      <header className="flex items-center justify-between bg-white px-4.5 py-[18px] rounded-lg shadow-card mb-4">
+        <h1 className="text-[17px] font-bold text-[#333] m-0">DOCUMENTOS E EXAMES</h1>
+        <div className={`px-3.5 py-1.5 rounded-[5px] text-xs font-semibold ${badge.className}`}>
           <span>{badge.label}</span>
         </div>
       </header>
 
       {/* Imagem do Documento */}
-      <div className="document-container">
+      <div className="bg-white rounded-xl shadow-[0_4px_16px_rgba(0,0,0,0.08)] p-10 h-[calc(100vh-170px)] flex items-center justify-center">
         {imageUrl ? (
           <img
             src={imageUrl}
             alt={badge.label}
-            className="document-image"
+            className="max-w-full max-h-full object-contain rounded-lg"
           />
         ) : (
-          <div className="document-placeholder">
-            <p className="placeholder-text">
+          <div className="w-full h-full bg-gray-100 rounded-lg flex items-center justify-center">
+            <p className="text-lg font-normal text-gray-400 text-center whitespace-pre-line leading-relaxed max-sm:text-sm">
               {placeholderText || 'Imagem do Documento\n\nArraste sua imagem aqui ou\nsubstitua este placeholder'}
             </p>
           </div>

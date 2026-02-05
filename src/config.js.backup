@@ -1,0 +1,73 @@
+/**
+ * Configuração da API
+ *
+ * MODOS DE ACESSO:
+ *
+ * 1. LOCALHOST (apenas na sua máquina):
+ *    USE_NETWORK = false, USE_NGROK = false
+ *
+ * 2. REDE LOCAL (outras pessoas na mesma rede WiFi/LAN):
+ *    USE_NETWORK = true, USE_NGROK = false
+ *    IMPORTANTE: Configure seu IP local em NETWORK_IP abaixo!
+ *
+ * 3. INTERNET (qualquer lugar do mundo via ngrok):
+ *    USE_NGROK = true
+ */
+
+// URL do ngrok para o backend (atualize quando o ngrok gerar uma nova URL)
+const NGROK_API_URL = 'https://automacaolab.ngrok.dev';
+
+// 🌐 CONFIGURAÇÃO DE REDE LOCAL
+// IMPORTANTE: Descubra seu IP local:
+// 1. Abra o CMD (Prompt de Comando)
+// 2. Digite: ipconfig
+// 3. Procure por "Endereço IPv4" (exemplo: 192.168.1.100)
+// 4. Cole o IP aqui embaixo:
+const NETWORK_IP = '192.168.1.100'; // ⚠️ ATUALIZE COM SEU IP LOCAL!
+
+// URLs disponíveis
+const NETWORK_API_URL = `http://${NETWORK_IP}:5000`; // Rede local
+const LOCAL_API_URL = 'http://localhost:5000'; // Apenas esta máquina
+
+// 🎯 CONFIGURAR MODO DE ACESSO
+const USE_NGROK = false;  // true = Usar ngrok (internet)
+const USE_NETWORK = true; // true = Usar rede local (outras pessoas na mesma rede)
+
+// URL base da API (selecionada automaticamente)
+export const API_BASE_URL = USE_NGROK
+  ? NGROK_API_URL
+  : (USE_NETWORK ? NETWORK_API_URL : LOCAL_API_URL);
+
+// Logs para debug
+console.log('='.repeat(80));
+console.log('🔧 CONFIGURAÇÃO DA API');
+console.log('='.repeat(80));
+
+let modo = 'LOCALHOST (apenas esta máquina)';
+if (USE_NGROK) {
+  modo = 'NGROK (internet - qualquer lugar)';
+} else if (USE_NETWORK) {
+  modo = 'REDE LOCAL (outras pessoas na mesma rede WiFi/LAN)';
+}
+
+console.log(`📍 Modo: ${modo}`);
+console.log(`🌐 URL da API: ${API_BASE_URL}`);
+
+if (USE_NETWORK && NETWORK_IP === '192.168.1.100') {
+  console.warn('⚠️ ATENÇÃO: Você precisa configurar seu IP local!');
+  console.warn('⚠️ Abra o CMD, digite "ipconfig" e encontre seu "Endereço IPv4"');
+  console.warn('⚠️ Depois atualize NETWORK_IP em src/config.js');
+}
+
+console.log(`✅ Configuração carregada com sucesso!`);
+console.log('='.repeat(80));
+
+export default {
+  API_BASE_URL,
+  USE_NGROK,
+  USE_NETWORK,
+  NGROK_API_URL,
+  NETWORK_API_URL,
+  LOCAL_API_URL,
+  NETWORK_IP
+};
