@@ -13,7 +13,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'localhost'),
     'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', 'SENHA@ROOT'),
+    'password': os.getenv('DB_PASSWORD', ''),
     'database': os.getenv('DB_NAME', 'newdb'),
     'charset': 'utf8mb4'
 }

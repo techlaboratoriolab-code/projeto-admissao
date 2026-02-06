@@ -1,9 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
 
-// ⚠️ IMPORTANTE: Configure as variáveis de ambiente no arquivo .env
-// Nunca commite chaves do Supabase no código!
-const supabaseUrl = process.env.REACT_APP_SUPABASE_URL
-const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY
+// Obter as variáveis de ambiente
+const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || 'CONFIGURE_SUPABASE_URL_NO_ENV'
+const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY || 'CONFIGURE_SUPABASE_ANON_KEY_NO_ENV'
+const supabaseServiceKey = process.env.REACT_APP_SUPABASE_SERVICE_KEY || 'CONFIGURE_SUPABASE_SERVICE_KEY_NO_ENV'
 
 // Validação: garantir que as variáveis estão configuradas
 if (!supabaseUrl || !supabaseAnonKey) {
@@ -13,6 +13,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 console.log('🔍 SUPABASE CONFIG:')
 console.log('URL:', supabaseUrl ? '✅ Configurado' : '❌ Não configurado')
 console.log('Anon Key:', supabaseAnonKey ? '✅ Configurado' : '❌ Não configurado')
+console.log('Service Key:', supabaseServiceKey ? '✅ Configurado' : '❌ Não configurado')
 
 // Cliente normal (para usuários)
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -23,10 +24,15 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   }
 })
 
-// ⚠️ NOTA: Service role key NÃO deve ser exposta no frontend!
-// Em produção, operações admin devem ser feitas pelo backend.
-// Por segurança, não exportamos supabaseAdmin no frontend.
-export const supabaseAdmin = null // Removido por segurança
-    autoRefreshToken: false
+// Supabase Admin (para gerenciamento de usuários)
+// ⚠️ IMPORTANTE: Em produção, essas operações devem ser movidas para o backend
+export const supabaseAdmin = createClient(
+  supabaseUrl,
+  supabaseServiceKey,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
   }
-})
+)
