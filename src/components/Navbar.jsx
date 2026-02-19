@@ -21,10 +21,11 @@ const Navbar = () => {
       <div className="max-w-[1400px] mx-auto px-8 py-4 flex justify-between items-center gap-8 max-md:flex-col max-md:gap-4">
         <div className="flex-shrink-0">
           <Link to="/admissao" className="flex items-center gap-3 no-underline text-neutral-700 dark:text-neutral-200 font-semibold text-lg transition-opacity hover:opacity-80">
-            <div className="flex items-center justify-center w-10 h-10 bg-gradient-primary rounded-full overflow-hidden p-1.5">
-              <img src="/logo.svg" alt="Logo" className="w-full h-full object-contain" style={{filter: 'brightness(0) invert(1)'}} />
-            </div>
-            <span className="max-md:hidden">Sistema de Admissão</span>
+            <img 
+              src="/logo-horizontal.svg" 
+              alt="Logo" 
+              className="h-10 w-auto object-contain dark:brightness-0 dark:invert" 
+            />
           </Link>
         </div>
 

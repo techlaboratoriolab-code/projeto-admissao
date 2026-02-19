@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import PatientCard from '../components/PatientCard';
 import { API_BASE_URL } from '../config';
+import { useAuth } from '../contexts/AuthContext';
+import { ConvenioSelect, FontePagadoraSelect, LocalOrigemSelect } from '../components/DropdownsAdmissao';
 
 const AdmissionView = () => {
+  const { usuario } = useAuth();
   const [loading, setLoading] = useState(false);
   const [loadingRequisicao, setLoadingRequisicao] = useState(false);
   const [loadingOCR, setLoadingOCR] = useState(false);
@@ -447,18 +450,30 @@ const AdmissionView = () => {
       console.log('[PREENCHER] ✓ Matrícula do convênio:', req.convenio.matConvenio.valor);
     }
 
-    // Nome da fonte pagadora
+    // ✅ CONVÊNIO - Nome do plano de saúde (CORRIGIDO: usar nomeConvenio)
+    if (req.convenio?.nomeConvenio?.valor) {
+      atualizacoesOCR.insurance = req.convenio.nomeConvenio.valor;
+      camposPreenchidos.push('Convênio (OCR)');
+      console.log('[PREENCHER] ✅ Convênio extraído:', req.convenio.nomeConvenio.valor);
+      
+      // Atualizar no card de paciente
+      setPatientData(prev => ({
+        ...prev,
+        insurance: req.convenio.nomeConvenio.valor
+      }));
+      console.log('[PREENCHER] 📝 Convênio atualizado no card do paciente');
+    }
+
+    // ✅ FONTE PAGADORA - Entidade que paga (se vier separado)
     if (req.convenio?.nome_fonte_pagadora?.valor) {
       atualizacoesOCR.fontePagadora = req.convenio.nome_fonte_pagadora.valor;
       camposPreenchidos.push('Fonte Pagadora (OCR)');
-      console.log('[PREENCHER] ✓ Fonte pagadora:', req.convenio.nome_fonte_pagadora.valor);
-    }
-
-    // Atualizar TAMBÉM no card de paciente lateral com a fonte pagadora
-    if (atualizacoesOCR.fontePagadora) {
+      console.log('[PREENCHER] ⚠️ Fonte pagadora (campo legado):', req.convenio.nome_fonte_pagadora.valor);
+      
+      // Atualizar no card de paciente lateral
       setPatientData(prev => ({
         ...prev,
-        payingSource: atualizacoesOCR.fontePagadora
+        payingSource: req.convenio.nome_fonte_pagadora.valor
       }));
       console.log('[PREENCHER] 📝 Fonte pagadora atualizada no card do paciente');
     }
@@ -608,9 +623,31 @@ const AdmissionView = () => {
           console.log('[PREENCHER]   - Nome RF:', nomeReceitaFederal);
           console.log('[PREENCHER]   - Data Nasc RF:', dataNascReceitaFederal);
           console.log('[PREENCHER]   - Situação:', resultRF.dados_receita_federal.situacao_cadastral);
+
+          // 🆕 ATUALIZAR O STATUS DA VALIDAÇÃO RECEITA FEDERAL NA UI
+          if (resultRF.comparacao) {
+            const temDivergencia = resultRF.comparacao.nome?.divergente ||
+                                  resultRF.comparacao.data_nascimento?.divergente;
+
+            setReceitaFederalStatus({
+              tipo: temDivergencia ? 'aviso' : 'sucesso',
+              mensagem: temDivergencia
+                ? '⚠️ CPF validado com divergências'
+                : '✅ CPF validado pela Receita Federal',
+              detalhes: `Nome: ${nomeReceitaFederal} | Situação: ${resultRF.dados_receita_federal.situacao_cadastral}`,
+              comparacao: resultRF.comparacao
+            });
+          }
         } else {
           console.warn('[PREENCHER] ⚠️ Não foi possível validar na Receita Federal');
           console.warn('[PREENCHER]   Motivo:', resultRF.mensagem || 'Erro desconhecido');
+
+          // 🆕 ATUALIZAR STATUS DE ERRO NA UI
+          setReceitaFederalStatus({
+            tipo: 'aviso',
+            mensagem: 'Validação da Receita Federal falhou',
+            detalhes: resultRF.mensagem || 'Não foi possível validar o CPF'
+          });
         }
       } catch (errorRF) {
         console.error('[PREENCHER] ❌ Erro ao validar na Receita Federal:', errorRF);
@@ -1147,19 +1184,99 @@ const AdmissionView = () => {
 
         if (cpfExtraido) {
           console.log('[CONSOLIDAR] ✅ CPF extraído do OCR:', cpfExtraido);
-          console.log('[CONSOLIDAR] 📞 Validando CPF na Receita Federal automaticamente...');
 
-          // DEBUG: Ver estrutura completa do paciente no resultado
-          console.log('[CONSOLIDAR] 🔍 DEBUG: Estrutura completa do paciente:', 
-                     JSON.stringify(result.resultado?.requisicoes?.[0]?.paciente, null, 2));
+          // 🆕 BUSCAR PACIENTE NA API (POR CPF OU NOME) ANTES DE VALIDAR NA RECEITA FEDERAL
+          console.log('[CONSOLIDAR] 🔍 Buscando paciente existente na API...');
 
-          // Extrair dados do OCR para comparação - TENTAR MÚLTIPLOS CAMINHOS
+          // Extrair nome do OCR também
           const pacienteOCR = result.resultado?.requisicoes?.[0]?.paciente || {};
-          
-          const nomeExtraido = pacienteOCR.nome?.valor || 
+          const nomeExtraido = pacienteOCR.nome?.valor ||
                               pacienteOCR.NomePaciente?.valor ||
                               pacienteOCR.NomPaciente?.valor ||
                               '';
+
+          try {
+            let buscaResult = null;
+            let metodoBusca = '';
+
+            // TENTATIVA 1: Buscar por CPF (prioritário)
+            if (cpfExtraido) {
+              const cpfLimpo = cpfExtraido.replace(/\D/g, '');
+              console.log('[CONSOLIDAR] 🔍 Tentando buscar por CPF:', cpfLimpo);
+
+              const buscaCPFResponse = await fetch(`${API_BASE_URL}/api/buscar-paciente`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cpf: cpfLimpo })
+              });
+
+              buscaResult = await buscaCPFResponse.json();
+              metodoBusca = 'CPF';
+
+              if (buscaResult.sucesso === 1 && buscaResult.paciente) {
+                console.log('[CONSOLIDAR] ✅ Paciente encontrado por CPF!');
+              }
+            }
+
+            // TENTATIVA 2: Buscar por NOME (se não encontrou por CPF)
+            if ((!buscaResult || buscaResult.sucesso !== 1) && nomeExtraido) {
+              console.log('[CONSOLIDAR] 🔍 CPF não encontrou, tentando buscar por NOME:', nomeExtraido);
+
+              const buscaNomeResponse = await fetch(`${API_BASE_URL}/api/buscar-paciente`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ nome: nomeExtraido })
+              });
+
+              buscaResult = await buscaNomeResponse.json();
+              metodoBusca = 'NOME';
+
+              if (buscaResult.sucesso === 1 && buscaResult.paciente) {
+                console.log('[CONSOLIDAR] ✅ Paciente encontrado por NOME!');
+              }
+            }
+
+            // PROCESSAR RESULTADO
+            if (buscaResult && buscaResult.sucesso === 1 && buscaResult.paciente) {
+              const pacienteEncontrado = buscaResult.paciente;
+              console.log('[CONSOLIDAR] ✅ PACIENTE ENCONTRADO NA API!');
+              console.log('[CONSOLIDAR]   Método:', metodoBusca);
+              console.log('[CONSOLIDAR]   ID:', pacienteEncontrado.idPaciente);
+              console.log('[CONSOLIDAR]   Nome:', pacienteEncontrado.nome);
+
+              // Preencher idPaciente no formData
+              setFormData(prev => ({
+                ...prev,
+                idPaciente: pacienteEncontrado.idPaciente
+              }));
+
+              // Atualizar patientData com dados do cadastro existente
+              setPatientData(prev => ({
+                ...prev,
+                name: pacienteEncontrado.nome || prev.name,
+                cpf: cpfExtraido || pacienteEncontrado.cpf,
+                birthDate: pacienteEncontrado.dataNascimento
+                  ? new Date(pacienteEncontrado.dataNascimento).toLocaleDateString('pt-BR')
+                  : prev.birthDate,
+                rg: pacienteEncontrado.rg || prev.rg,
+                phone: pacienteEncontrado.telefone || prev.phone,
+                email: pacienteEncontrado.email || prev.email
+              }));
+
+              alert(`✅ PACIENTE ENCONTRADO POR ${metodoBusca}!\n\nID: ${pacienteEncontrado.idPaciente}\nNome: ${pacienteEncontrado.nome}\nCPF: ${cpfExtraido || 'Não disponível'}\n\nOs dados do cadastro existente foram carregados.`);
+            } else {
+              console.log('[CONSOLIDAR] ℹ️ Paciente não encontrado. Novo cadastro será criado ao salvar.');
+            }
+          } catch (error) {
+            console.error('[CONSOLIDAR] ⚠️ Erro ao buscar paciente:', error);
+            // Não interromper o fluxo, continuar normalmente
+          }
+
+          console.log('[CONSOLIDAR] 📞 Validando CPF na Receita Federal automaticamente...');
+
+          // DEBUG: Ver estrutura completa do paciente no resultado
+          console.log('[CONSOLIDAR] 🔍 DEBUG: Estrutura completa do paciente:',
+                     JSON.stringify(result.resultado?.requisicoes?.[0]?.paciente, null, 2));
                               
           let dataNascExtraida = pacienteOCR.dtaNasc?.valor || 
                                  pacienteOCR.data_nascimento?.valor ||
@@ -1342,13 +1459,124 @@ const AdmissionView = () => {
     }
   };
 
+  // 🆕 FUNÇÃO PARA VALIDAR CPF MANUALMENTE (BOTÃO NO CARD DO PACIENTE)
+  const validarCPFManualmente = async () => {
+    console.log('[VALIDAR CPF] 🔍 Iniciando validação manual...');
+
+    // Verificar se tem CPF disponível
+    const cpfDisponivel = patientData?.cpf;
+
+    if (!cpfDisponivel) {
+      setMessage({
+        type: 'error',
+        text: '❌ Nenhum CPF disponível para validar. Extraia os dados primeiro usando OCR.'
+      });
+      return;
+    }
+
+    console.log('[VALIDAR CPF] 📋 CPF a ser validado:', cpfDisponivel);
+
+    try {
+      setMessage({
+        type: 'info',
+        text: '🔍 Validando CPF na Receita Federal...'
+      });
+
+      const response = await fetch(`${API_BASE_URL}/api/admissao/validar-cpf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cpf: cpfDisponivel.replace(/\D/g, ''),
+          nome_ocr: patientData?.name,
+          data_nascimento_ocr: patientData?.birthDate
+        })
+      });
+
+      const result = await response.json();
+      console.log('[VALIDAR CPF] ✓ Resposta da API:', result);
+
+      if (result.sucesso && result.dados_receita_federal) {
+        const dados = result.dados_receita_federal;
+        const comparacao = result.comparacao || {};
+
+        console.log('[VALIDAR CPF] ✅ CPF validado com sucesso!');
+        console.log('[VALIDAR CPF]   Nome RF:', dados.nome);
+        console.log('[VALIDAR CPF]   Data Nasc RF:', dados.data_nascimento);
+        console.log('[VALIDAR CPF]   Situação:', dados.situacao_cadastral);
+
+        // Verificar se há divergências
+        const temDivergencia = comparacao.nome?.divergente ||
+                              comparacao.data_nascimento?.divergente;
+
+        // Atualizar o status da validação na UI
+        setReceitaFederalStatus({
+          tipo: temDivergencia ? 'aviso' : 'sucesso',
+          mensagem: temDivergencia
+            ? '⚠️ CPF validado com divergências'
+            : '✅ CPF validado pela Receita Federal',
+          detalhes: `Nome: ${dados.nome} | Situação: ${dados.situacao_cadastral}`,
+          comparacao: comparacao
+        });
+
+        // Atualizar dados do paciente com os dados da Receita Federal
+        setPatientData(prev => ({
+          ...prev,
+          name: dados.nome || prev.name,
+          cpf: dados.cpf || prev.cpf,
+          birthDate: dados.data_nascimento || prev.birthDate
+        }));
+
+        setMessage({
+          type: temDivergencia ? 'warning' : 'success',
+          text: temDivergencia
+            ? `⚠️ CPF validado mas há divergências nos dados. Verifique a tabela abaixo.`
+            : `✅ CPF validado com sucesso! ${dados.nome} - ${dados.situacao_cadastral}`
+        });
+
+        // Scroll para a tabela de validação
+        setTimeout(() => {
+          const tabelaValidacao = document.querySelector('[style*="background: #f8f9fa"]');
+          if (tabelaValidacao) {
+            tabelaValidacao.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 500);
+      } else {
+        console.warn('[VALIDAR CPF] ⚠️ CPF não validado:', result.mensagem);
+
+        setReceitaFederalStatus({
+          tipo: 'erro',
+          mensagem: 'Erro ao validar CPF',
+          detalhes: result.mensagem || 'Não foi possível validar o CPF na Receita Federal'
+        });
+
+        setMessage({
+          type: 'error',
+          text: `❌ ${result.mensagem || 'Não foi possível validar o CPF'}`
+        });
+      }
+    } catch (error) {
+      console.error('[VALIDAR CPF] ❌ Erro:', error);
+
+      setReceitaFederalStatus({
+        tipo: 'erro',
+        mensagem: 'Erro ao conectar com a API',
+        detalhes: error.message
+      });
+
+      setMessage({
+        type: 'error',
+        text: `❌ Erro ao validar CPF: ${error.message}`
+      });
+    }
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
       [name]: value
     }));
-    
+
     // Sincronizar exames com o card do paciente
     if (name === 'examesConvenio') {
       setPatientData(prev => ({
@@ -1468,6 +1696,18 @@ const AdmissionView = () => {
       console.log('[SALVAR]   formData completo:', formData);
       console.log('[SALVAR]   patientData:', patientData);
 
+      // 🆕 SINCRONIZAR insuranceCardNumber do patientData com formData.matConvenio antes de salvar
+      console.log('[SALVAR] 🔄 Sincronizando número da carteirinha...');
+      console.log('[SALVAR]   formData.matConvenio (atual):', formData.matConvenio);
+      console.log('[SALVAR]   patientData.insuranceCardNumber:', patientData?.insuranceCardNumber);
+      
+      // Se formData.matConvenio está vazio mas patientData tem, usar do patientData
+      let matConvenioFinal = formData.matConvenio || '';
+      if ((!matConvenioFinal || matConvenioFinal.trim() === '') && patientData?.insuranceCardNumber) {
+        matConvenioFinal = patientData.insuranceCardNumber;
+        console.log('[SALVAR] ✅ Número da carteirinha sincronizado do patientData:', matConvenioFinal);
+      }
+
       // Montar dados para salvar (usando dados preenchidos pelo OCR)
       const dados = {
         ...formData,
@@ -1482,9 +1722,17 @@ const AdmissionView = () => {
         idExame: idsExames[0], // Primeiro exame como principal
         examesConvenio: idsExames, // Array com todos os IDs
         numGuia: formData.numGuia || '', // 🆕 Incluir número da guia
-        matConvenio: formData.matConvenio || '', // 🆕 Incluir matrícula do convênio
-        fontePagadora: formData.fontePagadora || '' // 🆕 Incluir fonte pagadora (nome)
+        matConvenio: matConvenioFinal, // 🆕 Incluir matrícula do convênio (SINCRONIZADO do patientData)
+        fontePagadora: formData.fontePagadora || '', // 🆕 Incluir fonte pagadora (nome)
+        // 🆕 CREDENCIAIS DO APLIS DO USUÁRIO LOGADO
+        aplis_usuario: usuario?.aplis_usuario || null,
+        aplis_senha: usuario?.aplis_senha || null
       };
+
+      console.log('[SALVAR] 🔐 Credenciais apLIS do usuário:', {
+        usuario: usuario?.aplis_usuario || 'PADRÃO',
+        tem_senha: !!usuario?.aplis_senha
+      });
 
       // 🆕 Se idPaciente estiver vazio, incluir dados do paciente do OCR para criação automática
       if (!dados.idPaciente && patientData) {
@@ -1572,6 +1820,12 @@ const AdmissionView = () => {
         delete dados.codRequisicao;
       }
 
+      // 🆕 MARCAR SE DADOS VIERAM DO OCR (para priorização no backend)
+      if (imagensProcessadas.size > 0 || dadosOCRConsolidados.length > 0) {
+        dados._fonte_dados = 'ocr';
+        console.log('[SALVAR] 📸 Dados vieram do OCR - marcando para priorização no backend');
+      }
+
       // 🆕 LOG DOS DADOS SENDO ENVIADOS
       console.log('[SALVAR] 📤 Enviando dados para o backend:');
       console.log('[SALVAR] Dados:', JSON.stringify(dados, null, 2));
@@ -1597,16 +1851,53 @@ const AdmissionView = () => {
       }
 
       if (result.sucesso === 1) {
-        // Verificar se há aviso de CPF não validado
+        // 🆕 VERIFICAR AVISOS DE DUPLICAÇÃO E VALIDAÇÃO
+        console.log('[SALVAR] 📋 Resposta completa:', result);
+
+        // Construir mensagem de sucesso
         let mensagemSucesso = `✅ Admissão salva com sucesso! Código: ${result.codRequisicao}`;
-        
-        if (result.aviso && result.aviso.tipo === 'cpf_nao_validado') {
-          mensagemSucesso += `\n\n${result.aviso.mensagem}`;
-          console.warn('[SALVAR] ⚠️ CPF NÃO VALIDADO:', result.aviso);
+        let tipoMensagem = 'success';
+
+        // AVISO DE DUPLICAÇÃO DETECTADA
+        if (result.aviso_duplicacao) {
+          const dup = result.aviso_duplicacao;
+          console.error('[SALVAR] ❌ DUPLICAÇÃO DETECTADA:', dup);
+
+          const listaPacientes = dup.pacientes.map((p, idx) =>
+            `${idx + 1}. ID: ${p.id} - Nome: ${p.nome}`
+          ).join('\n');
+
+          alert(
+            `⚠️⚠️⚠️ ALERTA DE DUPLICAÇÃO ⚠️⚠️⚠️\n\n` +
+            `${dup.mensagem}\n\n` +
+            `CPF: ${dup.cpf}\n` +
+            `Quantidade: ${dup.quantidade} pacientes\n\n` +
+            `PACIENTES DUPLICADOS:\n${listaPacientes}\n\n` +
+            `⚠️ AÇÃO NECESSÁRIA:\n` +
+            `Entre em contato com o administrador do sistema para remover as duplicatas!`
+          );
+
+          tipoMensagem = 'error';
         }
-        
+
+        // VERIFICAÇÃO OK
+        if (result.verificacao_duplicacao && result.verificacao_duplicacao.status === 'ok') {
+          console.log('[SALVAR] ✅ Verificação de duplicação OK:', result.verificacao_duplicacao.mensagem);
+          mensagemSucesso += '\n' + result.verificacao_duplicacao.mensagem;
+        }
+
+        // AVISO DE MÉTODO ALTERNATIVO (CPF NÃO VALIDADO)
+        if (result.aviso_metodo_alternativo) {
+          const aviso = result.aviso_metodo_alternativo;
+          console.warn('[SALVAR] ⚠️ CPF NÃO VALIDADO:', aviso);
+          mensagemSucesso += `\n\n⚠️ ${aviso.mensagem}`;
+          if (tipoMensagem === 'success') {
+            tipoMensagem = 'warning';
+          }
+        }
+
         setMessage({
-          type: result.aviso ? 'warning' : 'success',
+          type: tipoMensagem,
           text: mensagemSucesso
         });
 
@@ -1861,7 +2152,109 @@ const AdmissionView = () => {
             };
           });
 
-          if (!autoProcessamento) {
+          // 🆕 BUSCAR PACIENTE AUTOMATICAMENTE APÓS OCR (POR CPF OU NOME)
+          const cpfExtraido = result.dados.cpf || result.dados.NumCPF || result.dados.CPF;
+          const nomeExtraido = result.dados.nome || result.dados.NomPaciente || result.dados.NomePaciente;
+
+          if ((cpfExtraido || nomeExtraido) && !formData.idPaciente) {
+            console.log('[OCR] 🔍 Dados extraídos:', { cpf: cpfExtraido, nome: nomeExtraido });
+            console.log('[OCR] 🔄 Buscando paciente existente na API...');
+
+            try {
+              let buscaResult = null;
+              let metodoBusca = '';
+
+              // TENTATIVA 1: Buscar por CPF (prioritário)
+              if (cpfExtraido) {
+                const cpfLimpo = cpfExtraido.replace(/\D/g, '');
+                console.log('[OCR] 🔍 Tentando buscar por CPF:', cpfLimpo);
+
+                const buscaCPFResponse = await fetch(`${API_BASE_URL}/api/buscar-paciente`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ cpf: cpfLimpo })
+                });
+
+                buscaResult = await buscaCPFResponse.json();
+                metodoBusca = 'CPF';
+
+                if (buscaResult.sucesso === 1 && buscaResult.paciente) {
+                  console.log('[OCR] ✅ Paciente encontrado por CPF!');
+                }
+              }
+
+              // TENTATIVA 2: Buscar por NOME (se não encontrou por CPF)
+              if ((!buscaResult || buscaResult.sucesso !== 1) && nomeExtraido) {
+                console.log('[OCR] 🔍 CPF não encontrou, tentando buscar por NOME:', nomeExtraido);
+
+                const buscaNomeResponse = await fetch(`${API_BASE_URL}/api/buscar-paciente`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ nome: nomeExtraido })
+                });
+
+                buscaResult = await buscaNomeResponse.json();
+                metodoBusca = 'NOME';
+
+                if (buscaResult.sucesso === 1 && buscaResult.paciente) {
+                  console.log('[OCR] ✅ Paciente encontrado por NOME!');
+                }
+              }
+
+              // PROCESSAR RESULTADO
+              if (buscaResult && buscaResult.sucesso === 1 && buscaResult.paciente) {
+                const pacienteEncontrado = buscaResult.paciente;
+                console.log('[OCR] ✅ Paciente encontrado!', pacienteEncontrado);
+                console.log('[OCR]   Método:', metodoBusca);
+                console.log('[OCR]   ID:', pacienteEncontrado.idPaciente);
+                console.log('[OCR]   Nome:', pacienteEncontrado.nome);
+
+                // Preencher idPaciente no formData
+                setFormData(prev => ({
+                  ...prev,
+                  idPaciente: pacienteEncontrado.idPaciente
+                }));
+
+                // Atualizar patientData com dados do cadastro existente
+                setPatientData(prev => ({
+                  ...prev,
+                  name: pacienteEncontrado.nome || prev.name,
+                  cpf: cpfExtraido || pacienteEncontrado.cpf,
+                  birthDate: pacienteEncontrado.dataNascimento
+                    ? new Date(pacienteEncontrado.dataNascimento).toLocaleDateString('pt-BR')
+                    : prev.birthDate,
+                  rg: pacienteEncontrado.rg || prev.rg,
+                  phone: pacienteEncontrado.telefone || prev.phone,
+                  email: pacienteEncontrado.email || prev.email
+                }));
+
+                if (!autoProcessamento) {
+                  setMessage({
+                    type: 'success',
+                    text: `✅ OCR processado! Paciente ENCONTRADO por ${metodoBusca}: ${pacienteEncontrado.nome} (ID: ${pacienteEncontrado.idPaciente})`
+                  });
+                }
+              } else {
+                console.log('[OCR] ℹ️ Paciente não encontrado. Novo cadastro será criado ao salvar.');
+
+                if (!autoProcessamento) {
+                  setMessage({
+                    type: 'info',
+                    text: '📋 OCR processado! Paciente NÃO encontrado - novo cadastro será criado ao salvar.'
+                  });
+                }
+              }
+            } catch (error) {
+              console.error('[OCR] ⚠️ Erro ao buscar paciente:', error);
+              // Não mostrar erro ao usuário, apenas log (busca é opcional)
+              if (!autoProcessamento) {
+                setMessage({
+                  type: 'success',
+                  text: 'OCR processado com sucesso! Dados adicionados ao consolidado.'
+                });
+              }
+            }
+          } else if (!autoProcessamento) {
             setMessage({
               type: 'success',
               text: 'OCR processado com sucesso! Dados adicionados ao consolidado.'
@@ -2201,17 +2594,21 @@ const AdmissionView = () => {
   };
 
   return (
-    <div className="flex h-screen bg-white dark:bg-neutral-900 overflow-hidden">
-      <PatientCard patient={patientData} onPatientUpdate={handlePatientUpdate} />
+    <div className="flex h-screen bg-slate-50 dark:bg-neutral-900 overflow-hidden">
+      <PatientCard
+        patient={patientData}
+        onPatientUpdate={handlePatientUpdate}
+        onValidarCPF={validarCPFManualmente}
+      />
 
-      <div className="flex-1 p-6 bg-white dark:bg-neutral-900 overflow-y-auto">
+      <div className="flex-1 p-6 bg-slate-50 dark:bg-neutral-900 overflow-y-auto">
         {/* 🆕 Sistema de Abas Principal */}
         <div className="dark:bg-neutral-800 dark:border-neutral-700" style={{
           display: 'flex',
           gap: '0',
           marginBottom: '20px',
-          borderBottom: '3px solid #e5e7eb',
-          background: '#f9fafb'
+          borderBottom: '3px solid #e2e8f0',
+          background: 'white'
         }}>
           <button
             type="button"
@@ -2219,13 +2616,13 @@ const AdmissionView = () => {
             style={{
               flex: 1,
               padding: '20px',
-              background: abaPrincipal === 'admissao' ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'transparent',
-              color: abaPrincipal === 'admissao' ? 'white' : '#6b7280',
+              background: abaPrincipal === 'admissao' ? '#3b82f6' : 'transparent',
+              color: abaPrincipal === 'admissao' ? 'white' : '#64748b',
               border: 'none',
-              borderBottom: abaPrincipal === 'admissao' ? '4px solid #764ba2' : '4px solid transparent',
+              borderBottom: abaPrincipal === 'admissao' ? '4px solid #2563eb' : '4px solid #e2e8f0',
               cursor: 'pointer',
               fontSize: '18px',
-              fontWeight: '700',
+              fontWeight: '600',
               transition: 'all 0.3s ease',
               display: 'flex',
               alignItems: 'center',
@@ -2235,7 +2632,7 @@ const AdmissionView = () => {
           >
             <span></span>
             <span>Sistema Admissão com OCR</span>
-            {abaPrincipal === 'admissao' && <span className="bg-white text-primary px-4 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider ml-2.5">OCR ATIVO</span>}
+            {abaPrincipal === 'admissao' && <span className="bg-white dark:bg-neutral-700 text-blue-600 dark:text-blue-400 px-4 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider ml-2.5">OCR ATIVO</span>}
           </button>
           <button
             type="button"
@@ -2243,13 +2640,13 @@ const AdmissionView = () => {
             style={{
               flex: 1,
               padding: '20px',
-              background: abaPrincipal === 'visualizar' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'transparent',
-              color: abaPrincipal === 'visualizar' ? 'white' : '#6b7280',
+              background: abaPrincipal === 'visualizar' ? '#64748b' : 'transparent',
+              color: abaPrincipal === 'visualizar' ? 'white' : '#64748b',
               border: 'none',
-              borderBottom: abaPrincipal === 'visualizar' ? '4px solid #059669' : '4px solid transparent',
+              borderBottom: abaPrincipal === 'visualizar' ? '4px solid #475569' : '4px solid #e2e8f0',
               cursor: 'pointer',
               fontSize: '18px',
-              fontWeight: '700',
+              fontWeight: '600',
               transition: 'all 0.3s ease',
               display: 'flex',
               alignItems: 'center',
@@ -2278,7 +2675,7 @@ const AdmissionView = () => {
             style={{
               width: '100%',
               padding: '15px 20px',
-              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+              background: '#64748b',
               color: 'white',
               border: 'none',
               borderRadius: '8px',
@@ -2625,10 +3022,9 @@ const AdmissionView = () => {
           </div>
         )}
 
-        {receitaFederalStatus && receitaFederalStatus.tipo === 'sucesso' && (
-          <div style={{
-            background: 'linear-gradient(135deg, #51cf66 0%, #37b24d 100%)',
-            color: 'white',
+        {receitaFederalStatus && (receitaFederalStatus.tipo === 'sucesso' || receitaFederalStatus.tipo === 'aviso') && (
+          <div className="bg-slate-100 dark:bg-neutral-800 text-gray-900 dark:text-neutral-100" style={{
+            border: '2px solid #dee2e6',
             padding: '16px 20px',
             borderRadius: '8px',
             marginBottom: '20px',
@@ -2637,80 +3033,90 @@ const AdmissionView = () => {
             <div style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '15px',
+              gap: '12px',
               marginBottom: receitaFederalStatus.comparacao ? '15px' : '0'
             }}>
-              <div style={{
-                fontSize: '24px',
-                background: 'rgba(255,255,255,0.2)',
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
+              <span style={{
+                fontSize: '22px',
                 flexShrink: 0
               }}>
-                ✅
-              </div>
+                {receitaFederalStatus.tipo === 'aviso' ? '⚠️' : '✅'}
+              </span>
               <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 'bold', fontSize: '15px' }}>
+                <div className="text-gray-900 dark:text-neutral-100" style={{ fontWeight: 'bold', fontSize: '15px' }}>
                   {receitaFederalStatus.mensagem}
                 </div>
               </div>
             </div>
-            
+
             {/* Tabela comparativa */}
             {receitaFederalStatus.comparacao && (
-              <div style={{
-                background: 'rgba(255,255,255,0.15)',
+              <div className="bg-white dark:bg-neutral-800" style={{
+                border: '1px solid #dee2e6',
                 borderRadius: '6px',
                 padding: '12px',
                 fontSize: '13px'
               }}>
-                <div style={{ fontWeight: 'bold', marginBottom: '10px', fontSize: '14px' }}>
+                <div className="text-gray-900 dark:text-neutral-100" style={{ fontWeight: 'bold', marginBottom: '10px', fontSize: '14px' }}>
                   📊 Validação dos Dados:
                 </div>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.3)' }}>
-                      <th style={{ padding: '6px', textAlign: 'left', fontWeight: 'bold' }}>Campo</th>
-                      <th style={{ padding: '6px', textAlign: 'left', fontWeight: 'bold' }}>Sistema/OCR/API</th>
-                      <th style={{ padding: '6px', textAlign: 'left', fontWeight: 'bold' }}>Receita Federal</th>
-                      <th style={{ padding: '6px', textAlign: 'center', fontWeight: 'bold' }}>Status</th>
+                    <tr className="bg-slate-100 dark:bg-neutral-700" style={{ borderBottom: '2px solid #dee2e6' }}>
+                      <th className="text-gray-700 dark:text-neutral-200" style={{ padding: '10px', textAlign: 'left', fontWeight: 'bold' }}>Campo</th>
+                      <th className="text-gray-700 dark:text-neutral-200" style={{ padding: '10px', textAlign: 'left', fontWeight: 'bold' }}>Sistema/OCR/API</th>
+                      <th className="text-gray-700 dark:text-neutral-200" style={{ padding: '10px', textAlign: 'left', fontWeight: 'bold' }}>Receita Federal</th>
+                      <th className="text-gray-700 dark:text-neutral-200" style={{ padding: '10px', textAlign: 'center', fontWeight: 'bold' }}>Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {/* Nome */}
-                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.2)' }}>
-                      <td style={{ padding: '8px', fontWeight: '500' }}>Nome</td>
-                      <td style={{ padding: '8px' }}>{receitaFederalStatus.comparacao.nome?.sistema || '-'}</td>
-                      <td style={{ padding: '8px' }}>{receitaFederalStatus.comparacao.nome?.receita_federal || '-'}</td>
-                      <td style={{ padding: '8px', textAlign: 'center' }}>
+                    <tr style={{
+                      background: receitaFederalStatus.comparacao.nome?.divergente
+                        ? '#dc3545' // Vermelho FORTE se divergente
+                        : '#28a745', // Verde VIVO se OK
+                      color: 'white',
+                      borderBottom: '2px solid white'
+                    }}>
+                      <td style={{ padding: '12px', fontWeight: '600' }}>Nome</td>
+                      <td style={{ padding: '12px', fontWeight: '500' }}>{receitaFederalStatus.comparacao.nome?.sistema || '-'}</td>
+                      <td style={{ padding: '12px', fontWeight: '500' }}>{receitaFederalStatus.comparacao.nome?.receita_federal || '-'}</td>
+                      <td style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold', fontSize: '14px' }}>
                         {receitaFederalStatus.comparacao.nome?.divergente ? '⚠️ Diferente' : '✓ OK'}
                       </td>
                     </tr>
                     {/* CPF */}
-                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.2)' }}>
-                      <td style={{ padding: '8px', fontWeight: '500' }}>CPF</td>
-                      <td style={{ padding: '8px' }}>{receitaFederalStatus.comparacao.cpf?.sistema || '-'}</td>
-                      <td style={{ padding: '8px' }}>{receitaFederalStatus.comparacao.cpf?.receita_federal || '-'}</td>
-                      <td style={{ padding: '8px', textAlign: 'center' }}>
+                    <tr style={{
+                      background: receitaFederalStatus.comparacao.cpf?.divergente
+                        ? '#dc3545' // Vermelho FORTE se divergente
+                        : '#28a745', // Verde VIVO se OK
+                      color: 'white',
+                      borderBottom: '2px solid white'
+                    }}>
+                      <td style={{ padding: '12px', fontWeight: '600' }}>CPF</td>
+                      <td style={{ padding: '12px', fontWeight: '500' }}>{receitaFederalStatus.comparacao.cpf?.sistema || '-'}</td>
+                      <td style={{ padding: '12px', fontWeight: '500' }}>{receitaFederalStatus.comparacao.cpf?.receita_federal || '-'}</td>
+                      <td style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold', fontSize: '14px' }}>
                         {receitaFederalStatus.comparacao.cpf?.divergente ? '⚠️ Diferente' : '✓ OK'}
                       </td>
                     </tr>
                     {/* Data de Nascimento */}
-                    <tr>
-                      <td style={{ padding: '8px', fontWeight: '500' }}>Data Nascimento</td>
-                      <td style={{ padding: '8px' }}>{receitaFederalStatus.comparacao.data_nascimento?.sistema || '-'}</td>
-                      <td style={{ padding: '8px' }}>{receitaFederalStatus.comparacao.data_nascimento?.receita_federal || '-'}</td>
-                      <td style={{ padding: '8px', textAlign: 'center' }}>
+                    <tr style={{
+                      background: receitaFederalStatus.comparacao.data_nascimento?.divergente
+                        ? '#dc3545' // Vermelho FORTE se divergente
+                        : '#28a745', // Verde VIVO se OK
+                      color: 'white'
+                    }}>
+                      <td style={{ padding: '12px', fontWeight: '600' }}>Data Nascimento</td>
+                      <td style={{ padding: '12px', fontWeight: '500' }}>{receitaFederalStatus.comparacao.data_nascimento?.sistema || '-'}</td>
+                      <td style={{ padding: '12px', fontWeight: '500' }}>{receitaFederalStatus.comparacao.data_nascimento?.receita_federal || '-'}</td>
+                      <td style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold', fontSize: '14px' }}>
                         {receitaFederalStatus.comparacao.data_nascimento?.divergente ? '⚠️ Diferente' : '✓ OK'}
                       </td>
                     </tr>
                   </tbody>
                 </table>
-                <div style={{ marginTop: '10px', fontSize: '12px', fontStyle: 'italic', opacity: 0.9 }}>
+                <div className="text-gray-700 dark:text-neutral-300" style={{ marginTop: '10px', fontSize: '12px', fontStyle: 'italic', opacity: 0.9 }}>
                   ℹ️ Os dados da Receita Federal são prioritários e já foram aplicados automaticamente.
                 </div>
               </div>
@@ -2897,25 +3303,6 @@ const AdmissionView = () => {
           <div className="flex justify-end gap-3 pt-8 border-t-2 border-gray-200 dark:border-neutral-700">
             <button
               type="button"
-              onClick={handleValidate}
-              className="px-6 py-3 border-0 rounded-lg text-base font-semibold cursor-pointer transition-all bg-gray-200 dark:bg-neutral-700 text-gray-700 dark:text-neutral-200 hover:bg-gray-300 dark:hover:bg-neutral-600"
-              disabled={loading || loadingRequisicao}
-            >
-              {loading ? 'Validando...' : 'Validar Dados'}
-            </button>
-
-            <button
-              type="button"
-              onClick={consolidarResultados}
-              className="px-6 py-3 border-0 rounded-lg text-base font-semibold cursor-pointer transition-all bg-gray-200 text-gray-700 hover:bg-gray-300"
-              disabled={!requisicaoData}
-              style={{ background: 'linear-gradient(135deg, #28a745 0%, #20c997 100%)' }}
-            >
-              Gerar JSON Consolidado
-            </button>
-
-            <button
-              type="button"
               onClick={async () => {
                 if (!formData.codRequisicao) {
                   setMessage({
@@ -3002,6 +3389,8 @@ const AdmissionView = () => {
 
                             ocrResult = await ocrResponse.json();
                             console.log(`[ANÁLISE AUTO] Resposta OCR (tentativa ${tentativas}):`, ocrResult);
+                            if (ocrResult.erro) console.error(`[ANÁLISE AUTO] ERRO: ${ocrResult.erro}`);
+                            if (ocrResult.traceback) console.error(`[ANÁLISE AUTO] TRACEBACK:\n${ocrResult.traceback}`);
 
                             // Verificar se foi erro 429 (rate limit)
                             if (ocrResponse.status === 500 && ocrResult.erro && ocrResult.erro.includes('429')) {
@@ -3086,19 +3475,15 @@ const AdmissionView = () => {
                   setLoading(false);
                 }
               }}
-              className="px-6 py-3 border-0 rounded-lg text-base font-semibold cursor-pointer transition-all bg-gray-200 text-gray-700 hover:bg-gray-300"
+              className="px-10 py-4 bg-blue-600 hover:bg-blue-700 text-white border-0 rounded-lg text-base font-bold cursor-pointer transition-all hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
               disabled={loading || loadingRequisicao || !formData.codRequisicao}
-              style={{
-                background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-                fontWeight: 'bold'
-              }}
             >
-              {loading ? '🔄 Analisando...' : '🤖 Iniciar Análise Automática'}
+              {loading ? 'Analisando...' : 'Iniciar Análise Automática'}
             </button>
 
             <button
               type="submit"
-              className="px-10 py-4 bg-gradient-to-br from-primary to-primary-light text-white border-0 rounded-lg text-base font-bold cursor-pointer transition-all hover:shadow-lg hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
+              className="px-10 py-4 bg-blue-600 hover:bg-blue-700 text-white border-0 rounded-lg text-base font-bold cursor-pointer transition-all hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
               disabled={loading || loadingRequisicao}
             >
               {loading ? 'Salvando...' : 'Salvar Admissão'}
@@ -3574,7 +3959,45 @@ const AdmissionView = () => {
                           onChange={(e) => setDadosEditaveis(prev => ({ ...prev, cpf: e.target.value }))}
                         />
                       ) : (
-                        <span className="text-gray-900 dark:text-neutral-200">{patientData.cpf || 'Não informado'}</span>
+                        <div>
+                          <span className="text-gray-900 dark:text-neutral-200">{patientData.cpf || 'Não informado'}</span>
+
+                          {/* 🆕 BOTÃO VALIDAR CPF */}
+                          {patientData.cpf && (
+                            <button
+                              onClick={validarCPFManualmente}
+                              style={{
+                                marginTop: '10px',
+                                width: '100%',
+                                padding: '10px 16px',
+                                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '8px',
+                                cursor: 'pointer',
+                                fontWeight: '600',
+                                fontSize: '14px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '8px',
+                                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+                                transition: 'all 0.3s ease'
+                              }}
+                              onMouseOver={(e) => {
+                                e.currentTarget.style.transform = 'translateY(-2px)';
+                                e.currentTarget.style.boxShadow = '0 6px 16px rgba(16, 185, 129, 0.4)';
+                              }}
+                              onMouseOut={(e) => {
+                                e.currentTarget.style.transform = 'translateY(0)';
+                                e.currentTarget.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.3)';
+                              }}
+                            >
+                              <span style={{ fontSize: '18px' }}>✓</span>
+                              Validar CPF na Receita Federal
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
 
@@ -3677,11 +4100,10 @@ const AdmissionView = () => {
                     <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
                       <strong>CONVÊNIO</strong>
                       {modoEdicaoModal ? (
-                        <input
-                          type="text"
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                        <ConvenioSelect
                           value={dadosRequisicaoEditaveis?.convenio || ''}
-                          onChange={(e) => setDadosRequisicaoEditaveis(prev => ({ ...prev, convenio: e.target.value }))}
+                          onChange={(selectedConvenio) => setDadosRequisicaoEditaveis(prev => ({ ...prev, convenio: selectedConvenio?.nome || '' }))}
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                         />
                       ) : (
                         <span>{patientData.insurance || 'Não informado'}</span>
@@ -3691,11 +4113,10 @@ const AdmissionView = () => {
                     <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
                       <strong>ORIGEM</strong>
                       {modoEdicaoModal ? (
-                        <input
-                          type="text"
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                        <LocalOrigemSelect
                           value={dadosRequisicaoEditaveis?.origem || ''}
-                          onChange={(e) => setDadosRequisicaoEditaveis(prev => ({ ...prev, origem: e.target.value }))}
+                          onChange={(selectedOrigem) => setDadosRequisicaoEditaveis(prev => ({ ...prev, origem: selectedOrigem?.nome || '' }))}
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                         />
                       ) : (
                         <span>{patientData.origin || 'Não informado'}</span>
@@ -3705,11 +4126,10 @@ const AdmissionView = () => {
                     <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
                       <strong>FONTE PAGADORA</strong>
                       {modoEdicaoModal ? (
-                        <input
-                          type="text"
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                        <FontePagadoraSelect
                           value={dadosRequisicaoEditaveis?.fontePagadora || ''}
-                          onChange={(e) => setDadosRequisicaoEditaveis(prev => ({ ...prev, fontePagadora: e.target.value }))}
+                          onChange={(selectedFonte) => setDadosRequisicaoEditaveis(prev => ({ ...prev, fontePagadora: selectedFonte?.nome || '' }))}
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                         />
                       ) : (
                         <span>{patientData.payingSource || 'Não informado'}</span>

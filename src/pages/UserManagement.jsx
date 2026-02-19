@@ -25,7 +25,9 @@ const UserManagement = () => {
     senha: '',
     nome: '',
     department: '',
-    role: 'usuario'
+    role: 'usuario',
+    aplis_usuario: '',
+    aplis_senha: ''
   });
 
   // Carregar usuários ao montar o componente
@@ -54,6 +56,8 @@ const UserManagement = () => {
         nome: user.user_metadata?.name || user.user_metadata?.nome || '',
         department: user.user_metadata?.department || '',
         role: user.user_metadata?.role || 'usuario',
+        aplis_usuario: user.user_metadata?.aplis_usuario || '',
+        aplis_senha: user.user_metadata?.aplis_senha || '',
         ativo: !user.banned_until,
         email_confirmado: !!user.email_confirmed_at,
         created_at: user.created_at,
@@ -91,7 +95,9 @@ const UserManagement = () => {
       senha: '',
       nome: '',
       department: '',
-      role: 'usuario'
+      role: 'usuario',
+      aplis_usuario: '',
+      aplis_senha: ''
     });
     setModalAberto(true);
     setErro(null);
@@ -107,7 +113,9 @@ const UserManagement = () => {
       senha: '', // Senha fica vazia na edição
       nome: usuario.nome || '',
       department: usuario.department || '',
-      role: usuario.role
+      role: usuario.role,
+      aplis_usuario: usuario.aplis_usuario || '',
+      aplis_senha: usuario.aplis_senha || ''
     });
     setModalAberto(true);
     setErro(null);
@@ -124,7 +132,9 @@ const UserManagement = () => {
       senha: '',
       nome: '',
       department: '',
-      role: 'usuario'
+      role: 'usuario',
+      aplis_usuario: '',
+      aplis_senha: ''
     });
   };
 
@@ -178,7 +188,9 @@ const UserManagement = () => {
             username: formData.username,
             name: formData.nome,
             department: formData.department,
-            role: formData.role
+            role: formData.role,
+            aplis_usuario: formData.aplis_usuario || null,
+            aplis_senha: formData.aplis_senha || null
           }
         };
 
@@ -208,7 +220,9 @@ const UserManagement = () => {
             username: formData.username,
             name: formData.nome,
             department: formData.department,
-            role: formData.role
+            role: formData.role,
+            aplis_usuario: formData.aplis_usuario || null,
+            aplis_senha: formData.aplis_senha || null
           }
         });
 
@@ -340,7 +354,7 @@ const UserManagement = () => {
             <p className="text-gray-600 dark:text-neutral-400 mt-1">Gerencie usuários, permissões e departamentos do sistema</p>
           </div>
           <button 
-            className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-all font-medium flex items-center gap-2"
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg hover:shadow-lg transition-all font-medium flex items-center gap-2"
             onClick={abrirModalNovo}
           >
             <span className="text-xl">+</span>
@@ -459,7 +473,7 @@ const UserManagement = () => {
                   <tr key={usuario.id} className="border-b border-gray-100 dark:border-neutral-800 hover:bg-gray-50 dark:hover:bg-neutral-800/50 transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold">
+                        <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
                           {usuario.nome?.charAt(0)?.toUpperCase() || usuario.username?.charAt(0)?.toUpperCase() || 'U'}
                         </div>
                         <strong className="text-gray-800 dark:text-neutral-200">{usuario.username}</strong>
@@ -479,7 +493,7 @@ const UserManagement = () => {
                     </td>
                     <td className="px-6 py-4">
                       <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
-                        usuario.role === 'admin' ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300' :
+                        usuario.role === 'admin' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' :
                         usuario.role === 'supervisor' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' :
                         'bg-gray-100 dark:bg-neutral-800 text-gray-700 dark:text-neutral-300'
                       }`}>
@@ -630,6 +644,47 @@ const UserManagement = () => {
                 />
               </div>
 
+              {/* 🆕 CAMPOS DE LOGIN DO APLIS */}
+              <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-950/30 border-2 border-blue-200 dark:border-blue-900/50 rounded-lg">
+                <h3 className="text-sm font-bold text-blue-900 dark:text-blue-300 mb-3 flex items-center gap-2">
+                  🔐 Credenciais apLIS
+                  <span className="text-xs font-normal text-blue-600 dark:text-blue-400">(Sistema Laboratorial)</span>
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="aplis_usuario" className="block text-sm font-medium text-blue-900 dark:text-blue-300 mb-2">
+                      Usuário apLIS
+                    </label>
+                    <input
+                      id="aplis_usuario"
+                      type="text"
+                      name="aplis_usuario"
+                      value={formData.aplis_usuario}
+                      onChange={handleInputChange}
+                      placeholder="Ex: api.ana"
+                      className="w-full px-4 py-2 border border-blue-300 dark:border-blue-700 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-neutral-800 text-gray-900 dark:text-neutral-100 placeholder:text-blue-400 dark:placeholder:text-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="aplis_senha" className="block text-sm font-medium text-blue-900 dark:text-blue-300 mb-2">
+                      Senha apLIS
+                    </label>
+                    <input
+                      id="aplis_senha"
+                      type="password"
+                      name="aplis_senha"
+                      value={formData.aplis_senha}
+                      onChange={handleInputChange}
+                      placeholder="Senha do apLIS"
+                      className="w-full px-4 py-2 border border-blue-300 dark:border-blue-700 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-neutral-800 text-gray-900 dark:text-neutral-100 placeholder:text-blue-400 dark:placeholder:text-blue-500"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-blue-700 dark:text-blue-400 mt-2">
+                  💡 Essas credenciais serão usadas para acessar o sistema apLIS quando este usuário fizer login
+                </p>
+              </div>
+
               {/* Mensagens dentro do modal */}
               {erro && (
                 <div className="mb-4 p-4 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900/50 text-red-700 dark:text-red-300 rounded-lg">
@@ -653,7 +708,7 @@ const UserManagement = () => {
                 </button>
                 <button 
                   type="submit" 
-                  className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:shadow-lg dark:hover:shadow-blue-900/50 transition-all font-medium"
+                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg hover:shadow-lg transition-all font-medium"
                 >
                   {modoEdicao ? 'Atualizar Usuário' : 'Criar Usuário'}
                 </button>

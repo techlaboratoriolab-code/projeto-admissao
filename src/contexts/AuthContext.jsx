@@ -22,7 +22,9 @@ export const AuthProvider = ({ children }) => {
             email: session.user.email,
             username: session.user.user_metadata?.username || session.user.email.split('@')[0],
             role: session.user.user_metadata?.role || 'usuario',
-            nome_completo: session.user.user_metadata?.nome_completo || ''
+            nome_completo: session.user.user_metadata?.nome_completo || '',
+            aplis_usuario: session.user.user_metadata?.aplis_usuario || null,
+            aplis_senha: session.user.user_metadata?.aplis_senha || null
           });
         }
       } catch (error) {
@@ -45,7 +47,9 @@ export const AuthProvider = ({ children }) => {
           email: session.user.email,
           username: session.user.user_metadata?.username || session.user.email.split('@')[0],
           role: session.user.user_metadata?.role || 'usuario',
-          nome_completo: session.user.user_metadata?.nome_completo || ''
+          nome_completo: session.user.user_metadata?.nome_completo || '',
+          aplis_usuario: session.user.user_metadata?.aplis_usuario || null,
+          aplis_senha: session.user.user_metadata?.aplis_senha || null
         });
       } else {
         setUsuario(null);
@@ -90,7 +94,9 @@ export const AuthProvider = ({ children }) => {
           email: data.user.email,
           username: data.user.user_metadata?.username || data.user.email.split('@')[0],
           role: data.user.user_metadata?.role || 'usuario',
-          nome_completo: data.user.user_metadata?.nome_completo || ''
+          nome_completo: data.user.user_metadata?.nome_completo || '',
+          aplis_usuario: data.user.user_metadata?.aplis_usuario || null,
+          aplis_senha: data.user.user_metadata?.aplis_senha || null
         });
         return { sucesso: true };
       }
@@ -183,7 +189,9 @@ export const AuthProvider = ({ children }) => {
           email: data.user.email,
           username: data.user.user_metadata?.username || data.user.email.split('@')[0],
           role: data.user.user_metadata?.role || 'usuario',
-          nome_completo: data.user.user_metadata?.nome_completo || ''
+          nome_completo: data.user.user_metadata?.nome_completo || '',
+          aplis_usuario: data.user.user_metadata?.aplis_usuario || null,
+          aplis_senha: data.user.user_metadata?.aplis_senha || null
         });
         return { sucesso: true };
       }

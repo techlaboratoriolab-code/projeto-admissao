@@ -74,5 +74,10 @@ backup_scripts/
 # Build do React
 /build/
 
-# Dados CSV podem ser grandes, considere não versionar
-# dados/*.csv
+# CSVs gerados automaticamente (dados de cache do banco)
+dados/locais_origem_extraidos_*.csv
+dados/instituicoes_extraidas_*.csv
+dados/locais_instituicao_*.csv
+
+# Ambientes Python
+.venv/

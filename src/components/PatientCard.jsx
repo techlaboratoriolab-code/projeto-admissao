@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
+import { ConvenioSelect, LocalOrigemSelect, FontePagadoraSelect } from './DropdownsAdmissao';
 
-const PatientCard = ({ patient, onPatientUpdate }) => {
+const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedData, setEditedData] = useState({});
 
@@ -27,11 +28,11 @@ const PatientCard = ({ patient, onPatientUpdate }) => {
 
   return (
     <div className="w-[420px] h-screen bg-white dark:bg-neutral-800 p-6 overflow-y-auto shadow-[2px_0_12px_rgba(0,0,0,0.08)] dark:shadow-[2px_0_12px_rgba(0,0,0,0.3)] sticky top-0 scrollbar-custom max-xl:w-[400px] max-lg:w-[350px] max-md:w-full max-md:h-auto max-md:max-h-[50vh] max-md:p-5 transition-colors">
-      {/* Logo LAB */}
-      <div className="w-[100px] h-[50px] bg-secondary rounded-md flex items-center justify-center text-white font-bold text-xl mb-5 max-sm:w-20 max-sm:h-10 max-sm:text-base">
-        LAB
-      </div>
-
+      {/* Título do sistema */}
+      <h2 className="text-xl font-bold text-gray-900 dark:text-neutral-100 mb-4">
+        Sistema de Admissão
+      </h2>
+      
       {/* Botão de edição */}
       <div className="mb-5">
         {!isEditing ? (
@@ -131,7 +132,32 @@ const PatientCard = ({ patient, onPatientUpdate }) => {
               placeholder="000.000.000-00"
             />
           ) : (
-            <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.cpf || 'Não informado'}</p>
+            <div>
+              <p className="text-sm text-[#333] dark:text-neutral-300 mb-2">{patient?.cpf || 'Não informado'}</p>
+
+              {/* 🆕 BOTÃO VALIDAR CPF */}
+              {patient?.cpf && onValidarCPF && (
+                <button
+                  onClick={onValidarCPF}
+                  className="w-full py-2.5 px-4 text-white font-semibold text-sm rounded-lg transition-all duration-300 hover:-translate-y-0.5"
+                  style={{
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+                    border: 'none',
+                    cursor: 'pointer'
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.boxShadow = '0 6px 16px rgba(16, 185, 129, 0.4)';
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.3)';
+                  }}
+                >
+                  <span style={{ fontSize: '16px', marginRight: '6px' }}>✓</span>
+                  Validar na Receita Federal
+                </button>
+              )}
+            </div>
           )}
         </div>
 
@@ -263,12 +289,10 @@ const PatientCard = ({ patient, onPatientUpdate }) => {
       <section className="mb-4">
         <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">Local de origem</h2>
         {isEditing ? (
-          <input
-            type="text"
-            className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+          <LocalOrigemSelect
             value={editedData.origin || ''}
-            onChange={(e) => handleChange('origin', e.target.value)}
-            placeholder="Local de origem"
+            onChange={(selectedOrigem) => handleChange('origin', selectedOrigem?.nome || '')}
+            className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
           />
         ) : (
           <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.origin || '{requisicao.local_origem}'}</p>
@@ -281,12 +305,10 @@ const PatientCard = ({ patient, onPatientUpdate }) => {
       <section className="mb-4">
         <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">Fonte pagadora</h2>
         {isEditing ? (
-          <input
-            type="text"
-            className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+          <FontePagadoraSelect
             value={editedData.payingSource || ''}
-            onChange={(e) => handleChange('payingSource', e.target.value)}
-            placeholder="Fonte pagadora"
+            onChange={(selectedFonte) => handleChange('payingSource', selectedFonte?.nome || '')}
+            className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
           />
         ) : (
           <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.payingSource || '{requisicao.fonte_pagadora}'}</p>
@@ -299,12 +321,10 @@ const PatientCard = ({ patient, onPatientUpdate }) => {
       <section className="mb-4">
         <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">CONVÊNIO</h2>
         {isEditing ? (
-          <input
-            type="text"
-            className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+          <ConvenioSelect
             value={editedData.insurance || ''}
-            onChange={(e) => handleChange('insurance', e.target.value)}
-            placeholder="Convênio"
+            onChange={(selectedConvenio) => handleChange('insurance', selectedConvenio?.nome || '')}
+            className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
           />
         ) : (
           <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.insurance || '{convenio.nome}'}</p>
