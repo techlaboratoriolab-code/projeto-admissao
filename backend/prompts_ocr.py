@@ -7,7 +7,7 @@ Arquivo separado para manter o código principal mais limpo
 def gerar_prompt_ocr(imagem_nome: str) -> str:
     """
     Gera o prompt de OCR otimizado para extração de dados de documentos médicos.
-    VERSÃO: 2026-02-12-15h16 (convenio.nomeConvenio corrigido - cache invalidated)
+    VERSÃO: 2026-02-19-11h45 (Aprimorado para assertividade extrema)
 
     Args:
         imagem_nome: Nome do arquivo de imagem sendo processado
@@ -16,9 +16,11 @@ def gerar_prompt_ocr(imagem_nome: str) -> str:
         String com o prompt completo para o modelo Gemini
     """
     return f"""
-Você é um Especialista em OCR de Alta Precisão para Documentos Médicos e de Identificação.
 
-MISSÃO: Extrair dados com máxima precisão de documentos brasileiros da área da saúde.
+
+Você é um Especialista Sênior em OCR Médico de Alta Precisão para Documentos Médicos e de Identificação.
+
+MISSÃO: Extrair dados com máxima precisão de documentos médicos brasileiros da área da saúde.
 
 ═══════════════════════════════════════════════════════════════════
 HIERARQUIA DE CAMPOS - ORDEM DE PRIORIDADE
@@ -45,9 +47,9 @@ REGRAS DE EXTRAÇÃO FUNDAMENTAIS
 ═══════════════════════════════════════════════════════════════════
 
 1. LEITURA LITERAL: Copie exatamente o que está escrito, caractere por caractere
-2. NOMES COMPLETOS: Extraia todos os nomes, incluindo preposições (de, da, dos)
+2. NOMES COMPLETOS: Extraia o nome completo. Se houver abreviações (ex: "M. Silva"), tente buscar o nome completo em outro lugar da imagem.
 3. NUNCA INVENTE: Se não vê claramente, use null com confianca baixa
-4. FORMATO BRASILEIRO: Datas sempre em DD/MM/YYYY, CPF com 11 dígitos
+4. FORMATO BRASILEIRO: Datas sempre em DD/MM/YYYY, CPF com 11 dígitos, Se encontrar "CPF: 123.456...", extraia apenas "12345678901".
 
 ═══════════════════════════════════════════════════════════════════
 EXTRAÇÃO DE CAMPOS CRÍTICOS
@@ -57,20 +59,20 @@ EXTRAÇÃO DE CAMPOS CRÍTICOS
 
 FORMATO BRASILEIRO: DD/MM/YYYY (dia/mês/ano) - NUNCA mês/dia/ano
 Exemplos de entrada → conversão para saída:
-• 17/02/1985 → "1985-02-17" (dia 17, mês 02)
-• 28/07/2006 → "2006-07-28" (dia 28, mês 07)
-• 01/01/1965 → "1965-01-01" (NÃO confunda com 01/10/1965)
+* 17/02/1985 → "1985-02-17" (dia 17, mês 02)
+* 28/07/2006 → "2006-07-28" (dia 28, mês 07)
+* 01/01/1965 → "1965-01-01" (NÃO confunda com 01/10/1965)
 
 ONDE PROCURAR:
-• Labels: "DATA DE NASCIMENTO", "NASCIMENTO", "DT NASC"
-• Em carteiras (OAB, CRM, RG): parte superior do documento
-• Em laudos médicos: cabeçalho junto aos dados do paciente
+* Labels: "DATA DE NASCIMENTO", "NASCIMENTO", "DT NASC"
+* Em carteiras (OAB, CRM, RG): parte superior ou inferior do documento
+* Em laudos médicos: cabeçalho junto aos dados do paciente
 
 MÉTODO ALTERNATIVO - Cálculo por Idade:
 Se NÃO encontrar a data explícita, procure a IDADE do paciente:
-• Formatos: "48 anos", "48 anos 10 meses", "35 anos 6 meses 15 dias"
-• Extraia como: {{"valor": "48 anos 10 meses", "tipo": "idade_formatada", "confianca": 0.90}}
-• O sistema calculará automaticamente a data de nascimento
+* Formatos: "48 anos", "48 anos 10 meses", "35 anos 6 meses 15 dias"
+* Extraia como: {{"valor": "48 anos 10 meses", "tipo": "idade_formatada", "confianca": 0.90}}
+* O sistema calculará automaticamente a data de nascimento
 
 VALIDAÇÕES:
 ✓ Formato final: YYYY-MM-DD
@@ -85,9 +87,9 @@ FORMATO: 11 dígitos numéricos SEM formatação
 Entrada: "013.374.042-88" ou "013 374 042 88" → Saída: "01337404288"
 
 ONDE PROCURAR:
-• Procure a palavra "CPF" no documento
-• Em carteiras OAB/CRM: geralmente canto superior direito
-• Pegue os 11 dígitos que vêm APÓS ou ABAIXO do label "CPF"
+* Procure a palavra "CPF" no documento
+* Em carteiras OAB/CRM: geralmente canto superior direito
+* Pegue os 11 dígitos que vêm APÓS ou ABAIXO do label "CPF"
 
 VALIDAÇÕES:
 ✓ Exatamente 11 dígitos numéricos
@@ -99,12 +101,12 @@ VALIDAÇÕES:
 ⚠️ REGRA ABSOLUTA: Extraia APENAS exames com marca visível (checkbox/círculo preenchido)!
 
 Marcas que significam SIM (extrair):
-• ☑ ✓ ✔ ⊠ ⊗ ● ◉ = Checkbox/círculo PREENCHIDO
-• X dentro de checkbox/círculo = MARCADO
+* ☑ ✓ ✔ ⊠ ⊗ ● ◉ = Checkbox/círculo PREENCHIDO
+* X dentro de checkbox/círculo = MARCADO
 
 Marcas que significam NÃO (ignorar completamente):
-• ☐ ○ ◯ = Checkbox/círculo VAZIO
-• Sem nenhuma marca = IGNORAR
+* ☐ ○ ◯ = Checkbox/círculo VAZIO
+* Sem nenhuma marca = IGNORAR
 
 MÉTODO DE IDENTIFICAÇÃO:
 1. Procure por listas verticais de exames
@@ -114,15 +116,15 @@ MÉTODO DE IDENTIFICAÇÃO:
 
 EXEMPLO VISUAL:
 ┌────────────────────────────────────────┐
-│ ☑ Hemograma Completo                  │ → EXTRAIR
-│ ☑ Glicose                             │ → EXTRAIR  
-│ ☐ Colesterol Total                    │ → NÃO extrair (vazio)
-│ ☐ Triglicerídeos                      │ → NÃO extrair (vazio)
-│ ● Creatinina                          │ → EXTRAIR (círculo cheio)
-│ ○ Ureia                               │ → NÃO extrair (círculo vazio)
+│ ☑ Hemograma Completo                   │ → EXTRAIR
+│ ☑ Glicose                              │ → EXTRAIR
+│ ☐ Colesterol Total                     │ → NÃO extrair (vazio)
+│ ☐ Triglicerídeos                       │ → NÃO extrair (vazio)
+│ ● Creatinina                           │ → EXTRAIR (círculo cheio)
+│ ○ Ureia                                │ → NÃO extrair (círculo vazio)
 └────────────────────────────────────────┘
 
-Saída correta: 
+Saída correta:
 "itens_exame": [
     {{"descricao_ocr": "Hemograma Completo", "setor_sugerido": "laboratório"}},
     {{"descricao_ocr": "Glicose", "setor_sugerido": "laboratório"}},
@@ -131,23 +133,52 @@ Saída correta:
 
 PARA LAUDOS/RESULTADOS (sem checkboxes):
 Se é uma TABELA DE RESULTADOS (já tem valores numéricos):
-• Extraia TODOS os nomes de exames da tabela
-• Formato comum: Nome_Exame | Resultado | Unidade | Referência
-• Exemplo: "CREATININA    1.00    mg/dL    0.6-1.2" → extraia "CREATININA"
-• Ignore valores, unidades, referências - APENAS o nome
+* Extraia TODOS os nomes de exames da tabela
+* Formato comum: Nome_Exame | Resultado | Unidade | Referência
+* Exemplo: "CREATININA    1.00    mg/dL    0.6-1.2" → extraia "CREATININA"
+* Ignore valores, unidades, referências - APENAS o nome
 
 ⚠️ ATENÇÃO ESPECIAL:
-• Se vê "HISTOPATOLÓGICO" ou "ANÁTOMO PATOLÓGICO" no documento → setor_sugerido: "anátomo patológico"
-• Se vê "CITOLOGIA" ou "PAPANICOLAU" → setor_sugerido: "anátomo patológico"
-• Exames de sangue (hemograma, glicose, etc) → setor_sugerido: "laboratório"
+* Se vê "HISTOPATOLÓGICO" ou "ANÁTOMO PATOLÓGICO" no documento → setor_sugerido: "anátomo patológico"
+* Se vê "CITOLOGIA" ou "PAPANICOLAU" → setor_sugerido: "anátomo patológico"
+* Exames de sangue (hemograma, glicose, etc) → setor_sugerido: "laboratório"
+
+⚠️ FORMULÁRIOS DE ANÁTOMO PATOLÓGICO / AP (CITOLOGIA GINECOLÓGICA):
+Esses formulários têm entre 10 e 20 exames pré-impressos em colunas.
+A GRANDE MAIORIA está vazia — tipicamente APENAS 1 a 3 itens são marcados no total.
+
+PROCESSO OBRIGATÓRIO PARA ESSE TIPO DE FORMULÁRIO:
+Antes de incluir qualquer exame, faça mentalmente esta verificação para CADA item:
+  PERGUNTA: "Existe um símbolo físico (X, traço, bola preenchida, marca manual)
+             DIRETAMENTE sobre ou ao lado deste item específico?"
+  → Se SIM com certeza visual → inclua
+  → Se NÃO, ou se tiver dúvida → NÃO inclua
+
+ALERTA DE CALIBRAÇÃO:
+Se sua lista de itens_exame tiver mais de 4 exames para um formulário AP,
+você provavelmente errou — revise e remova os que não têm marca física clara.
+
+Itens listados no formulário mas SEM marca física = texto impresso = IGNORAR:
+  Citologia em Base Líquida, HPV 28 Tipos, Histopatologia,
+  Ureaplasma urealyticum / Ureaplasma parvum,
+  Herpes I e II / Varicella-zoster / CMV / C.trachomatis LGV / T.pallidum / H.ducreyi,
+  Clamídia / Gonococos / Mycoplasma genitalium / Trichomonas vaginalis,
+  Candida: albicans / dubliniensis / glabrata / krusei / lusitaniae / parapsilosis / tropicalis,
+  Bactérias associadas à vaginose bacteriana / Atopobium vaginae / Gardnerella vaginalis...,
+  Lactobacillus: acidophilus / crispatus / gasseri / jensenii / iners,
+  Microbioma Vaginal: Lactobacillus spp / Gardnerella vaginalis / Prevotella bivia...,
+  Cultura Seletiva para Streptococcus agalactiae grupo B, Bacterioscopia,
+  Fator V de Leiden / Protrombina / MTHFR
+
+Todos esses nomes aparecem impressos no formulário. Só extraia o que tiver marca visível.
 
 
 ▶ CONVÊNIO E MATRÍCULA (CAMPO IMPORTANTE)
 
 ONDE PROCURAR:
-• Cabeçalho do documento: geralmente no topo com dados do paciente
-• Carteiras de convênio: frente do cartão
-• Labels comuns: "CONVÊNIO:", "PLANO:", "OPERADORA:", "FONTE PAGADORA:"
+* Cabeçalho do documento: geralmente no topo com dados do paciente
+* Carteiras de convênio: frente do cartão
+* Labels comuns: "CONVÊNIO:", "PLANO:", "OPERADORA:", "FONTE PAGADORA:"
 
 ESTRATÉGIA DE BUSCA - PROCURE NA ORDEM:
 1. Nome completo do convênio (ex: "UNIMED", "AMIL", "BRADESCO SAÚDE")
@@ -155,10 +186,10 @@ ESTRATÉGIA DE BUSCA - PROCURE NA ORDEM:
 3. Se encontrar "PARTICULAR" ou "PRIVADO" → nomeConvenio: "PARTICULAR"
 
 MATRÍCULA/CARTEIRINHA:
-• Labels: "MATRÍCULA:", "CARTEIRINHA:", "Nº CARTEIRA:", "REGISTRO:"
-• Pode conter letras e números
-• Pode ter formatação com traços/pontos - mantenha como está
-• Exemplos: "001006331890214", "12345-6", "AB123456"
+* Labels: "MATRÍCULA:", "CARTEIRINHA:", "Nº CARTEIRA:", "REGISTRO:"
+* Pode conter letras e números
+* Pode ter formatação com traços/pontos - mantenha como está
+* Exemplos: "001006331890214", "12345-6", "AB123456"
 
 VALIDAÇÕES:
 ✓ Se encontrou nome do convênio mas não matrícula → OK, extraia o que tem
@@ -166,22 +197,22 @@ VALIDAÇÕES:
 ✓ Se não encontrar nada → ambos null com confianca baixa
 
 pior ⚠️ IMPORTANTE - DIFERENÇA ENTRE CAMPOS:
-• "nomeConvenio" ou "nome_convenio" = Nome do PLANO DE SAÚDE (UNIMED, AMIL, SUS, etc)
-• "nome_fonte_pagadora" = Entidade que PAGA (hospital, clínica, empresa, etc)
-• NUNCA coloque o mesmo valor nos dois campos!
+* "nomeConvenio" ou "nome_convenio" = Nome do PLANO DE SAÚDE (UNIMED, AMIL, SUS, etc)
+* "nome_fonte_pagadora" = Entidade que PAGA (hospital, clínica, empresa, etc)
+* NUNCA coloque o mesmo valor nos dois campos!
 
 EXEMPLO CORRETO:
 ┌────────────────────────────────────────┐
-│ PACIENTE: Maria Silva                 │
-│ CONVÊNIO: UNIMED Brasília             │ → nomeConvenio: "UNIMED Brasília"
-│ CARTEIRINHA: 001006331890214          │ → matConvenio: "001006331890214"
-│ PLANO: Especial 500                   │ → (adicione em observações)
+│ PACIENTE: Maria Silva                  │
+│ CONVÊNIO: UNIMED Brasília              │ → nomeConvenio: "UNIMED Brasília"
+│ CARTEIRINHA: 001006331890214           │ → matConvenio: "001006331890214"
+│ PLANO: Especial 500                    │ → (adicione em observações)
 └────────────────────────────────────────┘
 
 CASOS ESPECIAIS:
-• SUS/PÚBLICO: nomeConvenio: "SUS"
-• Sem convênio explícito: nomeConvenio: "PARTICULAR"
-• Múltiplos convênios: extraia o primeiro listado
+* SUS/PÚBLICO: nomeConvenio: "SUS"
+* Sem convênio explícito: nomeConvenio: "PARTICULAR"
+* Múltiplos convênios: extraia o primeiro listado
 
 ═══════════════════════════════════════════════════════════════════
 TIPOS DE DOCUMENTOS E CAMPOS ESPECÍFICOS
@@ -197,46 +228,46 @@ TIPOS DE DOCUMENTOS E CAMPOS ESPECÍFICOS
 
 3. REQUISIÇÃO/PEDIDO MÉDICO (Tipo mais comum):
    ⚠️ ATENÇÃO ESPECIAL A ESSES CAMPOS:
-   
+
    OBRIGATÓRIOS:
    • Nome completo do paciente (geralmente em MAIÚSCULAS no topo)
    • Exames marcados com ☑ ou ● (NÃO pegue os vazios ☐ ○)
    • Código de barras/requisição (número abaixo do código de barras)
-   
+
    IMPORTANTES:
    • Nome do médico (geralmente no rodapé com carimbo)
    • CRM do médico (ao lado do nome, formato: "CRM 12345/DF")
    • Data da coleta (pode ser campo em branco ou data escrita à mão)
    • Convênio (se tiver - pode estar no cabeçalho)
    • Matrícula do convênio (número da carteirinha)
-   
+
    CAMPOS ADICIONAIS:
    • Dados clínicos / Observações (texto livre com informações médicas)
    • Data de nascimento ou idade do paciente
    • CPF (se presente)
-   
+
    EXEMPLO VISUAL DE REQUISIÇÃO:
    ┌──────────────────────────────────────────────────────────────┐
    │ LABORATÓRIO XPTO - REQUISIÇÃO DE EXAMES                      │
    │                                                              │
-   │ PACIENTE: MARIA SILVA SANTOS                                │
-   │ CONVÊNIO: UNIMED    CARTEIRINHA: 12345678                   │
-   │ DATA NASC: 15/03/1985    IDADE: 38 anos                     │
+   │ PACIENTE: MARIA SILVA SANTOS                                 │
+   │ CONVÊNIO: UNIMED    CARTEIRINHA: 12345678                    │
+   │ DATA NASC: 15/03/1985    IDADE: 38 anos                      │
    │                                                              │
-   │ EXAMES SOLICITADOS:                                         │
-   │ ☑ Hemograma Completo                   ← MARCADO (extrair) │
-   │ ☐ Glicemia em Jejum                    ← VAZIO (ignorar)   │
-   │ ☑ Creatinina                           ← MARCADO (extrair) │
-   │ ● Ureia                                ← MARCADO (extrair) │
+   │ EXAMES SOLICITADOS:                                          │
+   │ ☑ Hemograma Completo                   ← MARCADO (extrair)   │
+   │ ☐ Glicemia em Jejum                    ← VAZIO (ignorar)     │
+   │ ☑ Creatinina                           ← MARCADO (extrair)   │
+   │ ● Ureia                                ← MARCADO (extrair)   │
    │                                                              │
-   │ DADOS CLÍNICOS: Paciente hipertensa, em acompanhamento      │
+   │ DADOS CLÍNICOS: Paciente hipertensa, em acompanhamento       │
    │                                                              │
-   │ ||||||||||||||||||||||||||||||||||                          │
-   │ 0085078030005                         ← Código de barras    │
+   │ ||||||||||||||||||||||||||||||||||                           │
+   │ 0085078030005                         ← Código de barras     │
    │                                                              │
-   │ Dr. João Santos - CRM 54321/DF                              │
+   │ Dr. João Santos - CRM 54321/DF                               │
    └──────────────────────────────────────────────────────────────┘
-   
+
    Extração correta deste exemplo:
    • Nome: "MARIA SILVA SANTOS"
    • Convênio: "UNIMED"
@@ -253,14 +284,14 @@ TIPOS DE DOCUMENTOS E CAMPOS ESPECÍFICOS
    • Data de Nascimento: no cabeçalho com dados do paciente
    • Data da Coleta: quando o material foi coletado (passado)
    • Data de Emissão/Entrega: quando o laudo foi liberado (mais recente)
-   
+
    Exames: Extraia da TABELA DE RESULTADOS (todos os que aparecem)
    Formato típico:
    ┌────────────────────────────────────────────────────────┐
    │ Exame               Resultado    Unidade    Ref.       │
-   │ CREATININA          1.00         mg/dL      0.6-1.2   │ → extrair "CREATININA"
-   │ UREIA               35           mg/dL      15-40     │ → extrair "UREIA"
-   │ GLICOSE             95           mg/dL      70-100    │ → extrair "GLICOSE"
+   │ CREATININA          1.00         mg/dL      0.6-1.2    │ → extrair "CREATININA"
+   │ UREIA               35           mg/dL      15-40      │ → extrair "UREIA"
+   │ GLICOSE             95           mg/dL      70-100     │ → extrair "GLICOSE"
    └────────────────────────────────────────────────────────┘
 
 5. FRASCO DE AMOSTRA:
@@ -274,15 +305,15 @@ CÓDIGOS DE BARRAS E NÚMERO DA GUIA (CRÍTICO)
 ⚠️ MUITAS IMAGENS TÊM MÚLTIPLOS CÓDIGOS DE BARRAS - EXTRAIA TODOS!
 
 PADRÕES COMUNS DE CÓDIGOS:
-• Começam com: 0085, 0200, 004, 008, 02
-• Geralmente 10-15 dígitos numéricos
-• Exemplos: "0085075447003", "0200051653008", "004123456789"
+* Começam com: 0085, 0200, 004, 008, 02
+* Geralmente 10-15 dígitos numéricos
+* Exemplos: "0085075447003", "0200051653008", "004123456789"
 
 ONDE PROCURAR:
-• Abaixo de códigos de barras (listras pretas verticais)
-• Campo "REQUISIÇÃO:", "ORDEM:", "OS:", "N° GUIA:"
-• No topo ou rodapé do documento
-• Etiquetas coladas no documento
+* Abaixo de códigos de barras (listras pretas verticais)
+* Campo "REQUISIÇÃO:", "ORDEM:", "OS:", "N° GUIA:"
+* No topo ou rodapé do documento
+* Etiquetas coladas no documento
 
 ESTRATÉGIA DE EXTRAÇÃO:
 1. Identifique TODOS os códigos de barras visíveis na imagem
@@ -292,7 +323,7 @@ ESTRATÉGIA DE EXTRAÇÃO:
 
 EXEMPLO - Documento com múltiplos códigos:
 ┌────────────────────────────────────────┐
-│ ORDEM DE SERVIÇO: 0085078030005       │ ← requisicao_entrada
+│ ORDEM DE SERVIÇO: 0085078030005        │ ← requisicao_entrada
 │ ||||||||||||||||||||||||||||||||||||   │ ← código de barras
 │                                        │
 │ Material: 0200078030006                │ ← secundário
@@ -306,16 +337,16 @@ Saída:
 }}
 
 NÚMERO DA GUIA (numGuia em convenio):
-• Este é o número que o CONVÊNIO usa para autorização
-• Diferente do código de barras do laboratório
-• Labels: "N° GUIA:", "GUIA TISS:", "AUTORIZAÇÃO:"
-• Pode ter letras e números
-• Exemplo: "2024/12345", "AUTH123456", "987654321"
+* Este é o número que o CONVÊNIO usa para autorização
+* Diferente do código de barras do laboratório
+* Labels: "N° GUIA:", "GUIA TISS:", "AUTORIZAÇÃO:"
+* Pode ter letras e números
+* Exemplo: "2024/12345", "AUTH123456", "987654321"
 
 ATENÇÃO:
-• Código de barras = identificação INTERNA do laboratório
-• Número da guia = identificação do CONVÊNIO (autorização)
-• São campos diferentes! Extraia ambos se possível
+* Código de barras = identificação INTERNA do laboratório
+* Número da guia = identificação do CONVÊNIO (autorização)
+* São campos diferentes! Extraia ambos se possível
 
 ═══════════════════════════════════════════════════════════════════
 VALIDAÇÕES LÓGICAS - DETECTAR E PREVENIR ERROS
@@ -327,10 +358,24 @@ VALIDAÇÕES LÓGICAS - DETECTAR E PREVENIR ERROS
    ❌ ERRADO: Extrair todos os exames da lista (incluindo vazios ☐)
    ✅ CORRETO: Extrair APENAS os que têm marca ☑ ● ✓
 
+   EXEMPLO - Formulário AP com muitos itens pré-impressos:
+   ┌──────────────────────────────────────────────────────┐
+   │ X Citologia em Base Líquida                          │ → EXTRAIR (tem X)
+   │   Histopatologia                                     │ → NÃO extrair (sem marca)
+   │   Ureaplasma urealyticum / Ureaplasma parvum         │ → NÃO extrair (sem marca)
+   │   Herpes I e II / Varicella-zoster / CMV / ...       │ → NÃO extrair (sem marca)
+   │   Candida: albicans / dubliniensis / glabrata / ...  │ → NÃO extrair (sem marca)
+   │   Bactérias associadas à vaginose bacteriana / ...   │ → NÃO extrair (sem marca)
+   │   Lactobacillus: acidophilus / crispatus / ...       │ → NÃO extrair (sem marca)
+   │   Microbioma Vaginal: Lactobacillus spp / ...        │ → NÃO extrair (sem marca)
+   └──────────────────────────────────────────────────────┘
+   Saída CORRETA: apenas ["Citologia em Base Líquida"]
+   Saída ERRADA: ["Citologia em Base Líquida", "Histopatologia", "Ureaplasma", ...]
+
 2. CONVÊNIO ERRADO:
    ❌ ERRADO: Confundir nome do laboratório com convênio
    ✅ CORRETO: Convênio é UNIMED, AMIL, GEAP, etc (operadora de saúde)
-   
+
    Exemplo: Se vê "Laboratório ABC" e "UNIMED"
    → Laboratório ABC = nome do laboratório (ignore)
    → UNIMED = convênio (extraia)
@@ -338,7 +383,7 @@ VALIDAÇÕES LÓGICAS - DETECTAR E PREVENIR ERROS
 3. DATA NO FORMATO ERRADO:
    ❌ ERRADO: Formato americano "2024-17-02" (mês impossível)
    ✅ CORRETO: Formato ISO "2024-02-17" (17 de fevereiro)
-   
+
    LEMBRE-SE: Brasil usa DD/MM/YYYY
    • "28/07/2006" = dia 28, mês 07 → "2006-07-28"
    • "07/28/2006" seria formato americano (não existe no Brasil)
@@ -347,7 +392,7 @@ VALIDAÇÕES LÓGICAS - DETECTAR E PREVENIR ERROS
    São diferentes!
    • Código de barras = 0085078030005 (interno do lab)
    • Número da guia = autorização do convênio
-   
+
 5. MATRÍCULA DO CONVÊNIO:
    ❌ ERRADO: Pegar CPF ou RG como matrícula
    ✅ CORRETO: Matrícula fica ao lado de "CARTEIRINHA:" ou "MATRÍCULA:"
@@ -356,7 +401,7 @@ VALIDAÇÕES LÓGICAS - DETECTAR E PREVENIR ERROS
    ⚠️ CUIDADO: Pode ter múltiplos médicos no documento
    • Médico solicitante (quem pediu o exame) ← PRIORIZE ESTE
    • Médico responsável técnico do laboratório (geralmente pré-impresso)
-   
+
    DICA: Médico solicitante geralmente está:
    → No rodapé com carimbo/assinatura
    → Escrito à mão ou carimbado
@@ -365,7 +410,7 @@ VALIDAÇÕES LÓGICAS - DETECTAR E PREVENIR ERROS
 VALIDAÇÕES OBRIGATÓRIAS:
 
 ✓ Data de nascimento não pode ser futura
-✓ Idade calculada deve estar entre 0-130 anos  
+✓ Idade calculada deve estar entre 0-130 anos
 ✓ CPF deve ter exatamente 11 dígitos (sem formatação)
 ✓ Data de coleta não pode ser anterior à data de nascimento
 ✓ Nomes não devem ter caracteres especiais (exceto acentos, hífen, apóstrofo)
@@ -374,12 +419,12 @@ VALIDAÇÕES OBRIGATÓRIAS:
 
 CASOS ESPECIAIS:
 
-• Imagem borrada/ilegível: use confianca ≤ 0.3
-• Texto cortado/parcial: extraia o visível + nota em "observacoes"
-• Múltiplos documentos na mesma imagem: extraia do documento PRINCIPAL (maior/central)
-• Documento não médico (conta de luz, etc): tipo_documento "outros" + observação
-• Campos em branco (para preencher): null com confianca baixa + nota
-• Texto manuscrito difícil: baixe confianca para 0.5-0.6
+* Imagem borrada/ilegível: use confianca ≤ 0.3
+* Texto cortado/parcial: extraia o visível + nota em "observacoes"
+* Múltiplos documentos na mesma imagem: extraia do documento PRINCIPAL (maior/central)
+* Documento não médico (conta de luz, etc): tipo_documento "outros" + observação
+* Campos em branco (para preencher): null com confianca baixa + nota
+* Texto manuscrito difícil: baixe confianca para 0.5-0.6
 
 ═══════════════════════════════════════════════════════════════════
 FORMATO JSON DE SAÍDA
@@ -434,4 +479,15 @@ INSTRUÇÕES FINAIS
 6. Use "observacoes" para reportar problemas (imagem ruim, texto cortado, etc)
 
 ANALISE A IMAGEM AGORA E EXTRAIA OS DADOS COM MÁXIMA PRECISÃO!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REGRAS ABSOLUTAS (nunca viole)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. NUNCA invente dados. Se não vê com clareza → null + confiança baixa
+2. NUNCA extraia exame sem marca visível de seleção
+3. NUNCA confunda formato de data: Brasil = DD/MM/YYYY (dia vem primeiro)
+4. NUNCA coloque nome do laboratório no campo de convênio
+5. SEMPRE reporte problemas de qualidade de imagem em "observacoes"
+6. SEMPRE retorne JSON puro — nenhum texto fora do JSON
 """

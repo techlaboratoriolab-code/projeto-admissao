@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import PatientCard from '../components/PatientCard';
-import { API_BASE_URL } from '../config';
+import { API_BASE_URL, apiFetch } from '../config';
 import { useAuth } from '../contexts/AuthContext';
 import { ConvenioSelect, FontePagadoraSelect, LocalOrigemSelect } from '../components/DropdownsAdmissao';
+import { useFilaCompartilhada } from '../hooks/useFilaCompartilhada';
+import { supabase as supabaseClient } from '../lib/supabase';
 
 const AdmissionView = () => {
   const { usuario } = useAuth();
@@ -53,6 +55,22 @@ const AdmissionView = () => {
   const [dadosRequisicaoEditaveis, setDadosRequisicaoEditaveis] = useState(null);
   const [salvandoDados, setSalvandoDados] = useState(false);
 
+  // Ref para debounce da busca automática
+  const debounceRef = useRef(null);
+
+  // Fila compartilhada multi-usuário (Supabase Realtime)
+  const {
+    filaRequisicoes, filaStatus, sessaoAtiva, euSouProcessador,
+    iniciarSessao, atualizarItem, atualizarSessao,
+    adquirirLockRevisao, liberarLockRevisao, aprovarItem: aprovarItemSupabase, pularItem: pularItemSupabase,
+    resetarSessao: resetarSessaoHook
+  } = useFilaCompartilhada();
+
+  const [filaIndice, setFilaIndice] = useState(0); // local: índice sendo processado pelo OCR
+  const [filaRevisaoIndice, setFilaRevisaoIndice] = useState(-1); // local: índice selecionado para revisão
+  const [filaLog, setFilaLog] = useState([]);
+  const autoStopRef = useRef(false);
+
   // Função para converter data DD/MM/YYYY para YYYY-MM-DD
   const converterDataParaISO = (data) => {
     if (!data) return '';
@@ -84,14 +102,17 @@ const AdmissionView = () => {
     setLoadingRequisicao(true);
     setMessage(null);
 
-    // LIMPAR ESTADOS ANTERIORES
+    // LIMPAR ESTADOS ANTERIORES (evitar herança entre requisições no modo automático)
     setResultadoConsolidadoFinal(null);
     setDadosOCRConsolidados([]);
     setImagensProcessadas(new Set());
-    setReceitaFederalStatus(null); // Limpar status de validação anterior
+    setReceitaFederalStatus(null);
+    setPatientData(null);
+    setRequisicaoData(null);
+    setImagens([]);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/requisicao/${codRequisicao}`);
+      const response = await apiFetch(`${API_BASE_URL}/api/requisicao/${codRequisicao}`);
       const data = await response.json();
 
       if (response.ok) {
@@ -162,7 +183,7 @@ const AdmissionView = () => {
             birthDate: formatarData(data.paciente.dtaNasc),
             recordNumber: data.requisicao.codRequisicao,
             origin: data.localOrigem?.nome || 'Não informado',
-            payingSource: data.fontePagadora?.nome || 'Não informado',
+            payingSource: data.fontePagadora?.nome || 'Particular',
             insurance: data.convenio?.nome || 'Não informado',
             doctorName: data.medico?.nome || 'Não informado',
             doctorCRM: data.medico?.crm ? `CRM: ${data.medico.crm}/${data.medico.uf}` : 'Não informado',
@@ -195,15 +216,15 @@ const AdmissionView = () => {
             ...prev,
             codRequisicao: data.requisicao.codRequisicao,
             dtaColeta: dataColeta,
-            // 🆕 Aceitar tanto idPaciente quanto CodPaciente
-            idPaciente: (data.paciente.idPaciente || data.paciente.CodPaciente)?.toString() || prev.idPaciente || '',
-            // Buscar IDs tanto do objeto requisicao quanto dos objetos específicos
-            idConvenio: data.requisicao.idConvenio?.toString() || data.convenio?.id?.toString() || prev.idConvenio || '',
-            idLocalOrigem: data.requisicao.idLocalOrigem?.toString() || data.localOrigem?.id?.toString() || prev.idLocalOrigem || '1',
-            idFontePagadora: data.requisicao.idFontePagadora?.toString() || data.fontePagadora?.id?.toString() || prev.idFontePagadora || '',
-            idMedico: data.requisicao.idMedico?.toString() || prev.idMedico || '',
-            numGuia: data.requisicao.numGuia || prev.numGuia || '',
-            dadosClinicos: data.requisicao.dadosClinicos || prev.dadosClinicos || ''
+            // Aceitar tanto idPaciente quanto CodPaciente - NÃO usar prev.idPaciente para evitar herdar de requisição anterior
+            idPaciente: (data.paciente.idPaciente || data.paciente.CodPaciente)?.toString() || '',
+            // Buscar IDs tanto do objeto requisicao quanto dos objetos específicos - NÃO usar prev para evitar herdar de requisição anterior
+            idConvenio: data.requisicao.idConvenio?.toString() || data.convenio?.id?.toString() || '',
+            idLocalOrigem: data.requisicao.idLocalOrigem?.toString() || data.localOrigem?.id?.toString() || '1',
+            idFontePagadora: data.requisicao.idFontePagadora?.toString() || data.fontePagadora?.id?.toString() || '',
+            idMedico: data.requisicao.idMedico?.toString() || '',
+            numGuia: data.requisicao.numGuia || '',
+            dadosClinicos: data.requisicao.dadosClinicos || ''
             // examesConvenio e idExame serão preenchidos pelo OCR depois
           };
         });
@@ -222,7 +243,7 @@ const AdmissionView = () => {
           console.log('[BUSCAR]   URL da API:', `${API_BASE_URL}/api/paciente/buscar-por-cpf`);
 
           try {
-            const responseCPF = await fetch(`${API_BASE_URL}/api/paciente/buscar-por-cpf`, {
+            const responseCPF = await apiFetch(`${API_BASE_URL}/api/paciente/buscar-por-cpf`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ cpf: cpfDisponivel })
@@ -257,7 +278,13 @@ const AdmissionView = () => {
                 idPaciente: resultCPF.paciente.idPaciente.toString()
               }));
 
-              console.log('[BUSCAR] ✅ idPaciente preenchido automaticamente no formData:', resultCPF.paciente.idPaciente);
+              // Atualizar patientData para exibir no PatientCard
+              setPatientData(prev => ({
+                ...prev,
+                idPaciente: resultCPF.paciente.idPaciente.toString()
+              }));
+
+              console.log('[BUSCAR] ✅ idPaciente preenchido automaticamente no formData e patientData:', resultCPF.paciente.idPaciente);
             } else {
               console.warn('[BUSCAR] ⚠️ Paciente não encontrado pelo CPF no sistema');
               console.warn('[BUSCAR]   Sucesso:', resultCPF.sucesso);
@@ -501,7 +528,7 @@ const AdmissionView = () => {
       console.log('[PREENCHER] Nomes extraídos:', nomesExames);
 
       try {
-        const responseBusca = await fetch(`${API_BASE_URL}/api/exames/buscar-por-nome`, {
+        const responseBusca = await apiFetch(`${API_BASE_URL}/api/exames/buscar-por-nome`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ nomes_exames: nomesExames })
@@ -604,7 +631,7 @@ const AdmissionView = () => {
           }
         }
 
-        const responseRF = await fetch(`${API_BASE_URL}/api/admissao/validar-cpf`, {
+        const responseRF = await apiFetch(`${API_BASE_URL}/api/admissao/validar-cpf`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -657,7 +684,7 @@ const AdmissionView = () => {
       console.log('[PREENCHER] 📂 PASSO 2: Buscando paciente no banco pelo CPF...');
 
       try {
-        const responseBusca = await fetch(`${API_BASE_URL}/api/paciente/buscar-por-cpf`, {
+        const responseBusca = await apiFetch(`${API_BASE_URL}/api/paciente/buscar-por-cpf`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ cpf: cpfOCR })
@@ -815,7 +842,7 @@ const AdmissionView = () => {
       console.log('[PREENCHER] 🔍 Buscando idMedico no banco de dados...');
 
       try {
-        const responseBusca = await fetch(`${API_BASE_URL}/api/medicos/${crm}/${uf}`, {
+        const responseBusca = await apiFetch(`${API_BASE_URL}/api/medicos/${crm}/${uf}`, {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' }
         });
@@ -1058,6 +1085,15 @@ const AdmissionView = () => {
       console.log('[PREENCHER] ✓ Exames atualizados no card do paciente:', atualizacoesOCR.examesConvenio);
     }
 
+    // 🆕 SINCRONIZAR idPaciente no formData também (necessário para o save)
+    if (atualizacoesOCR.idPaciente) {
+      setFormData(prev => ({
+        ...prev,
+        idPaciente: atualizacoesOCR.idPaciente
+      }));
+      console.log('[PREENCHER] ✓ idPaciente sincronizado no formData:', atualizacoesOCR.idPaciente);
+    }
+
     console.log('[PREENCHER] Formulário atualizado com sucesso!');
     console.log('[PREENCHER] Atualizações OCR aplicadas:', atualizacoesOCR);
     console.log('[PREENCHER] Campos preenchidos:', camposPreenchidos);
@@ -1114,7 +1150,7 @@ const AdmissionView = () => {
         console.log('[CONSOLIDAR]   - Endereço:', dadosParaEnviar.paciente?.endereco);
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/consolidar-resultados`, {
+      const response = await apiFetch(`${API_BASE_URL}/api/consolidar-resultados`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -1156,11 +1192,7 @@ const AdmissionView = () => {
             console.log('[CONSOLIDAR] ✅ Par 0085/0200 detectado e sincronizado!');
             console.log('[CONSOLIDAR] 🎯 Dados de paciente, médico e convênio são IDÊNTICOS em todas as requisições');
 
-            alert(`🔄 Sincronização Automática\n\n` +
-                  `Detectados ${totalRequisicoes} códigos de barras na mesma imagem:\n` +
-                  codigosRequisicoes.join('\n') + '\n\n' +
-                  `✅ Os dados foram sincronizados automaticamente.\n` +
-                  `Paciente, Médico e Convênio são idênticos em todas as requisições.`);
+            console.log(`[CONSOLIDAR] Sincronização: ${totalRequisicoes} códigos detectados: ${codigosRequisicoes.join(', ')}`);
           }
         }
 
@@ -1172,11 +1204,11 @@ const AdmissionView = () => {
         // VALIDAR CPF AUTOMATICAMENTE após OCR
         const pacienteOCR = result.resultado?.requisicoes?.[0]?.paciente || {};
 
-        // 🆕 TENTAR MÚLTIPLOS CAMINHOS PARA PEGAR O CPF
+        // TENTAR MÚLTIPLOS CAMINHOS PARA PEGAR O CPF (NUNCA usar patientData - pode ser de requisição anterior)
         const cpfExtraido = pacienteOCR.cpf?.valor ||
                            pacienteOCR.NumCPF?.valor ||
                            pacienteOCR.CPF?.valor ||
-                           patientData?.cpf;
+                           '';
 
         console.log('[CONSOLIDAR] 🔍 === VALIDAÇÃO RECEITA FEDERAL ===');
         console.log('[CONSOLIDAR] Tentando extrair CPF de:', Object.keys(pacienteOCR));
@@ -1199,12 +1231,17 @@ const AdmissionView = () => {
             let buscaResult = null;
             let metodoBusca = '';
 
-            // TENTATIVA 1: Buscar por CPF (prioritário)
+            // Helper: normaliza nome para comparação (sem acento, uppercase, sem espaços extras)
+            const normalizarNome = (n) => (n || '').toUpperCase()
+              .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+              .replace(/\s+/g, ' ').trim();
+
+            // TENTATIVA 1: Buscar por CPF
             if (cpfExtraido) {
               const cpfLimpo = cpfExtraido.replace(/\D/g, '');
               console.log('[CONSOLIDAR] 🔍 Tentando buscar por CPF:', cpfLimpo);
 
-              const buscaCPFResponse = await fetch(`${API_BASE_URL}/api/buscar-paciente`, {
+              const buscaCPFResponse = await apiFetch(`${API_BASE_URL}/api/buscar-paciente`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ cpf: cpfLimpo })
@@ -1214,15 +1251,36 @@ const AdmissionView = () => {
               metodoBusca = 'CPF';
 
               if (buscaResult.sucesso === 1 && buscaResult.paciente) {
-                console.log('[CONSOLIDAR] ✅ Paciente encontrado por CPF!');
+                console.log('[CONSOLIDAR] ✅ Paciente encontrado por CPF:', buscaResult.paciente.nome);
+
+                // Se temos o nome esperado, verificar se o CPF trouxe o paciente certo
+                if (nomeExtraido) {
+                  const nomeEncontrado = normalizarNome(buscaResult.paciente.nome);
+                  const nomeEsperado = normalizarNome(nomeExtraido);
+                  if (nomeEncontrado !== nomeEsperado) {
+                    console.warn(`[CONSOLIDAR] ⚠️ Nome do CPF ("${nomeEncontrado}") ≠ nome esperado ("${nomeEsperado}"). Tentando por nome...`);
+                    // CPF trouxe paciente diferente — tentar pelo nome
+                    const buscaNomeResponse2 = await apiFetch(`${API_BASE_URL}/api/buscar-paciente`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ nome: nomeExtraido })
+                    });
+                    const resultNome2 = await buscaNomeResponse2.json();
+                    if (resultNome2.sucesso === 1 && resultNome2.paciente) {
+                      console.log('[CONSOLIDAR] ✅ Nome correto encontrado por NOME:', resultNome2.paciente.nome);
+                      buscaResult = resultNome2;
+                      metodoBusca = 'NOME';
+                    }
+                  }
+                }
               }
             }
 
-            // TENTATIVA 2: Buscar por NOME (se não encontrou por CPF)
+            // TENTATIVA 2: Buscar por NOME (se CPF não encontrou nada)
             if ((!buscaResult || buscaResult.sucesso !== 1) && nomeExtraido) {
               console.log('[CONSOLIDAR] 🔍 CPF não encontrou, tentando buscar por NOME:', nomeExtraido);
 
-              const buscaNomeResponse = await fetch(`${API_BASE_URL}/api/buscar-paciente`, {
+              const buscaNomeResponse = await apiFetch(`${API_BASE_URL}/api/buscar-paciente`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ nome: nomeExtraido })
@@ -1250,20 +1308,21 @@ const AdmissionView = () => {
                 idPaciente: pacienteEncontrado.idPaciente
               }));
 
-              // Atualizar patientData com dados do cadastro existente
+              // Atualizar patientData com dados do cadastro existente (NÃO usar prev para evitar herdar de requisição anterior)
               setPatientData(prev => ({
-                ...prev,
-                name: pacienteEncontrado.nome || prev.name,
-                cpf: cpfExtraido || pacienteEncontrado.cpf,
+                ...(prev || {}),
+                idPaciente: pacienteEncontrado.idPaciente?.toString() || '',
+                name: pacienteEncontrado.nome || '',
+                cpf: cpfExtraido || pacienteEncontrado.cpf || '',
                 birthDate: pacienteEncontrado.dataNascimento
                   ? new Date(pacienteEncontrado.dataNascimento).toLocaleDateString('pt-BR')
-                  : prev.birthDate,
-                rg: pacienteEncontrado.rg || prev.rg,
-                phone: pacienteEncontrado.telefone || prev.phone,
-                email: pacienteEncontrado.email || prev.email
+                  : '',
+                rg: pacienteEncontrado.rg || '',
+                phone: pacienteEncontrado.telefone || '',
+                email: pacienteEncontrado.email || ''
               }));
 
-              alert(`✅ PACIENTE ENCONTRADO POR ${metodoBusca}!\n\nID: ${pacienteEncontrado.idPaciente}\nNome: ${pacienteEncontrado.nome}\nCPF: ${cpfExtraido || 'Não disponível'}\n\nOs dados do cadastro existente foram carregados.`);
+              console.log(`[CONSOLIDAR] Paciente encontrado por ${metodoBusca}: ID=${pacienteEncontrado.idPaciente}, Nome=${pacienteEncontrado.nome}`);
             } else {
               console.log('[CONSOLIDAR] ℹ️ Paciente não encontrado. Novo cadastro será criado ao salvar.');
             }
@@ -1315,7 +1374,7 @@ const AdmissionView = () => {
           console.log('[CONSOLIDAR]   Data Nascimento:', dataNascExtraida);
 
           try {
-            const responseCPF = await fetch(`${API_BASE_URL}/api/admissao/validar-cpf`, {
+            const responseCPF = await apiFetch(`${API_BASE_URL}/api/admissao/validar-cpf`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ 
@@ -1482,7 +1541,7 @@ const AdmissionView = () => {
         text: '🔍 Validando CPF na Receita Federal...'
       });
 
-      const response = await fetch(`${API_BASE_URL}/api/admissao/validar-cpf`, {
+      const response = await apiFetch(`${API_BASE_URL}/api/admissao/validar-cpf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1577,6 +1636,14 @@ const AdmissionView = () => {
       [name]: value
     }));
 
+    // Busca automática quando código de requisição tem >= 10 caracteres
+    if (name === 'codRequisicao' && value.length >= 10) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        buscarRequisicao(value);
+      }, 800);
+    }
+
     // Sincronizar exames com o card do paciente
     if (name === 'examesConvenio') {
       setPatientData(prev => ({
@@ -1656,7 +1723,7 @@ const AdmissionView = () => {
       console.log('[SALVAR] Nomes dos exames:', nomesExames);
 
       // Buscar IDs dos exames pelo nome
-      const responseBusca = await fetch(`${API_BASE_URL}/api/exames/buscar-por-nome`, {
+      const responseBusca = await apiFetch(`${API_BASE_URL}/api/exames/buscar-por-nome`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nomes_exames: nomesExames })
@@ -1832,7 +1899,7 @@ const AdmissionView = () => {
       console.log('[SALVAR] Campos presentes:', Object.keys(dados));
       console.log('[SALVAR] Exames:', dados.examesConvenio);
 
-      const response = await fetch(`${API_BASE_URL}/api/admissao/salvar`, {
+      const response = await apiFetch(`${API_BASE_URL}/api/admissao/salvar`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -1867,15 +1934,7 @@ const AdmissionView = () => {
             `${idx + 1}. ID: ${p.id} - Nome: ${p.nome}`
           ).join('\n');
 
-          alert(
-            `⚠️⚠️⚠️ ALERTA DE DUPLICAÇÃO ⚠️⚠️⚠️\n\n` +
-            `${dup.mensagem}\n\n` +
-            `CPF: ${dup.cpf}\n` +
-            `Quantidade: ${dup.quantidade} pacientes\n\n` +
-            `PACIENTES DUPLICADOS:\n${listaPacientes}\n\n` +
-            `⚠️ AÇÃO NECESSÁRIA:\n` +
-            `Entre em contato com o administrador do sistema para remover as duplicatas!`
-          );
+          console.error(`[SALVAR] DUPLICAÇÃO: CPF=${dup.cpf}, ${dup.quantidade} pacientes: ${listaPacientes}`);
 
           tipoMensagem = 'error';
         }
@@ -1932,6 +1991,556 @@ const AdmissionView = () => {
     }
   };
 
+  // ========== MODO AUTOMÁTICO: Funções ==========
+
+  // Extrair lógica OCR em função reutilizável
+  const processarOCRCompleto = async (codRequisicao) => {
+    console.log('[AUTO-OCR] Iniciando processamento OCR para requisição:', codRequisicao);
+
+    // 1. Buscar imagens da requisição
+    const response = await apiFetch(`${API_BASE_URL}/api/requisicao/${codRequisicao}`);
+    const data = await response.json();
+
+    if (!response.ok || !data.sucesso) {
+      throw new Error(data.erro || 'Erro ao buscar requisição');
+    }
+
+    setRequisicaoData(data.requisicao);
+    setImagens(data.imagens || []);
+
+    const imagensParaProcessar = data.imagens || [];
+    const dadosOCRColetados = [];
+
+    if (imagensParaProcessar.length === 0) {
+      console.log('[AUTO-OCR] Nenhuma imagem encontrada para esta requisição');
+      return []; // Retorna array vazio em vez de null — requisição é válida, só sem imagens
+    }
+
+    console.log(`[AUTO-OCR] ${imagensParaProcessar.length} imagens para processar`);
+    setMessage({ type: 'info', text: `Analisando ${imagensParaProcessar.length} imagens com OCR...` });
+
+    setDadosOCRConsolidados([]);
+    setImagensProcessadas(new Set());
+
+    let sucessos = 0;
+    let erros = 0;
+
+    for (let i = 0; i < imagensParaProcessar.length; i++) {
+      if (autoStopRef.current) {
+        console.log('[AUTO-OCR] Parada solicitada pelo usuário');
+        break;
+      }
+
+      const img = imagensParaProcessar[i];
+      console.log(`[AUTO-OCR] Processando imagem ${i + 1}/${imagensParaProcessar.length}: ${img.nome}`);
+      setMessage({ type: 'info', text: `Processando ${i + 1}/${imagensParaProcessar.length}: ${img.nome}` });
+
+      try {
+        let tentativas = 0;
+        let maxTentativas = 3;
+        let sucesso = false;
+
+        while (tentativas < maxTentativas && !sucesso) {
+          tentativas++;
+
+          if (tentativas > 1) {
+            const delayRetry = Math.pow(2, tentativas - 1) * 15000;
+            console.log(`[AUTO-OCR] Retry ${tentativas}/${maxTentativas} - Aguardando ${delayRetry/1000}s...`);
+            setMessage({ type: 'info', text: `Aguardando ${delayRetry/1000}s para retry (tentativa ${tentativas}/${maxTentativas})...` });
+            await new Promise(resolve => setTimeout(resolve, delayRetry));
+          }
+
+          try {
+            const ocrResponse = await apiFetch(`${API_BASE_URL}/api/ocr/processar`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ imagemUrl: img.url, imagemNome: img.nome })
+            });
+
+            const ocrResult = await ocrResponse.json();
+
+            if (ocrResponse.status === 500 && ocrResult.erro && ocrResult.erro.includes('429')) {
+              console.warn(`[AUTO-OCR] Rate limit (429) na tentativa ${tentativas}`);
+              if (tentativas < maxTentativas) continue;
+            }
+
+            if (ocrResponse.ok && ocrResult.sucesso) {
+              sucesso = true;
+              const dadoImagem = {
+                imagem: img.nome,
+                timestamp: new Date().toISOString(),
+                dados: ocrResult.dados
+              };
+              dadosOCRColetados.push(dadoImagem);
+              setImagensProcessadas(prev => new Set([...prev, img.nome]));
+              setDadosOCRConsolidados(prev => [...prev, dadoImagem]);
+              sucessos++;
+              break;
+            } else if (tentativas >= maxTentativas) {
+              erros++;
+              console.warn(`[AUTO-OCR] Erro na imagem ${i + 1} após ${maxTentativas} tentativas`);
+            }
+          } catch (fetchError) {
+            if (tentativas >= maxTentativas) throw fetchError;
+          }
+        }
+      } catch (imgError) {
+        erros++;
+        console.error(`[AUTO-OCR] Exceção na imagem ${i + 1}:`, imgError);
+      }
+
+      // Delay entre imagens
+      if (i < imagensParaProcessar.length - 1) {
+        console.log('[AUTO-OCR] Aguardando 10 segundos antes da próxima imagem...');
+        await new Promise(resolve => setTimeout(resolve, 10000));
+      }
+    }
+
+    console.log(`[AUTO-OCR] RESUMO: ${sucessos} sucessos, ${erros} erros de ${imagensParaProcessar.length} imagens`);
+
+    // Consolidar
+    if (dadosOCRColetados.length > 0) {
+      console.log('[AUTO-OCR] Consolidando resultados...');
+      setMessage({ type: 'info', text: 'Gerando JSON consolidado...' });
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      await consolidarResultados(dadosOCRColetados);
+      return dadosOCRColetados;
+    }
+
+    return null;
+  };
+
+  // Versão do handleSubmit sem confirmações (para modo automático)
+  const handleSubmitAutomatico = async () => {
+    console.log('[AUTO-SAVE] Iniciando salvamento automático...');
+    setLoading(true);
+    setMessage({ type: 'info', text: 'Salvando admissão automaticamente...' });
+
+    try {
+      if (!formData.codRequisicao) {
+        throw new Error('Código da requisição não informado');
+      }
+
+      if (!formData.examesConvenio || formData.examesConvenio.trim() === '') {
+        throw new Error('Nenhum exame encontrado para salvar');
+      }
+
+      const safeParseInt = (value) => {
+        const parsed = parseInt(value);
+        return isNaN(parsed) ? undefined : parsed;
+      };
+
+      // Converter nomes de exames para IDs
+      const nomesExames = formData.examesConvenio.split(',').map(nome => nome.trim()).filter(nome => nome.length > 0);
+      const responseBusca = await apiFetch(`${API_BASE_URL}/api/exames/buscar-por-nome`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nomes_exames: nomesExames })
+      });
+
+      const resultBusca = await responseBusca.json();
+      if (!resultBusca.sucesso || !resultBusca.resultados) {
+        throw new Error('Erro ao buscar IDs dos exames');
+      }
+
+      const idsExames = resultBusca.resultados.filter(r => r.encontrado && r.idExame).map(r => r.idExame);
+      if (idsExames.length === 0) {
+        throw new Error('Nenhum exame encontrado no banco de dados');
+      }
+
+      let matConvenioFinal = formData.matConvenio || '';
+      if ((!matConvenioFinal || matConvenioFinal.trim() === '') && patientData?.insuranceCardNumber) {
+        matConvenioFinal = patientData.insuranceCardNumber;
+      }
+
+      const dados = {
+        ...formData,
+        idLaboratorio: safeParseInt(formData.idLaboratorio) || 1,
+        idUnidade: safeParseInt(formData.idUnidade) || 1,
+        idPaciente: safeParseInt(formData.idPaciente),
+        dtaColeta: formData.dtaColeta || new Date().toISOString().split('T')[0],
+        idConvenio: safeParseInt(formData.idConvenio),
+        idLocalOrigem: safeParseInt(formData.idLocalOrigem) || 1,
+        idFontePagadora: safeParseInt(formData.idFontePagadora),
+        idMedico: safeParseInt(formData.idMedico),
+        idExame: idsExames[0],
+        examesConvenio: idsExames,
+        numGuia: formData.numGuia || '',
+        matConvenio: matConvenioFinal,
+        fontePagadora: formData.fontePagadora || '',
+        aplis_usuario: usuario?.aplis_usuario || null,
+        aplis_senha: usuario?.aplis_senha || null
+      };
+
+      // Se idPaciente vazio, incluir dados do paciente para criação automática (SEM confirmação)
+      if (!dados.idPaciente && patientData) {
+        console.log('[AUTO-SAVE] idPaciente vazio - incluindo dados do paciente para criação automática');
+        if (patientData.cpf) dados.NumCPF = patientData.cpf.replace(/\D/g, '');
+        if (patientData.name) dados.NomPaciente = patientData.name;
+        if (patientData.phone) dados.TelCelular = patientData.phone.replace(/\D/g, '');
+        if (patientData.birthDate) {
+          const partes = patientData.birthDate.split('/');
+          if (partes.length === 3) dados.DtaNasc = `${partes[2]}-${partes[1]}-${partes[0]}`;
+        }
+        if (patientData.rg) dados.RGNumero = patientData.rg;
+        if (patientData.address) dados.DscEndereco = patientData.address;
+        if (patientData.email) dados.Email = patientData.email;
+      }
+
+      if (imagensProcessadas.size > 0 || dadosOCRConsolidados.length > 0) {
+        dados._fonte_dados = 'ocr';
+      }
+
+      Object.keys(dados).forEach(key => dados[key] === undefined && delete dados[key]);
+      if (!dados.codRequisicao) delete dados.codRequisicao;
+
+      console.log('[AUTO-SAVE] Enviando dados:', Object.keys(dados));
+
+      const response = await apiFetch(`${API_BASE_URL}/api/admissao/salvar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dados)
+      });
+
+      const result = await response.json();
+
+      if (result.sucesso === 1) {
+        console.log('[AUTO-SAVE] Admissão salva com sucesso! Código:', result.codRequisicao);
+        return { sucesso: true, codRequisicao: result.codRequisicao };
+      } else {
+        throw new Error(result.erro || 'Erro ao salvar admissão');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Limpar formulário entre requisições
+  const limparFormulario = () => {
+    console.log('[AUTO] Limpando formulário para próxima requisição...');
+    setFormData({
+      codRequisicao: '',
+      idLaboratorio: '1',
+      idUnidade: '1',
+      idPaciente: '',
+      dtaColeta: new Date().toISOString().split('T')[0],
+      idConvenio: '',
+      idLocalOrigem: '1',
+      idFontePagadora: '',
+      idMedico: '',
+      idExame: '',
+      examesConvenio: '',
+      numGuia: '',
+      matConvenio: '',
+      fontePagadora: '',
+      dadosClinicos: ''
+    });
+    setPatientData(null);
+    setRequisicaoData(null);
+    setImagens([]);
+    setDadosOCRConsolidados([]);
+    setResultadoConsolidadoFinal(null);
+    setImagensProcessadas(new Set());
+    setReceitaFederalStatus(null);
+    setMessage(null);
+  };
+
+  // Iniciar modo automático: buscar requisições e processar OCR de TODAS
+  // Resetar sessão travada no Supabase
+  const resetarSessao = async () => {
+    await resetarSessaoHook();
+    setFilaIndice(0);
+    setFilaRevisaoIndice(-1);
+    autoStopRef.current = false;
+    limparFormulario();
+    setMessage({ type: 'info', text: 'Sessão resetada. Você pode iniciar uma nova.' });
+    console.log('[AUTO] Sessão resetada com sucesso.');
+  };
+
+  const iniciarModoAutomatico = async () => {
+    console.log('[AUTO] Iniciando modo automático...');
+
+    // Verificar se já existe sessão ativa de OUTRO usuário
+    if (sessaoAtiva && (filaStatus === 'processando' || filaStatus === 'revisao') && !euSouProcessador) {
+      setMessage({ type: 'error', text: `Já existe uma sessão ativa iniciada por ${sessaoAtiva.iniciado_por_nome}` });
+      return;
+    }
+
+    setFilaLog([]);
+    setFilaIndice(0);
+    setFilaRevisaoIndice(-1);
+    autoStopRef.current = false;
+
+    try {
+      setMessage({ type: 'info', text: 'Buscando requisições pendentes...' });
+
+      const response = await apiFetch(`${API_BASE_URL}/api/requisicoes/disponiveis`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          aplis_usuario: usuario?.aplis_usuario || null,
+          aplis_senha: usuario?.aplis_senha || null,
+          limite: 15
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.sucesso) {
+        throw new Error(data.erro || 'Erro ao buscar requisições disponíveis');
+      }
+
+      const requisicoes = data.requisicoes || [];
+      console.log(`[AUTO] ${requisicoes.length} requisições encontradas`);
+
+      if (requisicoes.length === 0) {
+        setMessage({ type: 'info', text: 'Nenhuma requisição pendente encontrada.' });
+        return;
+      }
+
+      // Criar sessão compartilhada no Supabase
+      const sessaoId = crypto.randomUUID();
+      const itensParaInserir = requisicoes.map((req, idx) => ({
+        sessao_id: sessaoId,
+        cod_requisicao: req.CodRequisicao || req.codRequisicao || req.codigo || req.cod,
+        paciente_nome: req.NomPaciente || req.paciente || null,
+        cpf: req.NumCPF || req.cpf || null,
+        status: 'pendente',
+        processado_por: usuario?.id || 'anon',
+        ordem: idx
+      }));
+
+      await iniciarSessao(sessaoId, itensParaInserir, usuario);
+      setMessage({ type: 'info', text: `${requisicoes.length} requisições encontradas. Processando OCR de todas...` });
+
+      // Processar OCR de TODAS sequencialmente (só este cliente roda)
+      await processarTodasRequisicoes(sessaoId);
+
+    } catch (error) {
+      console.error('[AUTO] Erro ao buscar requisições:', error);
+      setMessage({ type: 'error', text: `Erro ao buscar requisições: ${error.message}` });
+    }
+  };
+
+  // Processar OCR de TODAS as requisições (AFK) — escreve resultados no Supabase
+  const processarTodasRequisicoes = async (sessaoId) => {
+    // Buscar items diretamente do Supabase (não depender do Realtime que pode não ter propagado ainda)
+    const { data: filaDoSupabase, error: filaError } = await supabaseClient
+      .from('fila_admissao')
+      .select('*')
+      .eq('sessao_id', sessaoId)
+      .order('ordem', { ascending: true });
+
+    if (filaError) {
+      console.error('[AUTO] Erro ao buscar fila do Supabase:', filaError);
+      setMessage({ type: 'error', text: `Erro ao carregar fila: ${filaError.message}` });
+      return;
+    }
+
+    const fila = filaDoSupabase || [];
+    const total = fila.length;
+    console.log(`[AUTO] Fila carregada do Supabase: ${total} items`, fila);
+
+    if (total === 0) {
+      console.error('[AUTO] Fila vazia! sessaoId:', sessaoId);
+      setMessage({ type: 'error', text: 'Erro: fila vazia no Supabase.' });
+      return;
+    }
+
+    for (let i = 0; i < total; i++) {
+      const item = fila[i];
+      if (!item) continue;
+
+      if (autoStopRef.current) {
+        console.log('[AUTO] Parada solicitada pelo usuário');
+        setMessage({ type: 'info', text: `Processamento pausado. ${i}/${total} analisadas.` });
+        break;
+      }
+
+      const codRequisicao = item.cod_requisicao || item.codRequisicao;
+      console.log(`[AUTO] Processando ${i + 1}/${total}: ${codRequisicao}`);
+      setFilaIndice(i);
+      setMessage({ type: 'info', text: `[${i + 1}/${total}] Processando OCR: ${codRequisicao}...` });
+
+      // Marcar como processando no Supabase
+      if (item.id) await atualizarItem(item.id, { status: 'processando' });
+
+      // Atualizar progresso da sessão
+      await atualizarSessao({ itens_processados: i });
+
+      // Limpar form antes
+      limparFormulario();
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      try {
+        // Etapa 1: Buscar requisição
+        console.log(`[AUTO] [${i+1}/${total}] Buscando requisição ${codRequisicao}...`);
+        setMessage({ type: 'info', text: `[${i + 1}/${total}] Buscando dados: ${codRequisicao}...` });
+        await buscarRequisicao(codRequisicao);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        // Etapa 2: OCR
+        console.log(`[AUTO] [${i+1}/${total}] Processando OCR para ${codRequisicao}...`);
+        setMessage({ type: 'info', text: `[${i + 1}/${total}] Analisando imagens: ${codRequisicao}...` });
+        const ocrResult = await processarOCRCompleto(codRequisicao);
+
+        if (!ocrResult) {
+          console.warn(`[AUTO] [${i+1}/${total}] Sem imagens ou OCR falhou para ${codRequisicao} — salvando dados da API`);
+        }
+
+        // Aguardar states propagarem
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        // Capturar snapshot e salvar no Supabase
+        await new Promise(resolve => {
+          setFormData(currentFormData => {
+            setPatientData(currentPatientData => {
+              setResultadoConsolidadoFinal(currentResultado => {
+                // Salvar snapshot no Supabase
+                if (item.id) {
+                  atualizarItem(item.id, {
+                    status: 'processado',
+                    form_data_snapshot: { ...currentFormData },
+                    patient_data_snapshot: currentPatientData ? { ...currentPatientData } : null,
+                    resultado_consolidado: currentResultado,
+                    paciente_nome: currentPatientData?.name || null,
+                    cpf: currentPatientData?.cpf || null
+                  });
+                }
+                resolve();
+                return currentResultado;
+              });
+              return currentPatientData;
+            });
+            return currentFormData;
+          });
+        });
+
+        console.log(`[AUTO] [${i+1}/${total}] ${codRequisicao} processado com sucesso!`);
+
+      } catch (error) {
+        console.error(`[AUTO] [${i+1}/${total}] Erro em ${codRequisicao}:`, error);
+        if (item.id) await atualizarItem(item.id, { status: 'erro', erro: error.message });
+      }
+
+      // Delay entre requisições
+      if (i < total - 1 && !autoStopRef.current) {
+        console.log(`[AUTO] Aguardando 5s antes da próxima requisição...`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
+    }
+
+    // Todas processadas — entrar em modo revisão
+    console.log(`[AUTO] Processamento concluído! Entrando em modo revisão.`);
+    await atualizarSessao({ status: 'revisao', itens_processados: total });
+    setFilaRevisaoIndice(-1);
+    limparFormulario();
+    setMessage({ type: 'success', text: `OCR concluído! Revise e aprove cada requisição.` });
+  };
+
+  // Carregar uma requisição processada no formulário para revisão (com lock)
+  const carregarRequisicaoDaFila = async (indice) => {
+    const item = filaRequisicoes[indice];
+    if (!item) {
+      console.warn('[AUTO] Item não encontrado:', indice);
+      return;
+    }
+
+    // Verificar se tem snapshot (campos do Supabase usam snake_case)
+    const formSnapshot = item.form_data_snapshot || item.formDataSnapshot;
+    const patientSnapshot = item.patient_data_snapshot || item.patientDataSnapshot;
+    const resultado = item.resultado_consolidado || item.resultadoConsolidado;
+
+    if (!formSnapshot) {
+      console.warn('[AUTO] Requisição não tem dados para carregar:', indice);
+      return;
+    }
+
+    const codRequisicao = item.cod_requisicao || item.codRequisicao;
+    console.log(`[AUTO] Carregando requisição ${codRequisicao} para revisão...`);
+
+    // Adquirir lock no Supabase
+    if (item.id) {
+      const lockOk = await adquirirLockRevisao(item.id);
+      if (!lockOk) {
+        setMessage({ type: 'error', text: `Item sendo revisado por ${item.revisado_por_nome || 'outro usuário'}` });
+        return;
+      }
+    }
+
+    // Liberar lock anterior se existia
+    if (filaRevisaoIndice >= 0 && filaRevisaoIndice !== indice) {
+      const itemAnterior = filaRequisicoes[filaRevisaoIndice];
+      if (itemAnterior?.id && itemAnterior.status === 'em_revisao') {
+        await liberarLockRevisao(itemAnterior.id);
+      }
+    }
+
+    setFilaRevisaoIndice(indice);
+    setFormData(formSnapshot);
+    setPatientData(patientSnapshot);
+    if (resultado) setResultadoConsolidadoFinal(resultado);
+
+    setMessage({ type: 'info', text: `Revisando: ${codRequisicao} — ${patientSnapshot?.name || item.paciente_nome || 'Paciente'}` });
+  };
+
+  // Aprovar requisição: salvar no APLIS + marcar no Supabase
+  const aprovarRequisicao = async () => {
+    if (filaRevisaoIndice < 0) return;
+    const item = filaRequisicoes[filaRevisaoIndice];
+    const codRequisicao = formData.codRequisicao || item.cod_requisicao || item.codRequisicao;
+
+    console.log(`[AUTO] Aprovando requisição ${codRequisicao}...`);
+    setMessage({ type: 'info', text: `Salvando ${codRequisicao}...` });
+
+    try {
+      const saveResult = await handleSubmitAutomatico();
+
+      // Marcar como salvo no Supabase
+      if (item.id) await aprovarItemSupabase(item.id, usuario?.id);
+
+      setFilaLog(prev => [...prev, {
+        codRequisicao,
+        status: 'sucesso',
+        mensagem: `Salvo por ${usuario?.nome_completo || usuario?.username || 'usuário'}`,
+        timestamp: new Date().toLocaleTimeString()
+      }]);
+
+      setMessage({ type: 'success', text: `${codRequisicao} salvo com sucesso!` });
+      console.log(`[AUTO] ${codRequisicao} salvo!`);
+
+      limparFormulario();
+      setFilaRevisaoIndice(-1);
+
+    } catch (error) {
+      console.error(`[AUTO] Erro ao salvar ${codRequisicao}:`, error);
+      setMessage({ type: 'error', text: `Erro ao salvar ${codRequisicao}: ${error.message}` });
+    }
+  };
+
+  // Pular requisição + marcar no Supabase
+  const pularRequisicao = async () => {
+    if (filaRevisaoIndice < 0) return;
+    const item = filaRequisicoes[filaRevisaoIndice];
+    const codRequisicao = item.cod_requisicao || item.codRequisicao;
+
+    // Marcar no Supabase
+    if (item.id) await pularItemSupabase(item.id);
+
+    setFilaLog(prev => [...prev, {
+      codRequisicao,
+      status: 'pulado',
+      mensagem: `Pulada por ${usuario?.nome_completo || usuario?.username || 'usuário'}`,
+      timestamp: new Date().toLocaleTimeString()
+    }]);
+
+    limparFormulario();
+    setFilaRevisaoIndice(-1);
+    setMessage({ type: 'info', text: 'Requisição pulada. Selecione outra para revisar.' });
+  };
+
+  // ========== FIM MODO AUTOMÁTICO ==========
+
   const handleValidate = async () => {
     setLoading(true);
     setMessage(null);
@@ -1951,7 +2560,7 @@ const AdmissionView = () => {
           formData.examesConvenio.split(',').map(e => parseInt(e.trim())) : undefined
       };
 
-      const response = await fetch(`${API_BASE_URL}/api/admissao/validar`, {
+      const response = await apiFetch(`${API_BASE_URL}/api/admissao/validar`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -2099,7 +2708,7 @@ const AdmissionView = () => {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/ocr/processar`, {
+      const response = await apiFetch(`${API_BASE_URL}/api/ocr/processar`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -2164,12 +2773,17 @@ const AdmissionView = () => {
               let buscaResult = null;
               let metodoBusca = '';
 
-              // TENTATIVA 1: Buscar por CPF (prioritário)
+              // Helper: normaliza nome para comparação
+              const normalizarNomeOCR = (n) => (n || '').toUpperCase()
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                .replace(/\s+/g, ' ').trim();
+
+              // TENTATIVA 1: Buscar por CPF
               if (cpfExtraido) {
                 const cpfLimpo = cpfExtraido.replace(/\D/g, '');
                 console.log('[OCR] 🔍 Tentando buscar por CPF:', cpfLimpo);
 
-                const buscaCPFResponse = await fetch(`${API_BASE_URL}/api/buscar-paciente`, {
+                const buscaCPFResponse = await apiFetch(`${API_BASE_URL}/api/buscar-paciente`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ cpf: cpfLimpo })
@@ -2179,15 +2793,35 @@ const AdmissionView = () => {
                 metodoBusca = 'CPF';
 
                 if (buscaResult.sucesso === 1 && buscaResult.paciente) {
-                  console.log('[OCR] ✅ Paciente encontrado por CPF!');
+                  console.log('[OCR] ✅ Paciente encontrado por CPF:', buscaResult.paciente.nome);
+
+                  // Verificar se o nome bate com o esperado
+                  if (nomeExtraido) {
+                    const nomeEncontrado = normalizarNomeOCR(buscaResult.paciente.nome);
+                    const nomeEsperado = normalizarNomeOCR(nomeExtraido);
+                    if (nomeEncontrado !== nomeEsperado) {
+                      console.warn(`[OCR] ⚠️ Nome do CPF ("${nomeEncontrado}") ≠ nome esperado ("${nomeEsperado}"). Tentando por nome...`);
+                      const buscaNomeResponse2 = await apiFetch(`${API_BASE_URL}/api/buscar-paciente`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ nome: nomeExtraido })
+                      });
+                      const resultNome2 = await buscaNomeResponse2.json();
+                      if (resultNome2.sucesso === 1 && resultNome2.paciente) {
+                        console.log('[OCR] ✅ Nome correto encontrado por NOME:', resultNome2.paciente.nome);
+                        buscaResult = resultNome2;
+                        metodoBusca = 'NOME';
+                      }
+                    }
+                  }
                 }
               }
 
-              // TENTATIVA 2: Buscar por NOME (se não encontrou por CPF)
+              // TENTATIVA 2: Buscar por NOME (se CPF não encontrou nada)
               if ((!buscaResult || buscaResult.sucesso !== 1) && nomeExtraido) {
                 console.log('[OCR] 🔍 CPF não encontrou, tentando buscar por NOME:', nomeExtraido);
 
-                const buscaNomeResponse = await fetch(`${API_BASE_URL}/api/buscar-paciente`, {
+                const buscaNomeResponse = await apiFetch(`${API_BASE_URL}/api/buscar-paciente`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ nome: nomeExtraido })
@@ -2218,6 +2852,7 @@ const AdmissionView = () => {
                 // Atualizar patientData com dados do cadastro existente
                 setPatientData(prev => ({
                   ...prev,
+                  idPaciente: pacienteEncontrado.idPaciente?.toString() || prev.idPaciente,
                   name: pacienteEncontrado.nome || prev.name,
                   cpf: cpfExtraido || pacienteEncontrado.cpf,
                   birthDate: pacienteEncontrado.dataNascimento
@@ -2339,7 +2974,7 @@ const AdmissionView = () => {
     setSalvandoDados(true);
     try {
       // Salvar dados do paciente
-      const responsePaciente = await fetch(`${API_BASE_URL}/api/paciente/${requisicaoData.paciente.idPaciente}`, {
+      const responsePaciente = await apiFetch(`${API_BASE_URL}/api/paciente/${requisicaoData.paciente.idPaciente}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
@@ -2365,7 +3000,7 @@ const AdmissionView = () => {
       }
 
       // Salvar dados da requisição
-      const responseRequisicao = await fetch(`${API_BASE_URL}/api/requisicao/${formData.codRequisicao}`, {
+      const responseRequisicao = await apiFetch(`${API_BASE_URL}/api/requisicao/${formData.codRequisicao}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
@@ -2491,7 +3126,7 @@ const AdmissionView = () => {
         }
       }
 
-      const response = await fetch(url);
+      const response = await apiFetch(url);
       const data = await response.json();
 
       if (response.ok && data.sucesso === 1) {
@@ -2662,7 +3297,179 @@ const AdmissionView = () => {
         {/* Conteúdo da aba de Admissão */}
         {abaPrincipal === 'admissao' && (
           <>
-        {/* 🆕 Botão para abrir histórico */}
+        {/* Painel do Modo Automático — Compartilhado */}
+        <div className={`${filaStatus === 'processando' ? 'bg-blue-50 dark:bg-blue-950/40 border-2 border-blue-500' : filaStatus === 'revisao' ? 'bg-amber-50 dark:bg-amber-950/30 border-2 border-amber-500' : 'bg-slate-50 dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700'}`} style={{ marginBottom: '20px', padding: '16px', borderRadius: '12px' }}>
+
+          {/* Info da sessão ativa */}
+          {sessaoAtiva && (
+            <div className="text-xs mb-2" style={{ opacity: 0.7 }}>
+              <span className="dark:text-neutral-400 text-slate-500">
+                Sessao iniciada por <strong>{sessaoAtiva.iniciado_por_nome || 'Desconhecido'}</strong>
+                {euSouProcessador && ' (voce)'}
+              </span>
+            </div>
+          )}
+
+          {/* Barra de controle */}
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {(filaStatus === 'idle' || filaStatus === 'concluido') && (
+              <button
+                type="button"
+                onClick={iniciarModoAutomatico}
+                disabled={loading || loadingRequisicao}
+                style={{ padding: '12px 24px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1 }}
+              >
+                Iniciar Modo Automatico
+              </button>
+            )}
+
+            {(filaStatus === 'processando' || filaStatus === 'buscando_fila') && euSouProcessador && (
+              <button
+                type="button"
+                onClick={() => { autoStopRef.current = true; }}
+                style={{ padding: '12px 24px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}
+              >
+                Parar
+              </button>
+            )}
+
+            {(filaStatus === 'processando' || filaStatus === 'revisao' || filaStatus === 'buscando_fila') && (
+              <button
+                type="button"
+                onClick={resetarSessao}
+                title="Reseta a sessão travada e permite iniciar uma nova"
+                style={{ padding: '12px 24px', background: '#6b7280', color: 'white', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}
+              >
+                Reiniciar Sessão
+              </button>
+            )}
+
+            {filaStatus === 'buscando_fila' && (
+              <span className="text-blue-500 dark:text-blue-400" style={{ fontWeight: '500', fontSize: '14px' }}>Buscando requisicoes pendentes...</span>
+            )}
+
+            {filaStatus === 'processando' && (
+              <span className="text-blue-500 dark:text-blue-400" style={{ fontWeight: '600', fontSize: '15px' }}>
+                Processando OCR {(sessaoAtiva?.itens_processados || filaIndice) + 1}/{filaRequisicoes.length}
+              </span>
+            )}
+
+            {filaStatus === 'revisao' && (
+              <span className="text-amber-500 dark:text-amber-400" style={{ fontWeight: '600', fontSize: '15px' }}>
+                Revisao — {filaRequisicoes.filter(r => r.status === 'salvo').length} salvos, {filaRequisicoes.filter(r => r.status === 'processado' || r.status === 'em_revisao').length} aguardando
+              </span>
+            )}
+
+            {filaStatus === 'concluido' && (
+              <span className="text-green-600 dark:text-green-400" style={{ fontWeight: '600', fontSize: '15px' }}>
+                Concluido — {filaRequisicoes.filter(r => r.status === 'salvo').length} salvos de {filaRequisicoes.length}
+              </span>
+            )}
+          </div>
+
+          {/* Lista de requisições processadas para revisão */}
+          {(filaStatus === 'revisao' || filaStatus === 'processando' || filaStatus === 'concluido') && filaRequisicoes.length > 0 && (
+            <div className="border border-slate-200 dark:border-neutral-600" style={{ marginTop: '12px', maxHeight: '350px', overflowY: 'auto', borderRadius: '8px' }}>
+              {filaRequisicoes.map((item, idx) => {
+                const isSelected = idx === filaRevisaoIndice;
+                const isDark = document.documentElement.classList.contains('dark');
+                const codReq = item.cod_requisicao || item.codRequisicao;
+                const nome = item.patient_data_snapshot?.name || item.patientDataSnapshot?.name || item.paciente_nome || item.paciente || '—';
+                const cpfItem = item.patient_data_snapshot?.cpf || item.patientDataSnapshot?.cpf || item.cpf || '';
+                const isLockedByOther = item.status === 'em_revisao' && item.revisado_por !== usuario?.id;
+                const canClick = (item.status === 'processado' || (item.status === 'em_revisao' && item.revisado_por === usuario?.id)) && (filaStatus === 'revisao' || filaStatus === 'processando');
+                const statusColors = {
+                  pendente: { bg: isDark ? '#1c1c1c' : '#f8fafc', text: '#94a3b8', label: 'Pendente' },
+                  processando: { bg: isDark ? '#172554' : '#eff6ff', text: '#60a5fa', label: 'Processando...' },
+                  processado: { bg: isDark ? '#1a1a1a' : '#ffffff', text: '#fbbf24', label: 'Aguardando revisao' },
+                  em_revisao: { bg: isDark ? '#1e1b4b' : '#eef2ff', text: '#818cf8', label: isLockedByOther ? `Revisando: ${item.revisado_por_nome || '...'}` : 'Em revisao (voce)' },
+                  erro: { bg: isDark ? '#2a1215' : '#fef2f2', text: '#f87171', label: 'Erro' },
+                  salvo: { bg: isDark ? '#0a2618' : '#f0fdf4', text: '#4ade80', label: 'Salvo' },
+                  pulado: { bg: isDark ? '#1c1c1c' : '#f8fafc', text: '#94a3b8', label: 'Pulado' }
+                };
+                const st = statusColors[item.status] || statusColors.pendente;
+
+                return (
+                  <div
+                    key={item.id || idx}
+                    onClick={() => { if (canClick) carregarRequisicaoDaFila(idx); }}
+                    style={{
+                      padding: '10px 14px',
+                      borderBottom: isDark ? '1px solid #333' : '1px solid #f1f5f9',
+                      background: isSelected ? (isDark ? '#422006' : '#fef3c7') : st.bg,
+                      cursor: canClick ? 'pointer' : 'default',
+                      opacity: isLockedByOther ? 0.6 : 1,
+                      display: 'flex',
+                      gap: '12px',
+                      alignItems: 'center',
+                      transition: 'background 0.15s',
+                      borderLeft: isSelected ? '4px solid #f59e0b' : '4px solid transparent'
+                    }}
+                  >
+                    <span style={{ fontWeight: '600', fontSize: '14px', minWidth: '120px', color: isDark ? '#e5e5e5' : undefined }}>{codReq}</span>
+                    <span style={{ flex: 1, fontSize: '13px', color: isDark ? '#a3a3a3' : '#475569' }}>{nome}</span>
+                    <span style={{ fontSize: '12px', color: isDark ? '#737373' : '#64748b' }}>{cpfItem}</span>
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: '600',
+                      color: st.text,
+                      background: isDark ? '#262626' : st.bg,
+                      padding: '3px 10px',
+                      borderRadius: '12px',
+                      border: `1px solid ${st.text}30`,
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {st.label}
+                    </span>
+                    {item.status === 'erro' && (
+                      <span style={{ fontSize: '11px', color: '#f87171' }}>{item.erro}</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Botões de ação quando uma requisição está selecionada para revisão */}
+          {(filaStatus === 'revisao' || filaStatus === 'processando') && filaRevisaoIndice >= 0 && (
+            <div className="bg-amber-100 dark:bg-amber-900/30 border border-amber-400 dark:border-amber-600" style={{ marginTop: '12px', display: 'flex', gap: '12px', alignItems: 'center', padding: '12px', borderRadius: '8px' }}>
+              <span className="text-amber-800 dark:text-amber-300" style={{ fontSize: '14px', fontWeight: '500', flex: 1 }}>
+                Revisando: {filaRequisicoes[filaRevisaoIndice]?.cod_requisicao || filaRequisicoes[filaRevisaoIndice]?.codRequisicao} — Edite os campos se necessario, depois aprove ou pule.
+              </span>
+              <button
+                type="button"
+                onClick={aprovarRequisicao}
+                disabled={loading}
+                style={{ padding: '10px 20px', background: '#16a34a', color: 'white', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+              >
+                Aprovar e Salvar
+              </button>
+              <button
+                type="button"
+                onClick={pularRequisicao}
+                style={{ padding: '10px 20px', background: '#94a3b8', color: 'white', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+              >
+                Pular
+              </button>
+            </div>
+          )}
+
+          {/* Instrução quando em modo revisão sem seleção */}
+          {filaStatus === 'revisao' && filaRevisaoIndice < 0 && filaRequisicoes.some(r => r.status === 'processado') && (
+            <div className="bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-300" style={{ marginTop: '12px', padding: '12px', borderRadius: '8px', fontSize: '14px', fontWeight: '500' }}>
+              Clique em uma requisicao da lista acima para revisar e aprovar.
+            </div>
+          )}
+
+          {/* Verificar se todas foram revisadas */}
+          {filaStatus === 'revisao' && !filaRequisicoes.some(r => r.status === 'processado' || r.status === 'em_revisao') && (
+            <div className="bg-green-50 dark:bg-green-950/30 text-green-800 dark:text-green-300" style={{ marginTop: '12px', padding: '12px', borderRadius: '8px', fontSize: '14px', fontWeight: '500' }}>
+              Todas as requisicoes foram revisadas! {filaRequisicoes.filter(r => r.status === 'salvo').length} salvas, {filaRequisicoes.filter(r => r.status === 'pulado').length} puladas, {filaRequisicoes.filter(r => r.status === 'erro').length} com erro.
+            </div>
+          )}
+        </div>
+
+        {/* Botão para abrir histórico */}
         <div style={{ marginBottom: '20px' }}>
           <button
             type="button"
@@ -3136,41 +3943,22 @@ const AdmissionView = () => {
 
             <div className="mb-4">
               <label>Código Requisição</label>
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <div style={{ position: 'relative' }}>
                 <input
                   type="text"
                   name="codRequisicao"
                   value={formData.codRequisicao}
                   onChange={handleChange}
-                  placeholder="Digite o código da requisição"
+                  placeholder="Digite o codigo da requisicao (busca automatica)"
                   className="bg-white dark:bg-neutral-800 border-gray-300 dark:border-neutral-600 text-gray-900 dark:text-neutral-100 placeholder:text-gray-400 dark:placeholder:text-neutral-400"
-                  style={{ flex: 1, fontSize: '16px', padding: '12px' }}
+                  style={{ width: '100%', fontSize: '16px', padding: '12px', paddingRight: loadingRequisicao ? '140px' : '12px' }}
                 />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (formData.codRequisicao) {
-                      buscarRequisicao(formData.codRequisicao);
-                    }
-                  }}
-                  disabled={!formData.codRequisicao || loadingRequisicao}
-                  style={{
-                    padding: '12px 24px',
-                    background: '#0ea5e9',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '5px',
-                    cursor: formData.codRequisicao && !loadingRequisicao ? 'pointer' : 'not-allowed',
-                    fontWeight: '600',
-                    whiteSpace: 'nowrap',
-                    opacity: !formData.codRequisicao || loadingRequisicao ? 0.5 : 1,
-                    fontSize: '16px'
-                  }}
-                >
-                  {loadingRequisicao ? '🔄 Buscando...' : '🔍 Buscar'}
-                </button>
+                {loadingRequisicao && (
+                  <span style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: '#0ea5e9', fontSize: '14px', fontWeight: '500' }}>
+                    Buscando...
+                  </span>
+                )}
               </div>
-              {loadingRequisicao && <small className="text-blue-500">Buscando dados da requisição...</small>}
             </div>
           </div>
 
@@ -3212,7 +4000,7 @@ const AdmissionView = () => {
                     console.log('[BUSCAR IDS MANUAL] Buscando IDs para:', nomesExames);
 
                     try {
-                      const response = await fetch(`${API_BASE_URL}/api/exames/buscar-por-nome`, {
+                      const response = await apiFetch(`${API_BASE_URL}/api/exames/buscar-por-nome`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ nomes_exames: nomesExames })
@@ -3318,7 +4106,7 @@ const AdmissionView = () => {
                 try {
                   // 1. Buscar requisição e capturar dados retornados
                   console.log('[ANÁLISE AUTO] Etapa 1: Buscando requisição...');
-                  const response = await fetch(`${API_BASE_URL}/api/requisicao/${formData.codRequisicao}`);
+                  const response = await apiFetch(`${API_BASE_URL}/api/requisicao/${formData.codRequisicao}`);
                   const data = await response.json();
 
                   if (!response.ok || !data.sucesso) {
@@ -3376,7 +4164,7 @@ const AdmissionView = () => {
                           }
 
                           try {
-                            ocrResponse = await fetch(`${API_BASE_URL}/api/ocr/processar`, {
+                            ocrResponse = await apiFetch(`${API_BASE_URL}/api/ocr/processar`, {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({
@@ -4128,11 +4916,16 @@ const AdmissionView = () => {
                       {modoEdicaoModal ? (
                         <FontePagadoraSelect
                           value={dadosRequisicaoEditaveis?.fontePagadora || ''}
-                          onChange={(selectedFonte) => setDadosRequisicaoEditaveis(prev => ({ ...prev, fontePagadora: selectedFonte?.nome || '' }))}
+                          onChange={(selectedFonte) => {
+                            setDadosRequisicaoEditaveis(prev => ({ ...prev, fontePagadora: selectedFonte?.nome || '' }));
+                            if (selectedFonte?.id) {
+                              setFormData(prev => ({ ...prev, idFontePagadora: selectedFonte.id.toString() }));
+                            }
+                          }}
                           className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                         />
                       ) : (
-                        <span>{patientData.payingSource || 'Não informado'}</span>
+                        <span>{patientData.payingSource || 'Particular'}</span>
                       )}
                     </div>
 

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
 
+const ngrokHeaders = { 'ngrok-skip-browser-warning': 'true' };
+
 /**
  * Dropdown para seleção de Convênio
  */
@@ -14,7 +16,7 @@ export function ConvenioSelect({ value, onChange, disabled = false, className = 
     const carregarConvenios = async () => {
       try {
         setLoading(true);
-        const response = await axios.get(`${API_BASE_URL}/api/convenios`);
+        const response = await axios.get(`${API_BASE_URL}/api/convenios`, { headers: ngrokHeaders });
         
         if (response.data.sucesso === 1) {
           const conveniosOrdenados = response.data.convenios.sort((a, b) => 
@@ -90,10 +92,10 @@ export function FontePagadoraSelect({ value, onChange, disabled = false, classNa
     const carregarInstituicoes = async () => {
       try {
         setLoading(true);
-        const response = await axios.get(`${API_BASE_URL}/api/fontes-pagadoras`);
-        
+        const response = await axios.get(`${API_BASE_URL}/api/fontes-pagadoras`, { headers: ngrokHeaders });
+
         if (response.data.sucesso === 1) {
-          const instituicoesOrdenadas = response.data.fontes.sort((a, b) => 
+          const instituicoesOrdenadas = response.data.fontes.sort((a, b) =>
             a.nome.localeCompare(b.nome, 'pt-BR')
           );
           setInstituicoes(instituicoesOrdenadas);
@@ -110,6 +112,16 @@ export function FontePagadoraSelect({ value, onChange, disabled = false, classNa
 
     carregarInstituicoes();
   }, []);
+
+  // Auto-selecionar "Particular" quando não há valor definido
+  useEffect(() => {
+    if (!loading && !error && instituicoes.length > 0 && (!value || value === 'Não informado') && onChange) {
+      const particular = instituicoes.find(i => i.nome.toUpperCase().includes('PARTICULAR'));
+      if (particular) {
+        onChange(particular);
+      }
+    }
+  }, [loading, instituicoes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return (
@@ -166,7 +178,7 @@ export function LocalOrigemSelect({ value, onChange, disabled = false, className
     const carregarLocais = async () => {
       try {
         setLoading(true);
-        const response = await axios.get(`${API_BASE_URL}/api/locais-origem`);
+        const response = await axios.get(`${API_BASE_URL}/api/locais-origem`, { headers: ngrokHeaders });
         
         if (response.data.sucesso === 1) {
           const locaisOrdenados = response.data.locais.sort((a, b) => 

@@ -68,20 +68,10 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
         <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">DADOS DO PACIENTE</h2>
 
         {/* ID do Paciente */}
-        {(patient?.idPaciente || isEditing) && (
+        {patient?.idPaciente && (
           <div className="mb-3.5 p-2.5 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded">
             <label className="block text-[11px] font-medium text-blue-700 dark:text-blue-400 mb-1 uppercase tracking-wide">ID do Paciente</label>
-            {isEditing ? (
-              <input
-                type="text"
-                className="w-full px-3.5 py-2.5 text-sm border-2 border-blue-300 dark:border-blue-700 rounded-md transition-all bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-blue-600 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
-                value={editedData.idPaciente || ''}
-                onChange={(e) => handleChange('idPaciente', e.target.value)}
-                placeholder="ID do paciente"
-              />
-            ) : (
-              <p className="text-sm font-bold text-blue-900 dark:text-blue-300">{patient.idPaciente}</p>
-            )}
+            <p className="text-sm font-bold text-blue-900 dark:text-blue-300">{patient.idPaciente}</p>
           </div>
         )}
 
@@ -95,7 +85,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
               onChange={(e) => handleChange('name', e.target.value)}
             />
           ) : (
-            <p className="text-sm font-semibold text-[#1a1a1a] dark:text-neutral-100">{patient?.name || '{paciente.nome_completo}'}</p>
+            <p className="text-sm font-semibold text-[#1a1a1a] dark:text-neutral-100">{patient?.name || 'Não informado'}</p>
           )}
         </div>
 
@@ -112,13 +102,13 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
               }}
             />
           ) : (
-            <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.birthDate || '{paciente.data_nascimento}'}</p>
+            <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.birthDate || 'Não informado'}</p>
           )}
         </div>
 
         <div className="mb-3.5">
           <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">Idade</label>
-          <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.age || '{paciente.idade}'}</p>
+          <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.age || 'Não informado'}</p>
         </div>
 
         <div className="mb-3.5">
@@ -279,7 +269,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
             placeholder="Número da requisição"
           />
         ) : (
-          <p className="text-2xl font-bold text-secondary dark:text-blue-400">{patient?.recordNumber || '{requisicao.numero}'}</p>
+          <p className="text-2xl font-bold text-secondary dark:text-blue-400">{patient?.recordNumber || 'Não informado'}</p>
         )}
       </section>
 
@@ -295,7 +285,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
             className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
           />
         ) : (
-          <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.origin || '{requisicao.local_origem}'}</p>
+          <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.origin || 'Não informado'}</p>
         )}
       </section>
 
@@ -311,7 +301,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
             className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
           />
         ) : (
-          <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.payingSource || '{requisicao.fonte_pagadora}'}</p>
+          <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.payingSource || 'Não informado'}</p>
         )}
       </section>
 
@@ -327,7 +317,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
             className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
           />
         ) : (
-          <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.insurance || '{convenio.nome}'}</p>
+          <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.insurance || 'Não informado'}</p>
         )}
       </section>
 
@@ -355,8 +345,8 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
           </>
         ) : (
           <>
-            <p className="text-sm font-semibold text-[#1a1a1a] dark:text-neutral-100 mb-1">{patient?.doctorName || '{medico.nome_completo}'}</p>
-            <p className="text-xs text-gray-500 dark:text-neutral-400 uppercase tracking-wide">{patient?.doctorCRM || '{medico.crm}'}</p>
+            <p className="text-sm font-semibold text-[#1a1a1a] dark:text-neutral-100 mb-1">{patient?.doctorName || 'Não informado'}</p>
+            <p className="text-xs text-gray-500 dark:text-neutral-400 uppercase tracking-wide">{patient?.doctorCRM || ''}</p>
           </>
         )}
       </section>
@@ -379,7 +369,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
               }}
             />
           ) : (
-            <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.collectionDate || '{atendimento.data_coleta}'}</p>
+            <p className="text-sm text-[#333] dark:text-neutral-300">{patient?.collectionDate || 'Não informado'}</p>
           )}
         </div>
       </section>
@@ -408,7 +398,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
             patient?.status === 'processing' ? 'bg-blue-100 text-blue-600' :
             'bg-gray-100 text-gray-600'
           }`}>
-            <span>{patient?.statusText || '{laudo.status}'}</span>
+            <span>{patient?.statusText || 'Pendente'}</span>
           </div>
         )}
       </section>

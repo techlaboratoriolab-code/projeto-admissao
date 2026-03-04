@@ -33,7 +33,7 @@ echo [✓] Build gerado com sucesso!
 echo.
 
 echo [3/5] Iniciando Backend na porta 5000...
-start "Backend API (Porta 5000)" cmd /k "cd /d %~dp0..\backend && python api_admissao.py"
+start "Backend API (Porta 5000)" cmd /k "cd /d %~dp0.. && .venv\Scripts\activate && cd backend && python api_admissao.py"
 timeout /t 3 /nobreak >nul
 
 echo [4/5] Iniciando Frontend (Build Produção) na porta 3000...

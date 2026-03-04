@@ -32,7 +32,8 @@ export const supabaseAdmin = createClient(
   {
     auth: {
       autoRefreshToken: false,
-      persistSession: false
+      persistSession: false,
+      storageKey: 'sb-admin-auth-token'
     }
   }
 )

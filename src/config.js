@@ -62,6 +62,15 @@ if (USE_NETWORK && NETWORK_IP === '192.168.1.100') {
 console.log(`✅ Configuração carregada com sucesso!`);
 console.log('='.repeat(80));
 
+// Fetch wrapper que adiciona header para pular a tela de warning do ngrok
+export const apiFetch = (url, options = {}) => {
+  const headers = {
+    ...(options.headers || {}),
+    'ngrok-skip-browser-warning': 'true'
+  };
+  return fetch(url, { ...options, headers });
+};
+
 export default {
   API_BASE_URL,
   USE_NGROK,
@@ -69,5 +78,6 @@ export default {
   NGROK_API_URL,
   NETWORK_API_URL,
   LOCAL_API_URL,
-  NETWORK_IP
+  NETWORK_IP,
+  apiFetch
 };
