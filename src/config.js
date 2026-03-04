@@ -3,16 +3,23 @@
  *
  * MODOS DE ACESSO:
  *
- * 1. LOCALHOST (apenas na sua máquina):
+ * 1. PRODUÇÃO (Vercel + Railway/Render):
+ *    Defina REACT_APP_API_URL nas variáveis de ambiente do Vercel
+ *    Ex: https://meu-backend.railway.app
+ *
+ * 2. LOCALHOST (apenas na sua máquina):
  *    USE_NETWORK = false, USE_NGROK = false
  *
- * 2. REDE LOCAL (outras pessoas na mesma rede WiFi/LAN):
+ * 3. REDE LOCAL (outras pessoas na mesma rede WiFi/LAN):
  *    USE_NETWORK = true, USE_NGROK = false
  *    IMPORTANTE: Configure seu IP local em NETWORK_IP abaixo!
  *
- * 3. INTERNET (qualquer lugar do mundo via ngrok):
+ * 4. INTERNET (qualquer lugar do mundo via ngrok):
  *    USE_NGROK = true
  */
+
+// 🚀 PRODUÇÃO: variável de ambiente definida no Vercel (prioridade máxima)
+const ENV_API_URL = process.env.REACT_APP_API_URL;
 
 // URL do ngrok para o backend (atualize quando o ngrok gerar uma nova URL)
 const NGROK_API_URL = 'https://automacaolab.ngrok.dev';
@@ -29,14 +36,15 @@ const NETWORK_IP = '192.168.160.155'; // ⚠️ ATUALIZE COM SEU IP LOCAL!
 const NETWORK_API_URL = `http://${NETWORK_IP}:5000`; // Rede local
 const LOCAL_API_URL = 'http://localhost:5000'; // Apenas esta máquina
 
-// 🎯 CONFIGURAR MODO DE ACESSO
+// 🎯 CONFIGURAR MODO DE ACESSO (ignorado se REACT_APP_API_URL estiver definido)
 const USE_NGROK = true;  // true = Usar ngrok (internet)
 const USE_NETWORK = false; // true = Usar rede local (outras pessoas na mesma rede)
 
 // URL base da API (selecionada automaticamente)
-export const API_BASE_URL = USE_NGROK
-  ? NGROK_API_URL
-  : (USE_NETWORK ? NETWORK_API_URL : LOCAL_API_URL);
+// Se REACT_APP_API_URL estiver definido (Vercel/produção), usa ele. Senão, usa o modo local.
+export const API_BASE_URL = ENV_API_URL
+  ? ENV_API_URL
+  : (USE_NGROK ? NGROK_API_URL : (USE_NETWORK ? NETWORK_API_URL : LOCAL_API_URL));
 
 // Logs para debug
 console.log('='.repeat(80));
@@ -44,7 +52,9 @@ console.log('🔧 CONFIGURAÇÃO DA API');
 console.log('='.repeat(80));
 
 let modo = 'LOCALHOST (apenas esta máquina)';
-if (USE_NGROK) {
+if (ENV_API_URL) {
+  modo = 'PRODUÇÃO (variável REACT_APP_API_URL - Vercel/Railway)';
+} else if (USE_NGROK) {
   modo = 'NGROK (internet - qualquer lugar)';
 } else if (USE_NETWORK) {
   modo = 'REDE LOCAL (outras pessoas na mesma rede WiFi/LAN)';
