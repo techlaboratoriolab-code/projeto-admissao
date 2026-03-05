@@ -78,7 +78,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
       </div>
 
       {/* Corpo com dados */}
-      <div className="flex-1 p-5 overflow-y-auto scrollbar-custom">
+      <div className="flex-1 p-5 overflow-y-auto scrollbar-custom scrollbar-left">
       {/* Dados do Paciente */}
       <section className="mb-4">
         <p className="text-[10px] font-bold text-slate-400 dark:text-neutral-500 uppercase tracking-widest mb-3">Dados do Paciente</p>

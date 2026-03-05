@@ -21,6 +21,15 @@
   .scrollbar-custom::-webkit-scrollbar-thumb:hover {
     @apply bg-gray-400 dark:bg-neutral-500;
   }
+
+  /* Scrollbar on the left side */
+  .scrollbar-left {
+    direction: rtl;
+  }
+
+  .scrollbar-left > * {
+    direction: ltr;
+  }
 }
 
 /* Global resets */
