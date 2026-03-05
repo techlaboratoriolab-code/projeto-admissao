@@ -3401,7 +3401,22 @@ const AdmissionView = () => {
 
           {/* Lista de requisições processadas para revisão */}
           {(filaStatus === 'revisao' || filaStatus === 'processando' || filaStatus === 'concluido') && filaRequisicoes.length > 0 && (
-            <div className="border border-slate-200 dark:border-neutral-600" style={{ marginTop: '12px', maxHeight: '350px', overflowY: 'auto', borderRadius: '8px' }}>
+            <div className="border border-slate-200 dark:border-neutral-600" style={{ marginTop: '12px', borderRadius: '8px', overflow: 'hidden' }}>
+              {/* Cabeçalho das colunas */}
+              <div style={{
+                display: 'flex',
+                gap: '16px',
+                alignItems: 'center',
+                padding: '7px 18px',
+                background: document.documentElement.classList.contains('dark') ? '#1a1a1a' : '#f1f5f9',
+                borderBottom: document.documentElement.classList.contains('dark') ? '1px solid #333' : '1px solid #e2e8f0'
+              }}>
+                <div style={{ minWidth: '130px', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>Cód. Requisição</div>
+                <div style={{ flex: 1, fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>Paciente</div>
+                <div style={{ minWidth: '110px', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>CPF</div>
+                <div style={{ minWidth: '110px', textAlign: 'right', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>Situação</div>
+              </div>
+              <div style={{ maxHeight: '350px', overflowY: 'auto' }}>
               {filaRequisicoes.map((item, idx) => {
                 const isSelected = idx === filaRevisaoIndice;
                 const isDark = document.documentElement.classList.contains('dark');
@@ -3433,33 +3448,56 @@ const AdmissionView = () => {
                       cursor: canClick ? 'pointer' : 'default',
                       opacity: isLockedByOther ? 0.6 : 1,
                       display: 'flex',
-                      gap: '12px',
+                      gap: '16px',
                       alignItems: 'center',
                       transition: 'background 0.15s',
                       borderLeft: isSelected ? '4px solid #f59e0b' : '4px solid transparent'
                     }}
                   >
-                    <span style={{ fontWeight: '600', fontSize: '14px', minWidth: '120px', color: isDark ? '#e5e5e5' : undefined }}>{codReq}</span>
-                    <span style={{ flex: 1, fontSize: '13px', color: isDark ? '#a3a3a3' : '#475569' }}>{nome}</span>
-                    <span style={{ fontSize: '12px', color: isDark ? '#737373' : '#64748b' }}>{cpfItem}</span>
-                    <span style={{
-                      fontSize: '11px',
-                      fontWeight: '600',
-                      color: st.text,
-                      background: isDark ? '#262626' : st.bg,
-                      padding: '3px 10px',
-                      borderRadius: '12px',
-                      border: `1px solid ${st.text}30`,
-                      whiteSpace: 'nowrap'
-                    }}>
-                      {st.label}
-                    </span>
+                    {/* Código da Requisição */}
+                    <div style={{ minWidth: '130px' }}>
+                      <div style={{ fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: isDark ? '#525252' : '#94a3b8', marginBottom: '2px' }}>Cód. Requisição</div>
+                      <div style={{ fontWeight: '700', fontSize: '13px', color: isDark ? '#e5e5e5' : '#1e293b', fontFamily: 'monospace', letterSpacing: '0.03em' }}>{codReq}</div>
+                    </div>
+
+                    {/* Nome do Paciente */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: isDark ? '#525252' : '#94a3b8', marginBottom: '2px' }}>Paciente</div>
+                      <div style={{ fontSize: '13px', color: isDark ? '#d4d4d4' : '#334155', fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nome}</div>
+                    </div>
+
+                    {/* CPF */}
+                    {cpfItem && (
+                      <div style={{ minWidth: '110px' }}>
+                        <div style={{ fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: isDark ? '#525252' : '#94a3b8', marginBottom: '2px' }}>CPF</div>
+                        <div style={{ fontSize: '12px', color: isDark ? '#737373' : '#64748b', fontFamily: 'monospace' }}>{cpfItem}</div>
+                      </div>
+                    )}
+
+                    {/* Status */}
+                    <div style={{ minWidth: '110px', textAlign: 'right' }}>
+                      <div style={{ fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: isDark ? '#525252' : '#94a3b8', marginBottom: '4px' }}>Situação</div>
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: '600',
+                        color: st.text,
+                        background: isDark ? '#262626' : st.bg,
+                        padding: '3px 10px',
+                        borderRadius: '12px',
+                        border: `1px solid ${st.text}30`,
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {st.label}
+                      </span>
+                    </div>
+
                     {item.status === 'erro' && (
                       <span style={{ fontSize: '11px', color: '#f87171' }}>{item.erro}</span>
                     )}
                   </div>
                 );
               })}
+              </div>
             </div>
           )}
 
