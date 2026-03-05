@@ -2470,17 +2470,31 @@ const AdmissionView = () => {
     const formSnapshot = item.form_data_snapshot || item.formDataSnapshot;
     const patientSnapshot = item.patient_data_snapshot || item.patientDataSnapshot;
     const resultado = item.resultado_consolidado || item.resultadoConsolidado;
+    const codRequisicao = item.cod_requisicao || item.codRequisicao;
+
+    // Se não tem snapshot mas é salvo/pulado, carregar direto pela API
+    if (!formSnapshot && (item.status === 'salvo' || item.status === 'pulado')) {
+      console.log(`[AUTO] Sem snapshot - carregando via API: ${codRequisicao}`);
+      setFilaRevisaoIndice(indice);
+      setFormData(prev => ({ ...prev, codRequisicao: codRequisicao || '' }));
+      if (codRequisicao) {
+        await buscarRequisicao(codRequisicao);
+      }
+      setMessage({ type: 'info', text: `Carregando: ${codRequisicao}` });
+      return;
+    }
 
     if (!formSnapshot) {
       console.warn('[AUTO] Requisição não tem dados para carregar:', indice);
       return;
     }
-
-    const codRequisicao = item.cod_requisicao || item.codRequisicao;
     console.log(`[AUTO] Carregando requisição ${codRequisicao} para revisão...`);
 
+    // Não adquirir lock para itens já finalizados (salvo/pulado)
+    const jaFinalizado = item.status === 'salvo' || item.status === 'pulado';
+
     // Adquirir lock no Supabase
-    if (item.id) {
+    if (item.id && !jaFinalizado) {
       const lockOk = await adquirirLockRevisao(item.id);
       if (!lockOk) {
         setMessage({ type: 'error', text: `Item sendo revisado por ${item.revisado_por_nome || 'outro usuário'}` });
@@ -2489,7 +2503,7 @@ const AdmissionView = () => {
     }
 
     // Liberar lock anterior se existia
-    if (filaRevisaoIndice >= 0 && filaRevisaoIndice !== indice) {
+    if (!jaFinalizado && filaRevisaoIndice >= 0 && filaRevisaoIndice !== indice) {
       const itemAnterior = filaRequisicoes[filaRevisaoIndice];
       if (itemAnterior?.id && itemAnterior.status === 'em_revisao') {
         await liberarLockRevisao(itemAnterior.id);
@@ -2501,7 +2515,10 @@ const AdmissionView = () => {
     setPatientData(patientSnapshot);
     if (resultado) setResultadoConsolidadoFinal(resultado);
 
-    setMessage({ type: 'info', text: `Revisando: ${codRequisicao} — ${patientSnapshot?.name || item.paciente_nome || 'Paciente'}` });
+    const msgLabel = jaFinalizado
+      ? `Visualizando (${item.status === 'salvo' ? 'Salvo no apLIS' : 'Pulado'}): ${codRequisicao} — ${patientSnapshot?.name || item.paciente_nome || 'Paciente'}`
+      : `Revisando: ${codRequisicao} — ${patientSnapshot?.name || item.paciente_nome || 'Paciente'}`;
+    setMessage({ type: jaFinalizado ? 'success' : 'info', text: msgLabel });
   };
 
   // Aprovar requisição: salvar no APLIS + marcar no Supabase
@@ -3378,7 +3395,8 @@ const AdmissionView = () => {
                 const nome = item.patient_data_snapshot?.name || item.patientDataSnapshot?.name || item.paciente_nome || item.paciente || '—';
                 const cpfItem = item.patient_data_snapshot?.cpf || item.patientDataSnapshot?.cpf || item.cpf || '';
                 const isLockedByOther = item.status === 'em_revisao' && item.revisado_por !== usuario?.id;
-                const canClick = (item.status === 'processado' || (item.status === 'em_revisao' && item.revisado_por === usuario?.id)) && (filaStatus === 'revisao' || filaStatus === 'processando');
+                const canClick = item.status === 'salvo' || item.status === 'pulado' ||
+                  ((item.status === 'processado' || (item.status === 'em_revisao' && item.revisado_por === usuario?.id)) && (filaStatus === 'revisao' || filaStatus === 'processando'));
                 const statusColors = {
                   pendente: { bg: isDark ? '#1c1c1c' : '#f8fafc', text: '#94a3b8', label: 'Pendente' },
                   processando: { bg: isDark ? '#172554' : '#eff6ff', text: '#60a5fa', label: 'Processando...' },
