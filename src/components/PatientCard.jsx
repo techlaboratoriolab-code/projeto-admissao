@@ -27,45 +27,61 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
   };
 
   return (
-    <div className="w-[420px] h-screen bg-white dark:bg-neutral-800 p-6 overflow-y-auto shadow-[-2px_0_12px_rgba(0,0,0,0.08)] dark:shadow-[-2px_0_12px_rgba(0,0,0,0.3)] sticky top-0 scrollbar-custom max-xl:w-[400px] max-lg:w-[350px] max-md:w-full max-md:h-auto max-md:max-h-[50vh] max-md:p-5 transition-colors" style={{ order: 2 }}>
-      {/* Título do sistema */}
-      <h2 className="text-xl font-bold text-gray-900 dark:text-neutral-100 mb-4">
-        Sistema de Admissão
-      </h2>
-      
-      {/* Botão de edição */}
-      <div className="mb-5">
-        {!isEditing ? (
-          <button
-            className="px-5 py-2.5 bg-blue-500 text-white border-0 rounded-md text-sm font-semibold cursor-pointer transition-colors hover:bg-blue-600"
-            onClick={handleEdit}
-            title="Editar dados do paciente"
-          >
-            Editar
-          </button>
-        ) : (
-          <div className="flex gap-2">
-            <button
-              className="px-5 py-2.5 bg-success text-white border-0 rounded-md text-sm font-semibold cursor-pointer transition-colors hover:bg-success-dark"
-              onClick={handleSave}
-              title="Salvar alterações"
-            >
-              Salvar
-            </button>
-            <button
-              className="px-5 py-2.5 bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 border-0 rounded-md text-sm font-semibold cursor-pointer transition-colors hover:bg-neutral-300 dark:hover:bg-neutral-600"
-              onClick={handleCancel}
-              title="Cancelar edição"
-            >
-              Cancelar
-            </button>
+    <div className="w-[380px] h-screen bg-white dark:bg-neutral-900 overflow-y-auto shadow-[-1px_0_0_rgba(0,0,0,0.06)] dark:shadow-[-1px_0_0_rgba(0,0,0,0.3)] sticky top-0 scrollbar-custom max-xl:w-[360px] max-lg:w-[320px] max-md:w-full max-md:h-auto max-md:max-h-[50vh] transition-colors flex flex-col" style={{ order: 2 }}>
+
+      {/* Header do card */}
+      <div className="px-5 py-4 border-b border-slate-100 dark:border-neutral-800 bg-gradient-to-r from-slate-50 to-white dark:from-neutral-900 dark:to-neutral-900 flex-shrink-0">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center flex-shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-slate-400 dark:text-neutral-500 uppercase tracking-widest leading-none mb-0.5">Paciente</p>
+              <h2 className="text-sm font-bold text-slate-800 dark:text-neutral-100 leading-none">Dados da Admissão</h2>
+            </div>
           </div>
-        )}
+          {!isEditing ? (
+            <button
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-neutral-800 text-slate-600 dark:text-neutral-300 border border-slate-200 dark:border-neutral-700 rounded-lg text-xs font-semibold cursor-pointer transition-all hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-200 dark:hover:border-blue-700"
+              onClick={handleEdit}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              Editar
+            </button>
+          ) : (
+            <div className="flex gap-1.5">
+              <button
+                className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500 text-white border-0 rounded-lg text-xs font-semibold cursor-pointer transition-all hover:bg-emerald-600"
+                onClick={handleSave}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                Salvar
+              </button>
+              <button
+                className="flex items-center gap-1 px-3 py-1.5 bg-slate-100 dark:bg-neutral-800 text-slate-600 dark:text-neutral-300 border border-slate-200 dark:border-neutral-700 rounded-lg text-xs font-semibold cursor-pointer transition-all hover:bg-slate-200"
+                onClick={handleCancel}
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Nome do paciente em destaque */}
+        <div className="bg-slate-50 dark:bg-neutral-800 rounded-lg px-3.5 py-2.5 border border-slate-100 dark:border-neutral-700">
+          <p className="text-[10px] font-semibold text-slate-400 dark:text-neutral-500 uppercase tracking-widest mb-0.5">Nome Completo</p>
+          <p className="text-sm font-bold text-slate-800 dark:text-neutral-100 leading-tight truncate">
+            {patient?.name || <span className="text-slate-400 dark:text-neutral-500 font-normal italic">Não informado</span>}
+          </p>
+        </div>
       </div>
 
+      {/* Corpo com dados */}
+      <div className="flex-1 p-5 overflow-y-auto scrollbar-custom">
       {/* Dados do Paciente */}
       <section className="mb-4">
-        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">DADOS DO PACIENTE</h2>
+        <p className="text-[10px] font-bold text-slate-400 dark:text-neutral-500 uppercase tracking-widest mb-3">Dados do Paciente</p>
 
         {/* ID do Paciente */}
         {patient?.idPaciente && (
@@ -259,7 +275,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
 
       {/* Requisição */}
       <section className="mb-4">
-        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">Requisição</h2>
+        <h2 className="text-[10px] font-bold text-slate-400 dark:text-neutral-500 uppercase tracking-widest mb-3">Requisição</h2>
         {isEditing ? (
           <input
             type="text"
@@ -277,7 +293,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
 
       {/* Local de origem */}
       <section className="mb-4">
-        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">Local de origem</h2>
+        <h2 className="text-[10px] font-bold text-slate-400 dark:text-neutral-500 uppercase tracking-widest mb-3">Local de origem</h2>
         {isEditing ? (
           <LocalOrigemSelect
             value={editedData.origin || ''}
@@ -293,7 +309,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
 
       {/* Fonte pagadora */}
       <section className="mb-4">
-        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">Fonte pagadora</h2>
+        <h2 className="text-[10px] font-bold text-slate-400 dark:text-neutral-500 uppercase tracking-widest mb-3">Fonte pagadora</h2>
         {isEditing ? (
           <FontePagadoraSelect
             value={editedData.payingSource || ''}
@@ -309,7 +325,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
 
       {/* Convênio */}
       <section className="mb-4">
-        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">CONVÊNIO</h2>
+        <h2 className="text-[10px] font-bold text-slate-400 dark:text-neutral-500 uppercase tracking-widest mb-3">CONVÊNIO</h2>
         {isEditing ? (
           <ConvenioSelect
             value={editedData.insurance || ''}
@@ -325,7 +341,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
 
       {/* Médico Solicitante */}
       <section className="mb-4">
-        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">MÉDICO SOLICITANTE</h2>
+        <h2 className="text-[10px] font-bold text-slate-400 dark:text-neutral-500 uppercase tracking-widest mb-3">MÉDICO SOLICITANTE</h2>
         {isEditing ? (
           <>
             <input
@@ -355,7 +371,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
 
       {/* Atendimento */}
       <section className="mb-4">
-        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">ATENDIMENTO</h2>
+        <h2 className="text-[10px] font-bold text-slate-400 dark:text-neutral-500 uppercase tracking-widest mb-3">ATENDIMENTO</h2>
         <div className="mb-3.5">
           <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">Data da Coleta</label>
           {isEditing ? (
@@ -378,7 +394,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
 
       {/* Status */}
       <section className="mb-4">
-        <h2 className="text-base font-bold text-[#333] dark:text-neutral-100 mb-3.5">STATUS</h2>
+        <h2 className="text-[10px] font-bold text-slate-400 dark:text-neutral-500 uppercase tracking-widest mb-3">STATUS</h2>
         {isEditing ? (
           <select
             className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
@@ -402,6 +418,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
           </div>
         )}
       </section>
+      </div>
     </div>
   );
 };
