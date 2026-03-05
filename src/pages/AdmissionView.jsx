@@ -1639,8 +1639,9 @@ const AdmissionView = () => {
     // Busca automática quando código de requisição tem >= 10 caracteres
     if (name === 'codRequisicao' && value.length >= 10) {
       clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        buscarRequisicao(value);
+      debounceRef.current = setTimeout(async () => {
+        await buscarRequisicao(value);
+        iniciarAnaliseAutomatica(value);
       }, 800);
     }
 
@@ -1650,6 +1651,25 @@ const AdmissionView = () => {
         ...prev,
         exams: value
       }));
+    }
+  };
+
+  const iniciarAnaliseAutomatica = async (cod) => {
+    if (!cod) return;
+    setLoading(true);
+    setMessage({ type: 'info', text: '🔄 Iniciando análise automática...' });
+    try {
+      const dados = await processarOCRCompleto(cod);
+      if (!dados || dados.length === 0) {
+        setMessage({ type: 'warning', text: '⚠️ Nenhuma imagem encontrada para analisar.' });
+      } else {
+        setMessage({ type: 'success', text: '✅ Análise automática concluída!' });
+      }
+    } catch (error) {
+      console.error('[ANÁLISE AUTO]', error);
+      setMessage({ type: 'error', text: `Erro na análise automática: ${error.message}` });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1701,7 +1721,7 @@ const AdmissionView = () => {
       if (!formData.examesConvenio || formData.examesConvenio.trim() === '') {
         setMessage({
           type: 'error',
-          text: '⚠️ Por favor, preencha os exames ou clique em "Iniciar Análise Automática" para extrair automaticamente.'
+          text: '⚠️ Por favor, aguarde a análise automática ou preencha os exames manualmente.'
         });
         setLoading(false);
         return;
@@ -3365,7 +3385,7 @@ const AdmissionView = () => {
                   processado: { bg: isDark ? '#1a1a1a' : '#ffffff', text: '#fbbf24', label: 'Aguardando revisao' },
                   em_revisao: { bg: isDark ? '#1e1b4b' : '#eef2ff', text: '#818cf8', label: isLockedByOther ? `Revisando: ${item.revisado_por_nome || '...'}` : 'Em revisao (voce)' },
                   erro: { bg: isDark ? '#2a1215' : '#fef2f2', text: '#f87171', label: 'Erro' },
-                  salvo: { bg: isDark ? '#0a2618' : '#f0fdf4', text: '#4ade80', label: 'Salvo' },
+                  salvo: { bg: isDark ? '#0a2618' : '#f0fdf4', text: '#4ade80', label: 'Salvo no apLIS' },
                   pulado: { bg: isDark ? '#1c1c1c' : '#f8fafc', text: '#94a3b8', label: 'Pulado' }
                 };
                 const st = statusColors[item.status] || statusColors.pendente;
@@ -3923,6 +3943,16 @@ const AdmissionView = () => {
                   name="codRequisicao"
                   value={formData.codRequisicao}
                   onChange={handleChange}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const cod = formData.codRequisicao.trim();
+                      const codFinal = cod.startsWith('0') ? cod : '0' + cod;
+                      setFormData(prev => ({ ...prev, codRequisicao: codFinal }));
+                      clearTimeout(debounceRef.current);
+                      buscarRequisicao(codFinal).then(() => iniciarAnaliseAutomatica(codFinal));
+                    }
+                  }}
                   placeholder="Digite o codigo da requisicao (busca automatica)"
                   className="bg-white dark:bg-neutral-800 border-gray-300 dark:border-neutral-600 text-gray-900 dark:text-neutral-100 placeholder:text-gray-400 dark:placeholder:text-neutral-400"
                   style={{ width: '100%', fontSize: '16px', padding: '12px', paddingRight: loadingRequisicao ? '140px' : '12px' }}
@@ -4063,192 +4093,14 @@ const AdmissionView = () => {
           )}
 
           <div className="flex justify-end gap-6 pt-8 border-t-2 border-gray-200 dark:border-neutral-700">
-            <button
-              type="button"
-              onClick={async () => {
-                if (!formData.codRequisicao) {
-                  setMessage({
-                    type: 'error',
-                    text: 'Digite um código de requisição primeiro'
-                  });
-                  return;
-                }
-
-                setLoading(true);
-                setMessage({ type: 'info', text: '🔄 Iniciando análise automática...' });
-
-                try {
-                  // 1. Buscar requisição e capturar dados retornados
-                  console.log('[ANÁLISE AUTO] Etapa 1: Buscando requisição...');
-                  const response = await apiFetch(`${API_BASE_URL}/api/requisicao/${formData.codRequisicao}`);
-                  const data = await response.json();
-
-                  if (!response.ok || !data.sucesso) {
-                    throw new Error(data.erro || 'Erro ao buscar requisição');
-                  }
-
-                  // Atualizar estados com os dados da requisição
-                  setRequisicaoData(data.requisicao);
-                  setImagens(data.imagens || []);
-                  console.log(`[ANÁLISE AUTO] Requisição encontrada com ${data.imagens?.length || 0} imagens`);
-
-                  // 2. Processar OCR de todas as imagens
-                  console.log('[ANÁLISE AUTO] Etapa 2: Processando OCR das imagens...');
-                  const imagensParaProcessar = data.imagens || [];
-                  const dadosOCRColetados = []; // Array local para coletar dados (declarado aqui para estar acessível depois)
-
-                  if (imagensParaProcessar.length > 0) {
-                    setMessage({ type: 'info', text: `🔄 Analisando ${imagensParaProcessar.length} imagens com OCR...` });
-
-                    // Limpar dados de OCR anteriores
-                    setDadosOCRConsolidados([]);
-                    setImagensProcessadas(new Set());
-
-                    let sucessos = 0;
-                    let erros = 0;
-
-                    for (let i = 0; i < imagensParaProcessar.length; i++) {
-                      const img = imagensParaProcessar[i];
-                      console.log(`\n${'='.repeat(80)}`);
-                      console.log(`[ANÁLISE AUTO] Processando imagem ${i + 1}/${imagensParaProcessar.length}`);
-                      console.log(`[ANÁLISE AUTO] Nome: ${img.nome}`);
-                      console.log(`[ANÁLISE AUTO] URL: ${img.url}`);
-                      console.log(`${'='.repeat(80)}\n`);
-
-                      setMessage({ type: 'info', text: `🔄 Processando ${i + 1}/${imagensParaProcessar.length}: ${img.nome}` });
-
-                      try {
-                        console.log(`[ANÁLISE AUTO] Enviando requisição OCR para: ${API_BASE_URL}/api/ocr/processar`);
-
-                        // Retry com backoff exponencial para erro 429 (rate limit)
-                        let tentativas = 0;
-                        let maxTentativas = 3;
-                        let ocrResponse = null;
-                        let ocrResult = null;
-                        let sucesso = false;
-
-                        while (tentativas < maxTentativas && !sucesso) {
-                          tentativas++;
-
-                          if (tentativas > 1) {
-                            const delayRetry = Math.pow(2, tentativas - 1) * 15000; // 15s, 30s, 60s (aumentado!)
-                            console.log(`[ANÁLISE AUTO] 🔄 Tentativa ${tentativas}/${maxTentativas} - Aguardando ${delayRetry/1000}s antes de tentar novamente...`);
-                            setMessage({ type: 'info', text: `⏳ Aguardando ${delayRetry/1000}s para retry (tentativa ${tentativas}/${maxTentativas})...` });
-                            await new Promise(resolve => setTimeout(resolve, delayRetry));
-                          }
-
-                          try {
-                            ocrResponse = await apiFetch(`${API_BASE_URL}/api/ocr/processar`, {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                imagemUrl: img.url,
-                                imagemNome: img.nome
-                              })
-                            });
-
-                            console.log(`[ANÁLISE AUTO] Status da resposta (tentativa ${tentativas}): ${ocrResponse.status}`);
-
-                            ocrResult = await ocrResponse.json();
-                            console.log(`[ANÁLISE AUTO] Resposta OCR (tentativa ${tentativas}):`, ocrResult);
-                            if (ocrResult.erro) console.error(`[ANÁLISE AUTO] ERRO: ${ocrResult.erro}`);
-                            if (ocrResult.traceback) console.error(`[ANÁLISE AUTO] TRACEBACK:\n${ocrResult.traceback}`);
-
-                            // Verificar se foi erro 429 (rate limit)
-                            if (ocrResponse.status === 500 && ocrResult.erro && ocrResult.erro.includes('429')) {
-                              console.warn(`[ANÁLISE AUTO] ⚠ Rate limit (429) detectado na tentativa ${tentativas}`);
-                              if (tentativas < maxTentativas) {
-                                continue; // Tentar novamente
-                              }
-                            }
-
-                            // Se chegou aqui e teve sucesso, marcar como sucesso
-                            if (ocrResponse.ok && ocrResult.sucesso) {
-                              sucesso = true;
-                              const dadoImagem = {
-                                imagem: img.nome,
-                                timestamp: new Date().toISOString(),
-                                dados: ocrResult.dados
-                              };
-
-                              // Adicionar ao array local
-                              dadosOCRColetados.push(dadoImagem);
-
-                              // Atualizar estados
-                              setImagensProcessadas(prev => new Set([...prev, img.nome]));
-                              setDadosOCRConsolidados(prev => [...prev, dadoImagem]);
-
-                              sucessos++;
-                              console.log(`[ANÁLISE AUTO] ✓ Imagem ${i + 1} processada com sucesso! (${sucessos} sucessos, ${erros} erros)`);
-                              console.log(`[ANÁLISE AUTO] Total de dados coletados até agora: ${dadosOCRColetados.length}`);
-                              break;
-                            } else {
-                              // Outro tipo de erro
-                              if (tentativas >= maxTentativas) {
-                                erros++;
-                                console.warn(`[ANÁLISE AUTO] ⚠ Erro ao processar imagem ${i + 1} após ${maxTentativas} tentativas: ${ocrResult.erro || 'Erro desconhecido'}`);
-                                console.warn(`[ANÁLISE AUTO] Detalhes do erro:`, ocrResult);
-                              }
-                            }
-                          } catch (fetchError) {
-                            console.error(`[ANÁLISE AUTO] ✗ Erro na requisição (tentativa ${tentativas}):`, fetchError);
-                            if (tentativas >= maxTentativas) {
-                              throw fetchError;
-                            }
-                          }
-                        }
-                      } catch (imgError) {
-                        erros++;
-                        console.error(`[ANÁLISE AUTO] ✗ Exceção na imagem ${i + 1}:`, imgError);
-                        console.error(`[ANÁLISE AUTO] Stack trace:`, imgError.stack);
-                      }
-
-                      // Aguardar entre processamentos para evitar sobrecarga
-                      console.log(`[ANÁLISE AUTO] Aguardando 10 segundos antes da próxima imagem...\n`);
-                      await new Promise(resolve => setTimeout(resolve, 10000));
-                    }
-
-                    console.log(`\n${'='.repeat(80)}`);
-                    console.log(`[ANÁLISE AUTO] RESUMO: ${sucessos} sucessos, ${erros} erros de ${imagensParaProcessar.length} imagens`);
-                    console.log(`${'='.repeat(80)}\n`);
-                  } else {
-                    console.log('[ANÁLISE AUTO] ⚠ Nenhuma imagem encontrada para processar OCR');
-                    setMessage({ type: 'warning', text: 'Nenhuma imagem encontrada para análise' });
-                  }
-
-                  // 3. Gerar JSON consolidado
-                  console.log('[ANÁLISE AUTO] Etapa 3: Gerando JSON consolidado...');
-                  console.log('[ANÁLISE AUTO] Dados coletados para consolidação:', dadosOCRColetados.length, 'imagens');
-                  setMessage({ type: 'info', text: '🔄 Gerando JSON consolidado...' });
-                  await new Promise(resolve => setTimeout(resolve, 1500));
-                  await consolidarResultados(dadosOCRColetados);
-
-                  setMessage({
-                    type: 'success',
-                    text: '✅ Análise automática concluída com sucesso!'
-                  });
-                } catch (error) {
-                  console.error('[ANÁLISE AUTO] ✗ Erro:', error);
-                  setMessage({
-                    type: 'error',
-                    text: `Erro na análise automática: ${error.message}`
-                  });
-                } finally {
-                  setLoading(false);
-                }
-              }}
-              className="px-10 py-4 bg-blue-600 hover:bg-blue-700 text-white border-0 rounded-lg text-base font-bold cursor-pointer transition-all hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
-              disabled={loading || loadingRequisicao || !formData.codRequisicao}
-            >
-              {loading ? 'Analisando...' : 'Iniciar Análise Automática'}
-            </button>
+            {/* Análise automática disparada ao carregar imagens - não precisa de botão */}
 
             <button
               type="submit"
               className="px-10 py-4 bg-blue-600 hover:bg-blue-700 text-white border-0 rounded-lg text-base font-bold cursor-pointer transition-all hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
               disabled={loading || loadingRequisicao}
             >
-              {loading ? 'Salvando...' : 'Salvar Admissão'}
+              {loading ? 'Salvando...' : 'Salvar No Aplis'}
             </button>
           </div>
         </form>
