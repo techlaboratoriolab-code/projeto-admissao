@@ -27,7 +27,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF }) => {
   };
 
   return (
-    <div className="w-[420px] h-screen bg-white dark:bg-neutral-800 p-6 overflow-y-auto shadow-[2px_0_12px_rgba(0,0,0,0.08)] dark:shadow-[2px_0_12px_rgba(0,0,0,0.3)] sticky top-0 scrollbar-custom max-xl:w-[400px] max-lg:w-[350px] max-md:w-full max-md:h-auto max-md:max-h-[50vh] max-md:p-5 transition-colors">
+    <div className="w-[420px] h-screen bg-white dark:bg-neutral-800 p-6 overflow-y-auto shadow-[-2px_0_12px_rgba(0,0,0,0.08)] dark:shadow-[-2px_0_12px_rgba(0,0,0,0.3)] sticky top-0 scrollbar-custom max-xl:w-[400px] max-lg:w-[350px] max-md:w-full max-md:h-auto max-md:max-h-[50vh] max-md:p-5 transition-colors" style={{ order: 2 }}>
       {/* Título do sistema */}
       <h2 className="text-xl font-bold text-gray-900 dark:text-neutral-100 mb-4">
         Sistema de Admissão

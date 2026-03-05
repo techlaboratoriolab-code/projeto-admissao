@@ -3236,7 +3236,7 @@ const AdmissionView = () => {
         onValidarCPF={validarCPFManualmente}
       />
 
-      <div className="flex-1 p-6 bg-slate-50 dark:bg-neutral-900 overflow-y-auto">
+      <div className="flex-1 p-6 bg-slate-50 dark:bg-neutral-900 overflow-y-auto" style={{ order: 1 }}>
         {/* 🆕 Sistema de Abas Principal */}
         <div className="dark:bg-neutral-800 dark:border-neutral-700" style={{
           display: 'flex',
@@ -3296,7 +3296,8 @@ const AdmissionView = () => {
 
         {/* Conteúdo da aba de Admissão */}
         {abaPrincipal === 'admissao' && (
-          <>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+        <div style={{ order: 2 }}>
         {/* Painel do Modo Automático — Compartilhado */}
         <div className={`${filaStatus === 'processando' ? 'bg-blue-50 dark:bg-blue-950/40 border-2 border-blue-500' : filaStatus === 'revisao' ? 'bg-amber-50 dark:bg-amber-950/30 border-2 border-amber-500' : 'bg-slate-50 dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700'}`} style={{ marginBottom: '20px', padding: '16px', borderRadius: '12px' }}>
 
@@ -3468,7 +3469,9 @@ const AdmissionView = () => {
             </div>
           )}
         </div>
+        </div>
 
+        <div style={{ order: 1, marginBottom: '24px' }}>
         {/* Botão para abrir histórico */}
         <div style={{ marginBottom: '20px' }}>
           <button
@@ -4088,7 +4091,7 @@ const AdmissionView = () => {
             </div>
           )}
 
-          <div className="flex justify-end gap-3 pt-8 border-t-2 border-gray-200 dark:border-neutral-700">
+          <div className="flex justify-end gap-6 pt-8 border-t-2 border-gray-200 dark:border-neutral-700">
             <button
               type="button"
               onClick={async () => {
@@ -4278,7 +4281,8 @@ const AdmissionView = () => {
             </button>
           </div>
         </form>
-          </>
+          </div>
+          </div>
         )}
 
         {/* Conteúdo da aba de Visualizar Imagens e Dados */}
