@@ -2515,6 +2515,20 @@ const AdmissionView = () => {
     setPatientData(patientSnapshot);
     if (resultado) setResultadoConsolidadoFinal(resultado);
 
+    // Buscar imagens via API (não ficam salvas no snapshot)
+    if (codRequisicao) {
+      try {
+        const imgResp = await apiFetch(`${API_BASE_URL}/api/requisicao/${codRequisicao}`);
+        const imgData = await imgResp.json();
+        if (imgResp.ok && imgData.imagens) {
+          setImagens(imgData.imagens);
+          setRequisicaoData(imgData.requisicao || null);
+        }
+      } catch (e) {
+        console.warn('[AUTO] Erro ao buscar imagens:', e);
+      }
+    }
+
     const msgLabel = jaFinalizado
       ? `Visualizando (${item.status === 'salvo' ? 'Salvo no apLIS' : 'Pulado'}): ${codRequisicao} — ${patientSnapshot?.name || item.paciente_nome || 'Paciente'}`
       : `Revisando: ${codRequisicao} — ${patientSnapshot?.name || item.paciente_nome || 'Paciente'}`;
