@@ -629,7 +629,7 @@ Este projeto é proprietário. Todos os direitos reservados.
 
 ## 💬 Suporte
 
-- 📧 Email: tech.laboratorio.lab      
+- 📧 Email: tech.laboratorio.lab@gmail.com      
 
 ---
 
