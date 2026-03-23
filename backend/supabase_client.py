@@ -87,6 +87,14 @@ class SupabaseManager:
             nome_paciente = dados_paciente.get('name') or dados_paciente.get('nome') or dados_paciente.get('NomPaciente')
             cpf_paciente = dados_paciente.get('cpf') or dados_paciente.get('NumCPF') or dados_paciente.get('CPF')
 
+            # Normalizar campo sexo para sempre ter chave 'sexo' (minúscula) no dados_paciente
+            if 'sexo' not in dados_paciente or not dados_paciente.get('sexo'):
+                sexo_normalizado = (dados_paciente.get('Sexo') or dados_paciente.get('gender')
+                                    or dados_paciente.get('DesSexo') or dados_paciente.get('SexoPaciente'))
+                if sexo_normalizado:
+                    dados_paciente = dict(dados_paciente)  # cópia para não mutar o original
+                    dados_paciente['sexo'] = str(sexo_normalizado).strip()
+
             # Limpar CPF (apenas números)
             if cpf_paciente:
                 cpf_paciente = ''.join(filter(str.isdigit, str(cpf_paciente)))[:11]

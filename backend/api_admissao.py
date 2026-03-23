@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 import boto3
 
 import tempfile
+import re
 
 import vertexai
 
@@ -239,7 +240,6 @@ CPF_API_TOKEN = os.getenv('CPF_API_TOKEN', '')
 # CONFIGURAÃ‡Ã•ES DO BANCO DE DADOS MYSQL
 
 # ========================================
-
 DB_CONFIG = {
 
     'host': os.getenv('DB_HOST', 'localhost'),
@@ -253,6 +253,20 @@ DB_CONFIG = {
     'charset': 'utf8mb4'
 
 }
+
+
+COD_REQUISICAO_REGEX = re.compile(r'^(0085|0200)\d{9}$')
+
+
+def codigo_requisicao_valido(codigo):
+
+    if codigo is None:
+
+        return False
+
+    codigo_str = str(codigo).strip()
+
+    return COD_REQUISICAO_REGEX.fullmatch(codigo_str) is not None
 
 
 
@@ -466,9 +480,24 @@ def buscar_dados_paciente_via_api(cod_requisicao):
 
                 
 
-                # 3. Fonte Pagadora - API não retorna, deixar None por enquanto
-
-                logger.info(f"[API] INFO Fonte pagadora nao disponivel na API requisicaoResultado")
+                # 3. Buscar ID da Fonte Pagadora pelo nome (quando disponível)
+                fonte_pagadora = dados_resultado.get("fontePagadora", {})
+                nome_fonte = fonte_pagadora.get("nome") if isinstance(fonte_pagadora, dict) else None
+                if nome_fonte:
+                    logger.info(f"[API] Nome da fonte pagadora da API: '{nome_fonte}'")
+                    instituicao_fonte = buscar_instituicao_por_nome(nome_fonte)
+                    if instituicao_fonte and instituicao_fonte.get('id'):
+                        id_fonte_pagadora = int(instituicao_fonte['id'])
+                        logger.info(f"[API] OK ID da fonte pagadora encontrado no cache: {id_fonte_pagadora}")
+                    else:
+                        id_fonte_db = _buscar_id_fonte_pagadora_por_nome_banco(nome_fonte)
+                        if id_fonte_db:
+                            id_fonte_pagadora = int(id_fonte_db)
+                            logger.info(f"[API] OK ID da fonte pagadora encontrado no banco: {id_fonte_pagadora}")
+                        else:
+                            logger.warning(f"[API] AVISO ID da fonte pagadora NAO encontrado para '{nome_fonte}'")
+                else:
+                    logger.info(f"[API] INFO Fonte pagadora nao disponivel na API requisicaoResultado")
 
                 
 
@@ -2511,6 +2540,320 @@ def _buscar_id_por_nome_instituicao(nome_instituicao):
     logger.warning(f"[LookupReverso] ERRO Instituicao '{nome_instituicao}' NAO encontrada no cache")
 
     logger.warning(f"[LookupReverso] INFO Total de instituicoes no cache: {len(INSTITUICOES_CACHE)}")
+
+    return None
+
+
+def _buscar_id_local_origem_por_nome_banco(nome_instituicao):
+
+    """Fallback: busca IdInstituicao direto no banco para local de origem (Local=1)."""
+
+    if not nome_instituicao or not str(nome_instituicao).strip():
+
+        return None
+
+    nome = str(nome_instituicao).strip()
+
+    conn = None
+
+    cursor = None
+
+    try:
+
+        conn = pymysql.connect(**DB_CONFIG)
+
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        cursor.execute(
+
+            """
+
+            SELECT IdInstituicao AS id, NomFantasia AS nome
+
+            FROM newdb.fatinstituicao
+
+            WHERE Local = 1
+
+              AND Inativo = 0
+
+              AND UPPER(TRIM(NomFantasia)) = UPPER(TRIM(%s))
+
+            LIMIT 1
+
+            """,
+
+            (nome,)
+
+        )
+
+        row = cursor.fetchone()
+
+        if not row:
+
+            cursor.execute(
+
+                """
+
+                SELECT IdInstituicao AS id, NomFantasia AS nome
+
+                FROM newdb.fatinstituicao
+
+                WHERE Local = 1
+
+                  AND Inativo = 0
+
+                  AND UPPER(NomFantasia) LIKE UPPER(%s)
+
+                ORDER BY NomFantasia ASC
+
+                LIMIT 1
+
+                """,
+
+                (f"%{nome}%",)
+
+            )
+
+            row = cursor.fetchone()
+
+        if row and row.get('id'):
+
+            logger.info(f"[LookupReverso] ✅ Local origem encontrado no banco: '{nome_instituicao}' → ID {row['id']} ({row.get('nome')})")
+
+            return int(row['id'])
+
+    except Exception as e:
+
+        logger.error(f"[LookupReverso] Erro no fallback de local origem por nome no banco: {e}")
+
+    finally:
+
+        if cursor:
+
+            cursor.close()
+
+        if conn:
+
+            conn.close()
+
+    return None
+
+
+def _buscar_id_convenio_por_nome_banco(nome_convenio):
+
+    """Fallback: busca IdConvenio direto no banco por nome de convênio."""
+
+    if not nome_convenio or not str(nome_convenio).strip():
+
+        return None
+
+    nome = str(nome_convenio).strip()
+    nome_reduzido = nome.split('-')[0].split('/')[0].split('(')[0].strip()
+
+    conn = None
+
+    cursor = None
+
+    try:
+
+        conn = pymysql.connect(**DB_CONFIG)
+
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        cursor.execute(
+
+            """
+
+            SELECT IdConvenio AS id, NomConvenio AS nome
+
+            FROM newdb.fatconvenio
+
+            WHERE Inativo = 0
+
+              AND UPPER(TRIM(NomConvenio)) = UPPER(TRIM(%s))
+
+            LIMIT 1
+
+            """,
+
+            (nome,)
+
+        )
+
+        row = cursor.fetchone()
+
+        if not row:
+
+            cursor.execute(
+
+                """
+
+                SELECT IdConvenio AS id, NomConvenio AS nome
+
+                FROM newdb.fatconvenio
+
+                WHERE Inativo = 0
+
+                  AND UPPER(NomConvenio) LIKE UPPER(%s)
+
+                ORDER BY NomConvenio ASC
+
+                LIMIT 1
+
+                """,
+
+                (f"%{nome}%",)
+
+            )
+
+            row = cursor.fetchone()
+
+        if not row and nome_reduzido and nome_reduzido.lower() != nome.lower():
+
+            cursor.execute(
+
+                """
+
+                SELECT IdConvenio AS id, NomConvenio AS nome
+
+                FROM newdb.fatconvenio
+
+                WHERE Inativo = 0
+
+                  AND UPPER(NomConvenio) LIKE UPPER(%s)
+
+                ORDER BY CASE WHEN UPPER(TRIM(NomConvenio)) = UPPER(TRIM(%s)) THEN 0 ELSE 1 END,
+
+                         NomConvenio ASC
+
+                LIMIT 1
+
+                """,
+
+                (f"%{nome_reduzido}%", nome_reduzido)
+
+            )
+
+            row = cursor.fetchone()
+
+            if row:
+
+                logger.info(f"[LookupReverso] ℹ️ Convênio resolvido por nome reduzido '{nome_reduzido}' a partir de '{nome_convenio}'")
+
+        if row and row.get('id'):
+
+            logger.info(f"[LookupReverso] ✅ Convênio encontrado no banco: '{nome_convenio}' → ID {row['id']} ({row.get('nome')})")
+
+            return int(row['id'])
+
+    except Exception as e:
+
+        logger.error(f"[LookupReverso] Erro no fallback de convênio por nome no banco: {e}")
+
+    finally:
+
+        if cursor:
+
+            cursor.close()
+
+        if conn:
+
+            conn.close()
+
+    return None
+
+
+def _buscar_id_fonte_pagadora_por_nome_banco(nome_fonte):
+
+    """Fallback: busca IdInstituicao direto no banco por nome de fonte pagadora (FontePagadora=1)."""
+
+    if not nome_fonte or not str(nome_fonte).strip():
+
+        return None
+
+    nome = str(nome_fonte).strip()
+
+    conn = None
+
+    cursor = None
+
+    try:
+
+        conn = pymysql.connect(**DB_CONFIG)
+
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+        cursor.execute(
+
+            """
+
+            SELECT IdInstituicao AS id, NomFantasia AS nome
+
+            FROM newdb.fatinstituicao
+
+            WHERE FontePagadora = 1
+
+              AND Inativo = 0
+
+              AND UPPER(TRIM(NomFantasia)) = UPPER(TRIM(%s))
+
+            LIMIT 1
+
+            """,
+
+            (nome,)
+
+        )
+
+        row = cursor.fetchone()
+
+        if not row:
+
+            cursor.execute(
+
+                """
+
+                SELECT IdInstituicao AS id, NomFantasia AS nome
+
+                FROM newdb.fatinstituicao
+
+                WHERE FontePagadora = 1
+
+                  AND Inativo = 0
+
+                  AND UPPER(NomFantasia) LIKE UPPER(%s)
+
+                ORDER BY NomFantasia ASC
+
+                LIMIT 1
+
+                """,
+
+                (f"%{nome}%",)
+
+            )
+
+            row = cursor.fetchone()
+
+        if row and row.get('id'):
+
+            logger.info(f"[LookupReverso] ✅ Fonte pagadora encontrada no banco: '{nome_fonte}' → ID {row['id']} ({row.get('nome')})")
+
+            return int(row['id'])
+
+    except Exception as e:
+
+        logger.error(f"[LookupReverso] Erro no fallback de fonte pagadora por nome no banco: {e}")
+
+    finally:
+
+        if cursor:
+
+            cursor.close()
+
+        if conn:
+
+            conn.close()
 
     return None
 
@@ -4560,9 +4903,21 @@ def buscar_requisicao(cod_requisicao):
 
             if lista_direta and len(lista_direta) > 0:
 
-                logger.info(f"[BuscarIntegrado] âœ… Requisição encontrada por busca direta!")
+                cod_requisicao_str = str(cod_requisicao).strip()
+                dados_aplis = next(
+                    (item for item in lista_direta if str(item.get('CodRequisicao', '')).strip() == cod_requisicao_str),
+                    None
+                )
 
-                dados_aplis = lista_direta[0]
+                if not dados_aplis:
+                    logger.warning(f"[BuscarIntegrado] âš ️ Nenhuma correspondência EXATA para: {cod_requisicao_str}")
+                    logger.warning(f"[BuscarIntegrado] âš ️ Ignorando resultados aproximados para evitar carregar requisição errada")
+                    return jsonify({
+                        "sucesso": 0,
+                        "erro": f"Código de requisição inválido: {cod_requisicao_str}"
+                    }), 404
+
+                logger.info(f"[BuscarIntegrado] âœ… Requisição encontrada por busca direta (correspondência exata)!")
 
                 
 
@@ -5570,6 +5925,63 @@ def buscar_requisicao(cod_requisicao):
 
                     logger.info(f"[BuscarIntegrado]    Sincronizados: RG, telefones, mae, estado civil, endereco completo, matricula convenio")
 
+                    # ===== BUSCAR IMAGENS DO CODIGO PAR NO S3 =====
+                    # Se o paciente tem dois codigos (0085 + 0200), buscar imagens dos dois
+                    cod_par = str(req_correspondente.get("CodRequisicao") or "")
+                    if cod_par and cod_par != cod_requisicao and s3_client:
+                        try:
+                            prefixo_par = cod_par[:4] if len(cod_par) >= 4 else '0040'
+                            caminho_s3_par = f"lab/Arquivos/Foto/{prefixo_par}/{cod_par}"
+                            logger.info(f"[BuscarIntegrado][S3-PAR] Buscando imagens do codigo par em: {caminho_s3_par}")
+
+                            response_s3_par = s3_client.list_objects_v2(
+                                Bucket=S3_BUCKET,
+                                Prefix=caminho_s3_par
+                            )
+
+                            nomes_ja_adicionados = {img["nome"] for img in imagens}
+
+                            if 'Contents' in response_s3_par:
+                                for obj in response_s3_par['Contents']:
+                                    key = obj['Key']
+                                    filename = key.split('/')[-1]
+
+                                    if not filename or not filename.startswith(cod_par):
+                                        continue
+                                    if filename in nomes_ja_adicionados:
+                                        continue
+
+                                    try:
+                                        arquivo_local = os.path.join(TEMP_IMAGES_DIR, filename)
+
+                                        if not os.path.exists(arquivo_local):
+                                            logger.info(f"[BuscarIntegrado][S3-PAR] Baixando: {key}")
+                                            s3_client.download_file(S3_BUCKET, key, arquivo_local)
+                                        else:
+                                            logger.debug(f"[BuscarIntegrado][S3-PAR] Ja em cache: {filename}")
+
+                                        base_url = request.host_url.rstrip('/')
+                                        url_local = f"{base_url}/api/imagem/{filename}"
+
+                                        imagens.append({
+                                            "nome": filename,
+                                            "url": url_local,
+                                            "tamanho": obj['Size'],
+                                            "dataCadastro": obj['LastModified'].isoformat(),
+                                            "codigoOrigem": cod_par
+                                        })
+                                        nomes_ja_adicionados.add(filename)
+
+                                    except Exception as e:
+                                        logger.error(f"[BuscarIntegrado][S3-PAR] Erro ao processar {filename}: {e}")
+
+                                logger.info(f"[BuscarIntegrado][S3-PAR] Total de imagens apos merge do par: {len(imagens)}")
+                            else:
+                                logger.info(f"[BuscarIntegrado][S3-PAR] Nenhuma imagem do codigo par em {caminho_s3_par}")
+
+                        except Exception as e:
+                            logger.error(f"[BuscarIntegrado][S3-PAR] Erro ao buscar imagens do par {cod_par}: {e}")
+
 
 
                 # PASSO 5: Montar resposta ENRIQUECIDA com dados primários + complementares + sistema antigo + CSVs
@@ -6465,6 +6877,44 @@ def requisicoes_disponiveis():
 
         
 
+        # -------------------------------------------------------
+        # DEDUPLICAR pares 0085/0200 ANTES de aplicar o limite.
+        # Sem isso, o limite corta a lista e separa os pares:
+        # o scheduler recebe so metade do par e nao consegue
+        # sincronizar os dois codigos de barras do mesmo paciente.
+        # Preferencia: 0085 sobre 0200.
+        # -------------------------------------------------------
+        def _ordem_pref_disp(req):
+            cod = str(req.get("CodRequisicao") or "")
+            return 0 if cod.startswith("0085") else (1 if cod.startswith("0200") else 2)
+
+        lista_ordenada = sorted(lista_requisicoes, key=_ordem_pref_disp)
+        lista_dedup = []
+        codigos_vistos = set()
+        for req in lista_ordenada:
+            cod = str(req.get("CodRequisicao") or "")
+            if len(cod) >= 4:
+                if cod.startswith("0085"):
+                    cod_par = "0200" + cod[4:]
+                elif cod.startswith("0200"):
+                    cod_par = "0085" + cod[4:]
+                else:
+                    cod_par = None
+            else:
+                cod_par = None
+
+            if cod_par and cod_par in codigos_vistos:
+                logger.info(f"[Disponiveis] Dedup: pulando {cod} (par {cod_par} ja incluido)")
+                continue
+
+            codigos_vistos.add(cod)
+            lista_dedup.append(req)
+
+        if len(lista_dedup) < len(lista_requisicoes):
+            logger.info(f"[Disponiveis] Dedup 0085/0200: {len(lista_requisicoes)} -> {len(lista_dedup)} requisicoes unicas")
+
+        lista_requisicoes = lista_dedup
+
         # Extrair codigos e pacientes
 
         codigos_disponiveis = []
@@ -6539,6 +6989,18 @@ def salvar_admissao():
 
         dados = request.json
 
+        def _texto_placeholder(valor):
+            texto = str(valor or '').strip().lower()
+            return texto in ['', 'não informado', 'nao informado', 'null', 'undefined']
+
+        # Flags para evitar fallback silencioso quando usuário informou nomes explícitos
+        convenio_nome_informado = False
+        convenio_nome_resolvido = False
+        fonte_nome_informado = False
+        fonte_nome_resolvida = False
+        local_nome_informado = False
+        local_nome_resolvido = False
+
         logger.info(f"[SalvarAdmissao] Iniciando salvamento. Dados recebidos: {json.dumps(dados, indent=2, ensure_ascii=False)[:1000]}")
 
 
@@ -6550,6 +7012,36 @@ def salvar_admissao():
         aplis_senha = dados.pop('aplis_senha', None)
 
         logger.info(f"[SalvarAdmissao] Credenciais apLIS: usuario={aplis_usuario or 'PADRÃƒO'}")
+
+
+
+        # Validar e preservar código da requisição exatamente como informado
+
+        if 'codRequisicao' in dados:
+
+            cod_requisicao_str = str(dados.get('codRequisicao') or '').strip()
+
+            if not cod_requisicao_str:
+
+                del dados['codRequisicao']
+
+            else:
+
+                dados['codRequisicao'] = cod_requisicao_str
+
+                # Requisições válidas no sistema: 13 dígitos iniciando com 0085 ou 0200
+
+                if not codigo_requisicao_valido(cod_requisicao_str):
+
+                    logger.warning(f"[SalvarAdmissao] âŒ Código de requisição inválido recebido: '{cod_requisicao_str}'")
+
+                    return jsonify({
+
+                        "sucesso": 0,
+
+                        "erro": f"Código de requisição inválido: {cod_requisicao_str}"
+
+                    }), 400
 
 
 
@@ -6679,7 +7171,78 @@ def salvar_admissao():
 
 
 
-        # ðŸ†• 4. Converter fontePagadora (nome) para idFontePagadora (ID) se necessário
+        # Limpar placeholders textuais antes de converter nomes → IDs
+        for _campo_texto in ['convenio', 'localOrigem', 'origem', 'fontePagadora']:
+            if _campo_texto in dados and isinstance(dados.get(_campo_texto), str) and _texto_placeholder(dados.get(_campo_texto)):
+                del dados[_campo_texto]
+
+        # ðŸ†• 4. Converter convênio/local/fonte por NOME para IDs (quando necessário)
+
+        # 4.1 Convênio: aceitar nome em `convenio` (somente quando idConvenio não vier válido)
+        if 'convenio' in dados:
+            nome_convenio = dados.get('convenio')
+            id_convenio_informado = dados.get('idConvenio')
+            tem_id_convenio_valido = isinstance(id_convenio_informado, int) and id_convenio_informado > 0
+            if isinstance(nome_convenio, str) and nome_convenio.strip() and not tem_id_convenio_valido:
+                convenio_nome_informado = True
+                logger.info(f"[SalvarAdmissao] 🔍 Recebido convenio como nome: '{nome_convenio}'")
+                id_convenio = _buscar_id_por_nome_convenio(nome_convenio)
+                if not id_convenio:
+                    id_convenio = _buscar_id_convenio_por_nome_banco(nome_convenio)
+                if id_convenio:
+                    try:
+                        dados['idConvenio'] = int(id_convenio)
+                        convenio_nome_resolvido = True
+                        logger.info(f"[SalvarAdmissao] ✅ Convênio convertido/priorizado: '{nome_convenio}' → ID {dados['idConvenio']}")
+                    except Exception:
+                        logger.warning(f"[SalvarAdmissao] ⚠️ Falha ao converter ID de convênio '{id_convenio}' para int")
+                else:
+                    logger.warning(f"[SalvarAdmissao] ⚠️ Convênio '{nome_convenio}' não encontrado no cache")
+            elif isinstance(nome_convenio, str) and nome_convenio.strip() and tem_id_convenio_valido:
+                convenio_nome_informado = True
+                convenio_nome_resolvido = True
+                logger.info(f"[SalvarAdmissao] ✅ Mantendo idConvenio informado no payload: {id_convenio_informado} (ignorando nome '{nome_convenio}')")
+            # evitar enviar campo textual para a API downstream
+            del dados['convenio']
+
+        # 4.2 Local de origem: aceitar nome em `localOrigem` ou `origem`
+        # Regra de precedência: manter idLocalOrigem informado; converter por nome apenas se id ausente ou placeholder (1)
+        nome_local = None
+        if isinstance(dados.get('localOrigem'), str) and dados.get('localOrigem', '').strip():
+            nome_local = dados.get('localOrigem')
+        elif isinstance(dados.get('origem'), str) and dados.get('origem', '').strip():
+            nome_local = dados.get('origem')
+
+        id_local_informado = dados.get('idLocalOrigem')
+        tem_id_local_valido = isinstance(id_local_informado, int) and id_local_informado > 0
+        precisa_converter_local_por_nome = (not tem_id_local_valido) or (id_local_informado == 1)
+
+        if nome_local and precisa_converter_local_por_nome:
+            local_nome_informado = True
+            logger.info(f"[SalvarAdmissao] 🔍 Recebido local de origem como nome: '{nome_local}'")
+            id_local = _buscar_id_por_nome_instituicao(nome_local)
+            if not id_local:
+                id_local = _buscar_id_local_origem_por_nome_banco(nome_local)
+            if id_local:
+                try:
+                    dados['idLocalOrigem'] = int(id_local)
+                    local_nome_resolvido = True
+                    logger.info(f"[SalvarAdmissao] ✅ Local de origem convertido/priorizado: '{nome_local}' → ID {dados['idLocalOrigem']}")
+                except Exception:
+                    logger.warning(f"[SalvarAdmissao] ⚠️ Falha ao converter ID de local de origem '{id_local}' para int")
+            else:
+                logger.warning(f"[SalvarAdmissao] ⚠️ Local de origem '{nome_local}' não encontrado no cache")
+        elif nome_local and tem_id_local_valido and id_local_informado != 1:
+            local_nome_informado = True
+            local_nome_resolvido = True
+            logger.info(f"[SalvarAdmissao] ✅ Mantendo idLocalOrigem informado no payload: {id_local_informado} (ignorando nome '{nome_local}')")
+
+        if 'localOrigem' in dados:
+            del dados['localOrigem']
+        if 'origem' in dados:
+            del dados['origem']
+
+        # 4.3 Fonte pagadora: aceitar nome em `fontePagadora` (somente quando idFontePagadora não vier válido)
 
         logger.info(f"[SalvarAdmissao] ðŸ” DEBUG: Verificando campo fontePagadora...")
 
@@ -6691,7 +7254,11 @@ def salvar_admissao():
 
         
 
-        if 'fontePagadora' in dados and isinstance(dados['fontePagadora'], str):
+        id_fonte_informado = dados.get('idFontePagadora')
+        tem_id_fonte_valido = isinstance(id_fonte_informado, int) and id_fonte_informado > 0
+
+        if 'fontePagadora' in dados and isinstance(dados['fontePagadora'], str) and not tem_id_fonte_valido:
+            fonte_nome_informado = True
 
             nome_fonte = dados['fontePagadora']
 
@@ -6703,9 +7270,18 @@ def salvar_admissao():
 
             instituicao = buscar_instituicao_por_nome(nome_fonte)
 
+            if not instituicao:
+
+                id_fonte_db = _buscar_id_fonte_pagadora_por_nome_banco(nome_fonte)
+
+                if id_fonte_db:
+
+                    instituicao = {'id': int(id_fonte_db), 'nome': nome_fonte}
+
             if instituicao:
 
                 dados['idFontePagadora'] = instituicao['id']
+                fonte_nome_resolvida = True
 
                 logger.info(f"[SalvarAdmissao] âœ… Fonte pagadora convertida: '{nome_fonte}' â†’ ID {instituicao['id']}")
 
@@ -6720,6 +7296,33 @@ def salvar_admissao():
                 # Manter o campo para tentar usar default depois
 
                 del dados['fontePagadora']
+        elif 'fontePagadora' in dados and isinstance(dados['fontePagadora'], str) and tem_id_fonte_valido:
+            fonte_nome_informado = True
+            fonte_nome_resolvida = True
+            logger.info(f"[SalvarAdmissao] ✅ Mantendo idFontePagadora informado no payload: {id_fonte_informado} (ignorando nome '{dados['fontePagadora']}')")
+            del dados['fontePagadora']
+
+        # Bloquear fallback silencioso para default quando o usuário informou texto explícito
+        if convenio_nome_informado and not convenio_nome_resolvido and not dados.get('idConvenio'):
+            logger.error("[SalvarAdmissao] ❌ Convênio informado não pôde ser resolvido para ID; abortando para evitar default indevido")
+            return jsonify({
+                "sucesso": 0,
+                "erro": "Convênio informado não encontrado. Selecione uma opção válida da lista e tente novamente."
+            }), 400
+
+        if fonte_nome_informado and not fonte_nome_resolvida and not dados.get('idFontePagadora'):
+            logger.error("[SalvarAdmissao] ❌ Fonte pagadora informada não pôde ser resolvida para ID; abortando para evitar default indevido")
+            return jsonify({
+                "sucesso": 0,
+                "erro": "Fonte pagadora informada não encontrada. Selecione uma opção válida da lista e tente novamente."
+            }), 400
+
+        if local_nome_informado and not local_nome_resolvido and (not dados.get('idLocalOrigem') or dados.get('idLocalOrigem') == 1):
+            logger.error("[SalvarAdmissao] ❌ Local de origem informado não pôde ser resolvido para ID; abortando para evitar default indevido")
+            return jsonify({
+                "sucesso": 0,
+                "erro": "Local de origem informado não encontrado. Selecione uma opção válida da lista e tente novamente."
+            }), 400
 
 
 
@@ -6761,11 +7364,24 @@ def salvar_admissao():
 
                 ids_banco = buscar_ids_banco(dados['codRequisicao'])
 
-                if ids_banco and ids_banco.get('IdFontePagadora'):
+                tem_algum_id_banco = bool(
+                    ids_banco and (
+                        ids_banco.get('IdConvenio') or
+                        ids_banco.get('IdFontePagadora') or
+                        ids_banco.get('IdLocalOrigem')
+                    )
+                )
+
+                if tem_algum_id_banco:
 
                     requisicao_existente = ids_banco
 
-                    logger.info(f"[SalvarAdmissao] âœ… Requisição existe! Fonte pagadora no BANCO: {ids_banco.get('IdFontePagadora')}")
+                    logger.info(
+                        f"[SalvarAdmissao] ✅ Requisição existe no banco! "
+                        f"IdConvenio={ids_banco.get('IdConvenio')}, "
+                        f"IdFontePagadora={ids_banco.get('IdFontePagadora')}, "
+                        f"IdLocalOrigem={ids_banco.get('IdLocalOrigem')}"
+                    )
 
                     
 
@@ -6773,7 +7389,7 @@ def salvar_admissao():
 
                     # - Se dados vieram do OCR: SEMPRE usar dados do OCR (mais atualizados/corretos)
 
-                    # - Se dados vieram do banco/API: usar dados do banco (manter consistência)
+                    # - Se dados vieram de edição manual no sistema: manter valor informado no payload
 
                     if 'idFontePagadora' in dados and dados['idFontePagadora'] != ids_banco.get('IdFontePagadora'):
 
@@ -6791,19 +7407,17 @@ def salvar_admissao():
 
                         else:
 
-                            logger.warning(f"[SalvarAdmissao] âš ️ Conflito detectado!")
+                            logger.warning(f"[SalvarAdmissao] âš ️ Divergência detectada com edição manual!")
 
-                            logger.warning(f"[SalvarAdmissao]   Fonte informada: {dados['idFontePagadora']}")
+                            logger.warning(f"[SalvarAdmissao]   Fonte informada no sistema: {dados['idFontePagadora']}")
 
-                            logger.warning(f"[SalvarAdmissao]   Fonte cadastrada: {ids_banco.get('IdFontePagadora')}")
+                            logger.warning(f"[SalvarAdmissao]   Fonte cadastrada no banco: {ids_banco.get('IdFontePagadora')}")
 
-                            logger.warning(f"[SalvarAdmissao]   ðŸ”„ Usando fonte pagadora já cadastrada para evitar erro do apLIS")
-
-                            dados['idFontePagadora'] = ids_banco.get('IdFontePagadora')
+                            logger.warning(f"[SalvarAdmissao]   ✅ Mantendo fonte informada no sistema (não sobrescrever)")
 
                 else:
 
-                    logger.info(f"[SalvarAdmissao] â„¹️ Requisição não encontrada ou sem fonte pagadora - será nova requisição")
+                    logger.info(f"[SalvarAdmissao] ℹ️ Requisição não encontrada ou sem IDs complementares no banco")
 
             except Exception as e:
 
@@ -6932,6 +7546,50 @@ def salvar_admissao():
 
 
 
+        # Garantir local de origem no payload final do apLIS
+
+        if 'idLocalOrigem' not in dados or not dados.get('idLocalOrigem'):
+
+            if requisicao_existente and requisicao_existente.get('IdLocalOrigem') and not fonte_do_ocr:
+
+                dados['idLocalOrigem'] = requisicao_existente['IdLocalOrigem']
+
+                logger.info(f"[SalvarAdmissao] 💾 Usando local de origem da requisição existente (banco): {dados['idLocalOrigem']}")
+
+            else:
+
+                # Fallback: primeiro local ativo (Local=1)
+
+                try:
+
+                    _conn_lo = pymysql.connect(**DB_CONFIG)
+
+                    _cur_lo = _conn_lo.cursor(pymysql.cursors.DictCursor)
+
+                    _cur_lo.execute('SELECT IdInstituicao AS id, NomFantasia AS nome FROM newdb.fatinstituicao WHERE Local = 1 AND Inativo = 0 LIMIT 1')
+
+                    _row_lo = _cur_lo.fetchone()
+
+                    _cur_lo.close()
+
+                    _conn_lo.close()
+
+                    if _row_lo:
+
+                        dados['idLocalOrigem'] = int(_row_lo['id'])
+
+                        logger.info(f"[SalvarAdmissao] idLocalOrigem não informado, usando fallback Local=1: ID={_row_lo['id']}, Nome={_row_lo['nome']}")
+
+                except Exception as _e_lo:
+
+                    logger.error(f"[SalvarAdmissao] Erro ao definir fallback de idLocalOrigem: {_e_lo}")
+
+        else:
+
+            logger.info(f"[SalvarAdmissao] ✅ Mantendo idLocalOrigem informado no sistema: {dados.get('idLocalOrigem')}")
+
+
+
         if 'idMedico' not in dados or not dados.get('idMedico'):
 
             id_medico_default = obter_id_medico_default()
@@ -6962,7 +7620,7 @@ def salvar_admissao():
 
 
 
-        # ðŸ†• VALIDAR numGuia (deve ter exatamente 9 dígitos válidos)
+        # ðŸ†• VALIDAR numGuia (alguns convênios exigem 8, outros 9 dígitos)
 
         # IMPORTANTE: Para alguns convênios/procedimentos, o numGuia é OBRIGATÃ“RIO
 
@@ -6986,9 +7644,9 @@ def salvar_admissao():
 
             
 
-            # Só aceita se tiver exatamente 9 dígitos E não for só zeros
+            # Aceita 8 ou 9 dígitos e rejeita apenas sequências de zeros
 
-            if num_guia_limpo and len(num_guia_limpo) == 9 and num_guia_limpo != '000000000':
+            if num_guia_limpo and len(num_guia_limpo) in (8, 9) and num_guia_limpo not in ('00000000', '000000000'):
 
                 # Válido - manter
 
@@ -7006,7 +7664,7 @@ def salvar_admissao():
 
                 logger.warning(f"[SalvarAdmissao] âš ️ numGuia inválido ou vazio ('{num_guia_limpo}'), campo removido")
 
-                logger.warning(f"[SalvarAdmissao] âš ️ ATENÃ‡ÃƒO: Se o apLIS rejeitar, pode ser porque o numGuia é obrigatório para este convênio/exame")
+                logger.warning(f"[SalvarAdmissao] âš ️ ATENÃ‡ÃƒO: Se o apLIS rejeitar, pode ser por formato de dígitos incompatível para este convênio/exame")
 
         else:
 
@@ -7049,6 +7707,13 @@ def salvar_admissao():
                 logger.info(f"[SalvarAdmissao] ðŸ”„ numGuia gerado (código curto, com padding): {num_guia_provisorio}")
 
 
+        # Capturar matrícula do convênio (campo de paciente) para atualização via pacienteAlterar
+        mat_convenio_raw = dados.get('matConvenio') or dados.get('MatConvenio')
+        mat_convenio_limpa = ''.join(filter(str.isdigit, str(mat_convenio_raw or '')))
+        if mat_convenio_raw and not mat_convenio_limpa:
+            logger.warning(f"[SalvarAdmissao] ⚠️ matConvenio recebida sem dígitos válidos: '{mat_convenio_raw}'")
+
+
 
         # ðŸ†• LIMPAR campos vazios (apLIS rejeita strings vazias)
 
@@ -7066,12 +7731,20 @@ def salvar_admissao():
 
 
 
-        # matConvenio pertence ao paciente, nao a requisicao (admissaoSalvar)
-        # Enviar matConvenio sem validadeMatricula causa erro: 'Validade da carteirinha invalida'
-        for campo_paciente in ['matConvenio', 'validadeMatricula', 'MatConvenio', 'ValidadeMatricula']:
+        # matConvenio pode ser exigido pelo admissaoSalvar em alguns cenários
+        # (ex.: quando pacienteAlterar não consegue persistir matrícula para o paciente)
+        for campo_paciente in ['validadeMatricula', 'MatConvenio', 'ValidadeMatricula']:
             if campo_paciente in dados:
                 logger.info(f'[SalvarAdmissao] Removendo campo de paciente do payload admissaoSalvar: {campo_paciente}')
                 del dados[campo_paciente]
+
+        # Normalizar matConvenio quando informado (apLIS aceita variação por convênio)
+        if mat_convenio_limpa:
+            dados['matConvenio'] = mat_convenio_limpa
+            logger.info(f"[SalvarAdmissao] ✅ Enviando matConvenio no admissaoSalvar (fallback): {mat_convenio_limpa} (len={len(mat_convenio_limpa)})")
+        elif 'matConvenio' in dados:
+            del dados['matConvenio']
+            logger.warning(f"[SalvarAdmissao] ⚠️ matConvenio removida do payload final por ausência de dígitos válidos: '{mat_convenio_raw}'")
 
 
 
@@ -7087,9 +7760,37 @@ def salvar_admissao():
 
             }), 400
 
+        # 🆕 SE TEM idPaciente válido, atualizar paciente no apLIS (CPF/nascimento/matrícula)
+        # Isso garante que pacientes com dados incompletos no apLIS sejam atualizados ao salvar
+        if dados.get('idPaciente') and isinstance(dados['idPaciente'], int) and dados['idPaciente'] > 0:
+            cpf_para_upd = dados.pop('NumCPF', None)
+            nome_para_upd = dados.pop('NomPaciente', None)
+            dta_para_upd = dados.pop('DtaNasc', None)
 
+            if cpf_para_upd or dta_para_upd or mat_convenio_limpa:
+                try:
+                    dat_upd = {"idEvento": "4", "codPaciente": dados['idPaciente']}
+                    if cpf_para_upd:
+                        dat_upd['cpf'] = cpf_para_upd
+                    if dta_para_upd:
+                        dat_upd['dtaNascimento'] = dta_para_upd
+                    if nome_para_upd:
+                        dat_upd['nomePaciente'] = nome_para_upd
 
-        # ðŸ†• SE NÃƒO TEM idPaciente, tentar buscar/criar pelo CPF
+                    # Atualizar matrícula do convênio quando houver dígitos válidos
+                    if mat_convenio_limpa:
+                        dat_upd['matriculaConvenio'] = mat_convenio_limpa
+
+                    logger.info(f"[SalvarAdmissao] 🔄 Atualizando paciente {dados['idPaciente']} no apLIS (CPF/nascimento/matrícula)...")
+                    resp_upd = fazer_requisicao_aplis("pacienteAlterar", dat_upd, aplis_usuario, aplis_senha)
+                    if resp_upd.get("dat", {}).get("sucesso") == 1:
+                        logger.info(f"[SalvarAdmissao] ✅ Paciente atualizado no apLIS")
+                    else:
+                        logger.warning(f"[SalvarAdmissao] ⚠️ Não foi possível atualizar paciente: {resp_upd}")
+                except Exception as e_upd:
+                    logger.warning(f"[SalvarAdmissao] ⚠️ Erro ao atualizar paciente (não crítico): {e_upd}")
+
+        # 🆕 SE NÃO TEM idPaciente, tentar buscar/criar pelo CPF
 
         if 'idPaciente' not in dados or dados.get('idPaciente') is None or dados.get('idPaciente') == '':
 
@@ -7815,6 +8516,39 @@ def salvar_admissao():
 
         resultado = salvar_admissao_aplis(dados, aplis_usuario, aplis_senha)
 
+        # Retry automático: alguns convênios/procedimentos exigem guia com 8 dígitos
+        if resultado.get("dat", {}).get("sucesso") != 1 and dados.get('numGuia'):
+
+            erro_retry_txt = " ".join([
+                str(resultado.get("erro") or ''),
+                str(resultado.get("msg") or ''),
+                str(resultado.get("dat", {}).get("msgErro") or ''),
+                str(resultado.get("dat", {}).get("msg") or ''),
+                str(resultado.get("dat", {}).get("erro") or '')
+            ])
+
+            num_guia_atual = ''.join(filter(str.isdigit, str(dados.get('numGuia') or '')))
+            erro_lower = erro_retry_txt.lower()
+            exige_8 = ('deve conter 8' in erro_lower) or (('8' in erro_lower) and ('guia' in erro_lower) and ('conter' in erro_lower))
+
+            if exige_8 and len(num_guia_atual) == 9:
+
+                dados_retry = dados.copy()
+                dados_retry['numGuia'] = num_guia_atual[-8:]
+
+                logger.warning(
+                    f"[SalvarAdmissao] ⚠️ apLIS rejeitou guia com 9 dígitos. Tentando retry com 8 dígitos: {dados_retry['numGuia']}"
+                )
+
+                resultado_retry = salvar_admissao_aplis(dados_retry, aplis_usuario, aplis_senha)
+
+                if resultado_retry.get("dat", {}).get("sucesso") == 1:
+                    logger.info("[SalvarAdmissao] ✅ Retry com guia de 8 dígitos funcionou")
+                    dados = dados_retry
+                    resultado = resultado_retry
+                else:
+                    logger.warning("[SalvarAdmissao] ⚠️ Retry com guia de 8 dígitos também falhou")
+
 
 
         if resultado.get("dat", {}).get("sucesso") == 1:
@@ -8224,6 +8958,13 @@ def salvar_admissao():
             if "Guia Convênio" in str(erro_aplis) or "numGuia" in str(erro_aplis):
 
                 num_guia_enviado = dados.get('numGuia', 'NÃƒO ENVIADO')
+                erro_txt_lower = str(erro_aplis).lower()
+                if ('deve conter 8' in erro_txt_lower) or (('8' in erro_txt_lower) and ('guia' in erro_txt_lower) and ('conter' in erro_txt_lower)):
+                    esperado = '8 dígitos'
+                elif ('deve conter 9' in erro_txt_lower) or (('9' in erro_txt_lower) and ('guia' in erro_txt_lower) and ('conter' in erro_txt_lower)):
+                    esperado = '9 dígitos'
+                else:
+                    esperado = '8 ou 9 dígitos'
 
                 erro_aplis = (
 
@@ -8231,13 +8972,13 @@ def salvar_admissao():
 
                     f"ðŸ” DEBUG: numGuia enviado = '{num_guia_enviado}' (tamanho: {len(str(num_guia_enviado)) if num_guia_enviado != 'NÃƒO ENVIADO' else 0})\n\n"
 
-                    f"ðŸ’¡ CAUSA: O convênio/procedimento selecionado EXIGE o número da guia (9 dígitos).\n\n"
+                    f"ðŸ’¡ CAUSA: O convênio/procedimento selecionado EXIGE o número da guia ({esperado}).\n\n"
 
                     f"ðŸ”§ SOLUÃ‡ÃƒO:\n"
 
                     f"  1. Localize o campo 'Número da Guia' no formulário (lado direito)\n"
 
-                    f"  2. Preencha com 9 dígitos numéricos (ex: 123456789)\n"
+                    f"  2. Preencha com a quantidade de dígitos exigida no erro ({esperado})\n"
 
                     f"  3. Tente salvar novamente\n\n"
 
@@ -8245,7 +8986,7 @@ def salvar_admissao():
 
                     f"  - Entre em contato com o convênio para obter\n"
 
-                    f"  - Ou use '000000001' como número provisório"
+                    f"  - Ou use um número provisório com formato válido para o convênio"
 
                 )
 
@@ -13849,7 +14590,8 @@ def criar_paciente():
 
         else:
 
-            erro_msg = resposta.get("dat", {}).get("msg", "Erro desconhecido")
+            dat_resp = resposta.get("dat", {})
+            erro_msg = dat_resp.get("msg") or dat_resp.get("msgErro") or dat_resp.get("erro") or dat_resp.get("mensagem") or resposta.get("msg") or resposta.get("erro") or "Erro desconhecido"
 
             logger.error(f"[CRIAR_PACIENTE] âŒ Erro ao criar paciente: {erro_msg}")
 
@@ -13941,7 +14683,7 @@ def atualizar_paciente(id_paciente):
 
         if dados.get('numGuia'):
 
-            # Só envia se for válido: 9 dígitos e não só zeros
+            # Só envia se for válido: 8 ou 9 dígitos e não só zeros
 
             num_guia = str(dados['numGuia']).strip()
 
@@ -13949,7 +14691,7 @@ def atualizar_paciente(id_paciente):
 
             
 
-            if num_guia_limpo and len(num_guia_limpo) == 9 and num_guia_limpo != '000000000':
+            if num_guia_limpo and len(num_guia_limpo) in (8, 9) and num_guia_limpo not in ('00000000', '000000000'):
 
                 dat['numGuiaConvenio'] = num_guia_limpo
 
@@ -13989,9 +14731,11 @@ def atualizar_paciente(id_paciente):
 
         else:
 
-            erro_msg = resposta.get("dat", {}).get("msg", "Erro desconhecido")
+            dat_resp = resposta.get("dat", {})
+            erro_msg = dat_resp.get("msg") or dat_resp.get("msgErro") or dat_resp.get("erro") or dat_resp.get("mensagem") or resposta.get("msg") or resposta.get("erro") or "Erro desconhecido"
 
             logger.error(f"[ATUALIZAR_PACIENTE] âŒ Erro: {erro_msg}")
+            logger.error(f"[ATUALIZAR_PACIENTE] Resposta completa do apLIS: {resposta}")
 
             return jsonify({
 
@@ -14071,7 +14815,7 @@ def atualizar_requisicao(cod_requisicao):
 
         if dados.get('numGuia'):
 
-            # Só envia se for válido: 9 dígitos e não só zeros
+            # Só envia se for válido: 8 ou 9 dígitos e não só zeros
 
             num_guia = str(dados['numGuia']).strip()
 
@@ -14079,7 +14823,7 @@ def atualizar_requisicao(cod_requisicao):
 
             
 
-            if num_guia_limpo and len(num_guia_limpo) == 9 and num_guia_limpo != '000000000':
+            if num_guia_limpo and len(num_guia_limpo) in (8, 9) and num_guia_limpo not in ('00000000', '000000000'):
 
                 dat['numGuia'] = num_guia_limpo
 
@@ -14119,7 +14863,8 @@ def atualizar_requisicao(cod_requisicao):
 
         else:
 
-            erro_msg = resposta.get("dat", {}).get("msg", "Erro desconhecido")
+            dat_resp = resposta.get("dat", {})
+            erro_msg = dat_resp.get("msg") or dat_resp.get("msgErro") or dat_resp.get("erro") or dat_resp.get("mensagem") or resposta.get("msg") or resposta.get("erro") or "Erro desconhecido"
 
             logger.error(f"[ATUALIZAR_REQUISICAO] âŒ Erro: {erro_msg}")
 
@@ -14274,7 +15019,14 @@ except Exception as e:
 def executar_scheduler_manual():
     """Trigger manual do processamento automatico (para testes)"""
     import threading
-    from scheduler_job import executar_processamento_automatico
+    from scheduler_job import executar_processamento_automatico, _job_running
+
+    if _job_running:
+        logger.warning('[SCHEDULER] Disparo ignorado: job ja em execucao')
+        return jsonify({
+            'sucesso': 0,
+            'mensagem': 'Job ja em execucao. Aguarde o termino.'
+        }), 409
 
     thread = threading.Thread(
         target=executar_processamento_automatico,
@@ -14468,7 +15220,7 @@ if __name__ == '__main__':
     
 
     # ========================================
-    # Inicializar APScheduler (4h da manha)
+    # Inicializar APScheduler (4h30 da manha)
     # ========================================
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
@@ -14480,14 +15232,14 @@ if __name__ == '__main__':
             trigger='cron',
             day_of_week='mon-fri',  # Seg a sex; segunda pega requisicoes de sexta
             hour=4,
-            minute=0,
+            minute=30,
             id='processamento_4am',
-            name='Processamento automatico 4h',
+            name='Processamento automatico 4h30',
             misfire_grace_time=3600,
             max_instances=1,
         )
         _scheduler.start()
-        logger.info('[SCHEDULER] Agendamento 4h configurado com sucesso')
+        logger.info('[SCHEDULER] Agendamento 4h30 configurado com sucesso')
         logger.info('[SCHEDULER] Proxima execucao: %s', _scheduler.get_job('processamento_4am').next_run_time)
         logger.info('[SCHEDULER] Endpoint manual: POST /api/scheduler/executar')
         logger.info('[SCHEDULER] Status: GET /api/scheduler/status')

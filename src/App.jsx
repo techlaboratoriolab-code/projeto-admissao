@@ -7,6 +7,7 @@ import Navbar from './components/Navbar';
 import LoginNew from './pages/LoginNew';
 import AdmissionView from './pages/AdmissionView';
 import UserManagement from './pages/UserManagement';
+import ErrorBoundary from './components/ErrorBoundary';
 
 function App() {
   return (
@@ -26,8 +27,10 @@ function App() {
               path="/admissao"
               element={
                 <PrivateRoute>
-                  <Navbar />
-                  <AdmissionView />
+                  <ErrorBoundary>
+                    <Navbar />
+                    <AdmissionView />
+                  </ErrorBoundary>
                 </PrivateRoute>
               }
             />

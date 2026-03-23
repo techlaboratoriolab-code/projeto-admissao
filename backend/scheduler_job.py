@@ -11,6 +11,7 @@ import uuid
 import json
 import traceback
 import os
+import threading
 import requests as http_requests
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
@@ -24,6 +25,10 @@ SYSTEM_USER_NAME = "Sistema Automatico (4h)"
 # URL base do proprio Flask (chamadas internas)
 FLASK_BASE_URL = "http://localhost:5000"
 
+# Lock global para evitar execucao dupla (APScheduler interno + disparar_4h.ps1)
+_job_lock = threading.Lock()
+_job_running = False
+
 
 def executar_processamento_automatico():
     """
@@ -34,6 +39,21 @@ def executar_processamento_automatico():
       3. Para cada: buscar dados + imagens, OCR, consolidar, salvar snapshot
       4. Marcar sessao como 'revisao'
     """
+    global _job_running
+    # Evitar dupla execucao (APScheduler interno + disparar_4h.ps1 simultâneos)
+    if not _job_lock.acquire(blocking=False):
+        logger.warning("[SCHEDULER] Job ja em execucao. Ignorando disparo duplicado.")
+        return
+    _job_running = True
+    try:
+        _executar_processamento_interno()
+    finally:
+        _job_running = False
+        _job_lock.release()
+
+
+def _executar_processamento_interno():
+    """Logica real do processamento, chamada com lock adquirido."""
     logger.info("=" * 80)
     logger.info("[SCHEDULER] INICIO PROCESSAMENTO AUTOMATICO - %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     logger.info("=" * 80)
@@ -91,7 +111,7 @@ def executar_processamento_automatico():
 
         resp = http_requests.post(f"{FLASK_BASE_URL}/api/requisicoes/disponiveis", json={
             "filtrarAguardaAdmissao": True,
-            "limite": 50
+            "limite": 15
         }, timeout=60)
 
         if resp.status_code != 200:
@@ -109,6 +129,47 @@ def executar_processamento_automatico():
         if not requisicoes:
             logger.info("[SCHEDULER] Nenhuma requisicao pendente. Finalizando.")
             return
+
+        # =============================================
+        # DEDUPLICAR pares 0085/0200
+        # Se 0085XXX e 0200XXX existem para o mesmo paciente/data,
+        # processar apenas UM (preferir 0085). O endpoint /api/requisicao/{cod}
+        # ja sincroniza os dados do par correspondente automaticamente.
+        # =============================================
+
+        # Primeiro ordena: 0085 antes de 0200 para preferir 0085 quando ambos presentes
+        def _ordem_preferencia(req):
+            cod = str(req.get('CodRequisicao') or req.get('codRequisicao') or req.get('codigo') or req.get('cod', ''))
+            if len(cod) >= 4 and cod[:4] == '0085':
+                return 0  # 0085 tem prioridade
+            if len(cod) >= 4 and cod[:4] == '0200':
+                return 1  # 0200 e descartado se 0085 existir
+            return 2
+
+        requisicoes_ordenadas = sorted(requisicoes, key=_ordem_preferencia)
+
+        requisicoes_dedup = []
+        codigos_adicionados = set()
+        for req in requisicoes_ordenadas:
+            cod = str(req.get('CodRequisicao') or req.get('codRequisicao') or req.get('codigo') or req.get('cod', ''))
+            # Calcular codigo do par correspondente
+            cod_par = None
+            if len(cod) >= 4:
+                if cod[:4] == '0085':
+                    cod_par = '0200' + cod[4:]
+                elif cod[:4] == '0200':
+                    cod_par = '0085' + cod[4:]
+            # Se o par ja foi adicionado, pular este
+            if cod_par and cod_par in codigos_adicionados:
+                logger.info("[SCHEDULER] Dedup: pulando %s (par %s ja na fila)", cod, cod_par)
+                continue
+            codigos_adicionados.add(cod)
+            requisicoes_dedup.append(req)
+
+        if len(requisicoes_dedup) < len(requisicoes):
+            logger.info("[SCHEDULER] Dedup 0085/0200: %d -> %d requisicoes (removidos %d pares duplicados)",
+                        len(requisicoes), len(requisicoes_dedup), len(requisicoes) - len(requisicoes_dedup))
+        requisicoes = requisicoes_dedup
 
         # =============================================
         # ETAPA 2: Criar sessao no Supabase
@@ -268,19 +329,29 @@ def executar_processamento_automatico():
 # ===================================================================
 
 def _atualizar_item(sb, item_id, dados):
-    """Atualiza um item na fila_admissao"""
-    try:
-        sb.table('fila_admissao').update(dados).eq('id', str(item_id)).execute()
-    except Exception as e:
-        logger.error("[SCHEDULER] Erro ao atualizar item %s: %s", item_id, e)
+    """Atualiza um item na fila_admissao com retry para erros transientes (Cloudflare)"""
+    for tentativa in range(3):
+        try:
+            sb.table('fila_admissao').update(dados).eq('id', str(item_id)).execute()
+            return
+        except Exception as e:
+            if tentativa < 2:
+                time.sleep(2 ** tentativa)  # backoff: 1s, 2s
+            else:
+                logger.error("[SCHEDULER] Erro ao atualizar item %s apos 3 tentativas: %s", item_id, e)
 
 
 def _atualizar_sessao(sb, sessao_id, dados):
-    """Atualiza a sessao na fila_sessao"""
-    try:
-        sb.table('fila_sessao').update(dados).eq('id', sessao_id).execute()
-    except Exception as e:
-        logger.error("[SCHEDULER] Erro ao atualizar sessao %s: %s", sessao_id, e)
+    """Atualiza a sessao na fila_sessao com retry para erros transientes (Cloudflare)"""
+    for tentativa in range(3):
+        try:
+            sb.table('fila_sessao').update(dados).eq('id', sessao_id).execute()
+            return
+        except Exception as e:
+            if tentativa < 2:
+                time.sleep(2 ** tentativa)  # backoff: 1s, 2s
+            else:
+                logger.error("[SCHEDULER] Erro ao atualizar sessao %s apos 3 tentativas: %s", sessao_id, e)
 
 
 def _processar_ocr_imagem(img):
@@ -378,10 +449,13 @@ def _construir_form_data(dados_api, resultado_consolidado):
         local_origem = dados_api.get('localOrigem', {})
         fonte_pagadora = dados_api.get('fontePagadora', {})
 
-        # Data de coleta - limpar hora se vier
-        dta_coleta = requisicao.get('dtaColeta', '')
+        # Data de coleta - converter para ISO YYYY-MM-DD se necessário
+        dta_coleta = requisicao.get('dtaColeta', '') or ''
         if dta_coleta and 'T' in str(dta_coleta):
             dta_coleta = str(dta_coleta).split('T')[0]
+        # Converter DD/MM/YYYY → YYYY-MM-DD (formato retornado pelo APLIS)
+        if dta_coleta and '/' in str(dta_coleta):
+            dta_coleta = _converter_data_iso(str(dta_coleta))
 
         form = {
             'codRequisicao': requisicao.get('codRequisicao', ''),
@@ -399,6 +473,14 @@ def _construir_form_data(dados_api, resultado_consolidado):
             'idLaboratorio': '1',
             'idUnidade': '1',
         }
+
+        # Incluir info de sincronizacao 0085/0200 se disponivel
+        sincronizacao = dados_api.get('sincronizacao', {})
+        if sincronizacao and sincronizacao.get('sincronizado'):
+            form['codRequisicaoCorrespondente'] = str(sincronizacao.get('codigo_correspondente', ''))
+            form['tipoSincronizacao'] = str(sincronizacao.get('tipo_sincronizacao', ''))
+            logger.info("[SCHEDULER] Sincronizacao 0085/0200: %s <-> %s",
+                        form.get('codRequisicao'), form['codRequisicaoCorrespondente'])
 
     # Sobrescrever com dados do OCR consolidado
     if resultado_consolidado and resultado_consolidado.get('requisicoes'):
@@ -488,26 +570,27 @@ def _construir_patient_data(dados_api, resultado_consolidado):
 
     patient = {
         'idPaciente': paciente.get('idPaciente') or paciente.get('CodPaciente') or '',
-        'name': paciente.get('nome', ''),
+        'name': paciente.get('nome') or '',
         'age': idade_str,
         'birthDate': birth_date_fmt,
-        'recordNumber': requisicao.get('codRequisicao', ''),
-        'origin': local_origem.get('nome', 'Nao informado'),
-        'payingSource': fonte_pagadora.get('nome', 'Particular'),
-        'insurance': convenio.get('nome', 'Nao informado'),
-        'doctorName': medico.get('nome', 'Nao informado'),
-        'doctorCRM': crm_str or 'Nao informado',
+        'recordNumber': requisicao.get('codRequisicao') or '',
+        'origin': local_origem.get('nome') or '',
+        'payingSource': fonte_pagadora.get('nome') or '',
+        'insurance': convenio.get('nome') or '',
+        'doctorName': medico.get('nome') or '',
+        'doctorCRM': crm_str or '',
         'collectionDate': coleta_fmt,
         'statusText': 'Em andamento',
         'status': 'in-progress',
-        'cpf': paciente.get('cpf', ''),
-        'rg': paciente.get('rg', ''),
-        'phone': paciente.get('telCelular', ''),
-        'email': paciente.get('email', ''),
-        'insuranceCardNumber': paciente.get('matriculaConvenio', ''),
-        'numGuia': paciente.get('numGuia') or requisicao.get('numGuia', ''),
-        'address': paciente.get('endereco', ''),
-        'exams': requisicao.get('examesNomes', 'Nao informado'),
+        'cpf': paciente.get('cpf') or '',
+        'sexo': paciente.get('sexo') or paciente.get('DesSexo') or '',
+        'rg': paciente.get('rg') or '',
+        'phone': paciente.get('telCelular') or '',
+        'email': paciente.get('email') or '',
+        'insuranceCardNumber': paciente.get('matriculaConvenio') or '',
+        'numGuia': paciente.get('numGuia') or requisicao.get('numGuia') or '',
+        'address': _formatar_endereco(paciente.get('endereco') or ''),
+        'exams': requisicao.get('examesNomes') or '',
     }
 
     # Sobrescrever com dados do OCR
@@ -568,6 +651,26 @@ def _enriquecer_form_com_exames(form_data, resultado_consolidado):
                     logger.info("[SCHEDULER] %d/%d exames encontrados no banco", len(ids), len(nomes))
     except Exception as e:
         logger.warning("[SCHEDULER] Erro ao buscar IDs de exames: %s", e)
+
+
+def _formatar_endereco(endereco):
+    """Converte endereco (dict ou string) para string legivel."""
+    if not endereco:
+        return ''
+    if isinstance(endereco, str):
+        return endereco
+    if isinstance(endereco, dict):
+        partes = [
+            endereco.get('logradouro', ''),
+            endereco.get('numEndereco', ''),
+            endereco.get('complemento', ''),
+            endereco.get('bairro', ''),
+            endereco.get('cidade', ''),
+            endereco.get('uf', ''),
+            endereco.get('cep', ''),
+        ]
+        return ', '.join(p for p in partes if p)
+    return str(endereco)
 
 
 def _converter_data_iso(data_str):

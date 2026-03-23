@@ -2,6 +2,11 @@
 
 Sistema completo para automação do processo de admissão hospitalar com React + Flask + Supabase.
 
+**Responsável**: Kaua
+**Área**: Cadastro/Admissão
+**Status**: Em teste
+**Local de Execução**: PC
+
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![React](https://img.shields.io/badge/React-18.2-61DAFB?logo=react)](https://reactjs.org/)
 [![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask)](https://flask.palletsprojects.com/)

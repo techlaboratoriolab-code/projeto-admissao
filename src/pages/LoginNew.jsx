@@ -242,8 +242,8 @@ const Login = () => {
                   >
                     <option value="" className="text-slate-400 dark:text-neutral-500">Selecione um departamento</option>
                     {DEPARTMENTS.map((dept) => (
-                      <option key={dept} value={dept}>
-                        {dept}
+                      <option key={dept.id} value={dept.id}>
+                        {dept.name}
                       </option>
                     ))}
                   </select>

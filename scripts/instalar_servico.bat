@@ -25,11 +25,12 @@ echo [1/3] Removendo tarefa antiga (se existir)...
 schtasks /delete /tn "LaboratorioAdmissao_Backend" /f >nul 2>&1
 echo [OK]
 
-echo [2/3] Criando tarefa para iniciar com o Windows...
+echo [2/3] Criando tarefa para iniciar com o Windows (ONSTART, sem precisar de login)...
 schtasks /create ^
   /tn "LaboratorioAdmissao_Backend" ^
   /tr "wscript.exe \"%VBS_PATH%\"" ^
-  /sc onlogon ^
+  /sc onstart ^
+  /ru SYSTEM ^
   /rl HIGHEST ^
   /delay 0001:30 ^
   /f

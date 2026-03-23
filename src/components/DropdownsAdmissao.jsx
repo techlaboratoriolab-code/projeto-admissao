@@ -5,6 +5,145 @@ import { API_BASE_URL } from '../config';
 const ngrokHeaders = { 'ngrok-skip-browser-warning': 'true' };
 
 /**
+ * Dropdown pesquisável para seleção de Médico (permite digitação manual)
+ */
+export function MedicoSelect({ value, onChange, disabled = false, className = "" }) {
+  const [medicos, setMedicos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [query, setQuery] = useState(value || '');
+  const [aberto, setAberto] = useState(false);
+
+  useEffect(() => {
+    const carregarMedicos = async () => {
+      try {
+        setLoading(true);
+        const response = await axios.get(`${API_BASE_URL}/api/medicos`, { headers: ngrokHeaders });
+
+        if (response.data.sucesso === 1) {
+          const medicosOrdenados = (response.data.medicos || []).sort((a, b) =>
+            (a.nome || '').localeCompare(b.nome || '', 'pt-BR')
+          );
+          setMedicos(medicosOrdenados);
+        } else {
+          setError('Erro ao carregar médicos');
+        }
+      } catch (err) {
+        console.error('[MedicoSelect] Erro ao carregar médicos:', err);
+        setError('Erro ao conectar com o servidor');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    carregarMedicos();
+  }, []);
+
+  useEffect(() => {
+    setQuery(value || '');
+  }, [value]);
+
+  if (loading) {
+    return (
+      <input
+        type="text"
+        disabled
+        className={className}
+        value="Carregando médicos..."
+        readOnly
+      />
+    );
+  }
+
+  if (error) {
+    return (
+      <input
+        type="text"
+        disabled
+        className={className}
+        value={error}
+        readOnly
+      />
+    );
+  }
+
+  const normalizar = (texto) => String(texto || '').trim().toLowerCase();
+
+  const encontrarMedico = (nomeDigitado) => {
+    const alvo = normalizar(nomeDigitado);
+    if (!alvo) return null;
+    return medicos.find((medico) => normalizar(medico?.nome) === alvo) || null;
+  };
+
+  const medicosFiltrados = medicos
+    .filter((medico) => {
+      const texto = normalizar(query);
+      if (!texto) return true;
+      const nome = normalizar(medico?.nome);
+      const crmUf = normalizar(`${medico?.crm || ''}/${medico?.uf || ''}`);
+      return nome.includes(texto) || crmUf.includes(texto);
+    })
+    .slice(0, 80);
+
+  const selecionarMedico = (medico) => {
+    const nome = medico?.nome || '';
+    setQuery(nome);
+    onChange(medico || null, nome);
+    setAberto(false);
+  };
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={query || ''}
+        onChange={(e) => {
+          const nomeDigitado = e.target.value;
+          setQuery(nomeDigitado);
+          setAberto(true);
+          const medicoSelecionado = encontrarMedico(nomeDigitado);
+          onChange(medicoSelecionado, nomeDigitado);
+        }}
+        onFocus={() => setAberto(true)}
+        onClick={() => setAberto(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            setAberto(false);
+          }
+        }}
+        disabled={disabled}
+        className={className}
+        placeholder="Digite ou selecione um médico..."
+        autoComplete="off"
+      />
+
+      {aberto && !disabled && (
+        <div className="mt-1 w-full max-h-64 overflow-y-auto rounded-md border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 shadow-lg">
+          {medicosFiltrados.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-500 dark:text-neutral-400">
+              Nenhum médico encontrado
+            </div>
+          ) : (
+            medicosFiltrados.map((medico) => (
+              <button
+                key={medico.id}
+                type="button"
+                className="w-full text-left px-3 py-2 text-sm text-gray-900 dark:text-neutral-100 hover:bg-gray-100 dark:hover:bg-neutral-700"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => selecionarMedico(medico)}
+              >
+                <div className="font-medium">{medico.nome}</div>
+                <div className="text-xs text-gray-500 dark:text-neutral-400">CRM {medico.crm}/{medico.uf}</div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Dropdown para seleção de Convênio
  */
 export function ConvenioSelect({ value, onChange, disabled = false, className = "" }) {

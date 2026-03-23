@@ -1,12 +1,14 @@
-export const DEPARTMENTS: string[] = [
-  'Administração',
-  'Financeiro',
-  'TI',
-  'Recursos Humanos',
-  'Comercial',
-  'Operações',
-  'Atendimento',
-];
+export const DEPARTMENTS = [
+  { id: 'Administração', name: 'Administração' },
+  { id: 'Financeiro', name: 'Financeiro' },
+  { id: 'TI', name: 'TI' },
+  { id: 'Recursos Humanos', name: 'Recursos Humanos' },
+  { id: 'Comercial', name: 'Comercial' },
+  { id: 'Operações', name: 'Operações' },
+  { id: 'Atendimento', name: 'Atendimento' },
+] as const;
+
+export type DepartmentId = typeof DEPARTMENTS[number]['id'];
 
 export const USER_ROLES = {
   ADMIN: 'admin',

@@ -10,11 +10,6 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error('❌ ERRO: Configure REACT_APP_SUPABASE_URL e REACT_APP_SUPABASE_ANON_KEY no arquivo .env')
 }
 
-console.log('🔍 SUPABASE CONFIG:')
-console.log('URL:', supabaseUrl ? '✅ Configurado' : '❌ Não configurado')
-console.log('Anon Key:', supabaseAnonKey ? '✅ Configurado' : '❌ Não configurado')
-console.log('Service Key:', supabaseServiceKey ? '✅ Configurado' : '❌ Não configurado')
-
 // Cliente normal (para usuários)
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {

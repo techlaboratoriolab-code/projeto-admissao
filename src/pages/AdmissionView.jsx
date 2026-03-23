@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import PatientCard from '../components/PatientCard';
 import { API_BASE_URL, apiFetch } from '../config';
 import { useAuth } from '../contexts/AuthContext';
-import { ConvenioSelect, FontePagadoraSelect, LocalOrigemSelect } from '../components/DropdownsAdmissao';
+import { ConvenioSelect, FontePagadoraSelect, LocalOrigemSelect, MedicoSelect } from '../components/DropdownsAdmissao';
 import { useFilaCompartilhada } from '../hooks/useFilaCompartilhada';
 import { supabase as supabaseClient } from '../lib/supabase';
 
@@ -15,6 +15,8 @@ const AdmissionView = () => {
   const [imagens, setImagens] = useState([]);
   const [imagemSelecionada, setImagemSelecionada] = useState(null);
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [rotacao, setRotacao] = useState(0);
+  const imageContainerRef = useRef(null);
   const [dadosOCRConsolidados, setDadosOCRConsolidados] = useState([]);
   const [resultadoConsolidadoFinal, setResultadoConsolidadoFinal] = useState(null);
   const [imagensProcessadas, setImagensProcessadas] = useState(new Set());
@@ -34,6 +36,8 @@ const AdmissionView = () => {
     numGuia: '',
     matConvenio: '',
     fontePagadora: '',
+    convenio: '',
+    localOrigem: '',
     dadosClinicos: ''
   });
 
@@ -41,6 +45,7 @@ const AdmissionView = () => {
   const [requisicaoData, setRequisicaoData] = useState(null);
   const [sincronizacaoInfo, setSincronizacaoInfo] = useState(null);
   const [receitaFederalStatus, setReceitaFederalStatus] = useState(null); // 🆕 Status da validação da Receita Federal
+  const [validandoCPF, setValidandoCPF] = useState(false);
 
   // 🆕 Estados para histórico de requisições do Supabase
   const [mostrarHistorico, setMostrarHistorico] = useState(false);
@@ -54,9 +59,54 @@ const AdmissionView = () => {
   const [dadosEditaveis, setDadosEditaveis] = useState(null);
   const [dadosRequisicaoEditaveis, setDadosRequisicaoEditaveis] = useState(null);
   const [salvandoDados, setSalvandoDados] = useState(false);
+  const [toastSalvo, setToastSalvo] = useState(false);
+  const [erroModal, setErroModal] = useState(null);
 
   // Ref para debounce da busca automática
   const debounceRef = useRef(null);
+  const ultimaBuscaCodRef = useRef('');
+
+  const CODIGO_REQUISICAO_REGEX = /^(0085|0200)\d{9}$/;
+
+  const normalizarCodigoRequisicao = (valor) => String(valor || '').trim();
+
+  const codigoRequisicaoValido = (valor) => {
+    const codigo = normalizarCodigoRequisicao(valor);
+    return CODIGO_REQUISICAO_REGEX.test(codigo);
+  };
+
+  const resolverCodigoCanonico = (...candidatos) => {
+    const normalizados = candidatos
+      .map(normalizarCodigoRequisicao)
+      .filter(Boolean);
+
+    const valido = normalizados.find(codigoRequisicaoValido);
+    return valido || normalizados[0] || '';
+  };
+
+  const ehTextoPlaceholder = (valor) => {
+    const texto = String(valor || '').trim().toLowerCase();
+    return !texto || texto === 'não informado' || texto === 'nao informado' || texto === 'null' || texto === 'undefined';
+  };
+
+  const valorTextoValido = (valor) => (ehTextoPlaceholder(valor) ? '' : String(valor).trim());
+
+  const buscarCodigoCanonicoNaApi = async (codigoInformado) => {
+    const codigo = normalizarCodigoRequisicao(codigoInformado);
+    if (!codigo) return '';
+
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/api/requisicao/${codigo}`);
+      const data = await response.json();
+      if (!response.ok) return '';
+
+      const codigoApi = normalizarCodigoRequisicao(data?.requisicao?.codRequisicao);
+      return codigoRequisicaoValido(codigoApi) ? codigoApi : '';
+    } catch (error) {
+      console.warn('[CODIGO] Não foi possível resolver código canônico via API:', error);
+      return '';
+    }
+  };
 
   // Fila compartilhada multi-usuário (Supabase Realtime)
   const {
@@ -99,6 +149,9 @@ const AdmissionView = () => {
   const buscarRequisicao = async (codRequisicao) => {
     if (!codRequisicao || codRequisicao.length < 10) return;
 
+    const codigoSolicitado = String(codRequisicao).trim();
+    ultimaBuscaCodRef.current = codigoSolicitado;
+
     setLoadingRequisicao(true);
     setMessage(null);
 
@@ -112,10 +165,42 @@ const AdmissionView = () => {
     setImagens([]);
 
     try {
-      const response = await apiFetch(`${API_BASE_URL}/api/requisicao/${codRequisicao}`);
+      const response = await apiFetch(`${API_BASE_URL}/api/requisicao/${codigoSolicitado}`);
       const data = await response.json();
 
+      if (ultimaBuscaCodRef.current !== codigoSolicitado) {
+        console.warn('[BUSCAR] Resposta ignorada (busca antiga):', codigoSolicitado);
+        return;
+      }
+
       if (response.ok) {
+        const codigoRetornado = String(data?.requisicao?.codRequisicao || '').trim();
+        const solicitadoValido = codigoRequisicaoValido(codigoSolicitado);
+        const retornadoValido = codigoRequisicaoValido(codigoRetornado);
+
+        if (!codigoRetornado || (codigoRetornado !== codigoSolicitado && solicitadoValido)) {
+          console.warn('[BUSCAR] Código divergente retornado pela API:', {
+            solicitado: codigoSolicitado,
+            retornado: codigoRetornado
+          });
+          setMessage({
+            type: 'error',
+            text: `❌ Código divergente retornado pela API. Solicitado: ${codigoSolicitado} | Retornado: ${codigoRetornado || 'vazio'}`
+          });
+          return;
+        }
+
+        if (codigoRetornado !== codigoSolicitado && !solicitadoValido && retornadoValido) {
+          console.log('[BUSCAR] Alias resolvido para código canônico:', {
+            informado: codigoSolicitado,
+            canonico: codigoRetornado
+          });
+          setMessage({
+            type: 'info',
+            text: `Código canônico identificado: ${codigoRetornado}`
+          });
+        }
+
         // Atualizar dados do paciente para exibir no card lateral
         if (data.paciente) {
           // 🔍 DEBUG: Ver o que está vindo do backend
@@ -150,6 +235,7 @@ const AdmissionView = () => {
               // Dados foram corrigidos pela Receita Federal
               setReceitaFederalStatus({
                 tipo: 'sucesso',
+                validado: true,
                 mensagem: 'Dados validados e corrigidos pela Receita Federal',
                 detalhes: 'Os dados do paciente foram validados e corrigidos automaticamente.',
                 comparacao: data.validacao_cpf.comparacao  // Adicionar dados comparativos
@@ -162,6 +248,7 @@ const AdmissionView = () => {
               // Dados validados e OK
               setReceitaFederalStatus({
                 tipo: 'sucesso',
+                validado: true,
                 mensagem: 'Dados validados pela Receita Federal',
                 detalhes: 'Os dados do paciente foram validados e estão corretos.',
                 comparacao: data.validacao_cpf.comparacao  // Adicionar dados comparativos
@@ -182,15 +269,17 @@ const AdmissionView = () => {
             age: `${idade} anos`,
             birthDate: formatarData(data.paciente.dtaNasc),
             recordNumber: data.requisicao.codRequisicao,
-            origin: data.localOrigem?.nome || 'Não informado',
-            payingSource: data.fontePagadora?.nome || 'Particular',
-            insurance: data.convenio?.nome || 'Não informado',
+            origin: valorTextoValido(data.localOrigem?.nome),
+            payingSource: valorTextoValido(data.fontePagadora?.nome),
+            insurance: valorTextoValido(data.convenio?.nome),
             doctorName: data.medico?.nome || 'Não informado',
             doctorCRM: data.medico?.crm ? `CRM: ${data.medico.crm}/${data.medico.uf}` : 'Não informado',
             collectionDate: formatarData(data.requisicao.dtaColeta),
             statusText: 'Em andamento',
             status: 'in-progress',
             cpf: data.paciente.cpf,
+            sexo: data.paciente.sexo || data.paciente.DesSexo || '',
+            gender: data.paciente.sexo || data.paciente.DesSexo || '',
             rg: data.paciente.rg,
             phone: data.paciente.telCelular,
             email: data.paciente.email,
@@ -212,16 +301,23 @@ const AdmissionView = () => {
           // Converter para ISO se estiver em formato DD/MM/YYYY
           dataColeta = converterDataParaISO(dataColeta);
 
+          const codRequisicaoAtual = normalizarCodigoRequisicao(prev.codRequisicao);
+          const codRequisicaoApi = normalizarCodigoRequisicao(data.requisicao.codRequisicao);
+          const codRequisicaoFinal = resolverCodigoCanonico(codRequisicaoAtual, codRequisicaoApi);
+
           return {
             ...prev,
-            codRequisicao: data.requisicao.codRequisicao,
+            codRequisicao: codRequisicaoFinal,
             dtaColeta: dataColeta,
             // Aceitar tanto idPaciente quanto CodPaciente - NÃO usar prev.idPaciente para evitar herdar de requisição anterior
             idPaciente: (data.paciente.idPaciente || data.paciente.CodPaciente)?.toString() || '',
             // Buscar IDs tanto do objeto requisicao quanto dos objetos específicos - NÃO usar prev para evitar herdar de requisição anterior
             idConvenio: data.requisicao.idConvenio?.toString() || data.convenio?.id?.toString() || '',
+            convenio: data.requisicao.convenio || data.convenio?.nome || '',
             idLocalOrigem: data.requisicao.idLocalOrigem?.toString() || data.localOrigem?.id?.toString() || '1',
+            localOrigem: data.requisicao.localOrigem || data.localOrigem?.nome || '',
             idFontePagadora: data.requisicao.idFontePagadora?.toString() || data.fontePagadora?.id?.toString() || '',
+            fontePagadora: data.requisicao.fontePagadora || data.fontePagadora?.nome || '',
             idMedico: data.requisicao.idMedico?.toString() || '',
             numGuia: data.requisicao.numGuia || '',
             dadosClinicos: data.requisicao.dadosClinicos || ''
@@ -435,11 +531,10 @@ const AdmissionView = () => {
     // Criar objeto de atualização APENAS com campos do OCR
     const atualizacoesOCR = {};
 
-    // Código da requisição do OCR (se não estiver preenchido)
-    if (req.comentarios_gerais?.requisicao_entrada && !formData.codRequisicao) {
-      atualizacoesOCR.codRequisicao = req.comentarios_gerais.requisicao_entrada;
-      camposPreenchidos.push('Código da Requisição (OCR)');
-      console.log('[PREENCHER] ✓ :', req.comentarios_gerais.requisicao_entrada);
+    // IMPORTANTE: NUNCA sobrescrever código da requisição com OCR.
+    // O código canônico vem da fila/API e deve ser preservado exatamente como recebido.
+    if (req.comentarios_gerais?.requisicao_entrada) {
+      console.log('[PREENCHER] ℹ️ Código detectado no OCR foi ignorado para preservar o código canônico:', req.comentarios_gerais.requisicao_entrada);
     }
 
     // Data de coleta do OCR (sobrescreve API se existir)
@@ -1533,12 +1628,18 @@ const AdmissionView = () => {
       return;
     }
 
+    if (validandoCPF) {
+      return;
+    }
+
     console.log('[VALIDAR CPF] 📋 CPF a ser validado:', cpfDisponivel);
+
+    setValidandoCPF(true);
 
     try {
       setMessage({
         type: 'info',
-        text: '🔍 Validando CPF na Receita Federal...'
+        text: '⏳ Validação de CPF iniciada. Consultando Receita Federal...'
       });
 
       const response = await apiFetch(`${API_BASE_URL}/api/admissao/validar-cpf`, {
@@ -1570,6 +1671,7 @@ const AdmissionView = () => {
         // Atualizar o status da validação na UI
         setReceitaFederalStatus({
           tipo: temDivergencia ? 'aviso' : 'sucesso',
+          validado: true,
           mensagem: temDivergencia
             ? '⚠️ CPF validado com divergências'
             : '✅ CPF validado pela Receita Federal',
@@ -1588,7 +1690,7 @@ const AdmissionView = () => {
         setMessage({
           type: temDivergencia ? 'warning' : 'success',
           text: temDivergencia
-            ? `⚠️ CPF validado mas há divergências nos dados. Verifique a tabela abaixo.`
+            ? `✅ CPF validado. Há divergências nos dados; revise a tabela abaixo.`
             : `✅ CPF validado com sucesso! ${dados.nome} - ${dados.situacao_cadastral}`
         });
 
@@ -1626,6 +1728,8 @@ const AdmissionView = () => {
         type: 'error',
         text: `❌ Erro ao validar CPF: ${error.message}`
       });
+    } finally {
+      setValidandoCPF(false);
     }
   };
 
@@ -1717,8 +1821,24 @@ const AdmissionView = () => {
         console.log('[SALVAR] ⚠️ Data de coleta não informada, usando data atual:', dtaColetaFinal);
       }
 
+      // Verificar campos obrigatórios do paciente
+      const camposFaltando = [];
+      if (!patientData?.name || patientData.name.trim() === '') camposFaltando.push('Nome Completo');
+      if (!patientData?.cpf || patientData.cpf.trim() === '') camposFaltando.push('CPF');
+      if (!patientData?.birthDate || patientData.birthDate.trim() === '') camposFaltando.push('Data de Nascimento');
+
+      if (camposFaltando.length > 0) {
+        setMessage({
+          type: 'error',
+          text: `⚠️ Preencha os seguintes campos obrigatórios antes de salvar:\n• ${camposFaltando.join('\n• ')}`
+        });
+        setLoading(false);
+        return;
+      }
+
       // Verificar se tem exames
-      if (!formData.examesConvenio || formData.examesConvenio.trim() === '') {
+      const examesConvenioStr = Array.isArray(formData.examesConvenio) ? formData.examesConvenio.join(', ') : String(formData.examesConvenio || '');
+      if (!examesConvenioStr || examesConvenioStr.trim() === '') {
         setMessage({
           type: 'error',
           text: '⚠️ Por favor, aguarde a análise automática ou preencha os exames manualmente.'
@@ -1735,7 +1855,10 @@ const AdmissionView = () => {
 
       // 🆕 CONVERTER NOMES DE EXAMES PARA IDs
       console.log('[SALVAR] 🔄 Convertendo nomes de exames para IDs...');
-      const nomesExames = formData.examesConvenio
+      const examesConvenioFinal = Array.isArray(formData.examesConvenio)
+        ? formData.examesConvenio.join(', ')
+        : String(formData.examesConvenio || '');
+      const nomesExames = examesConvenioFinal
         .split(',')
         .map(nome => nome.trim())
         .filter(nome => nome.length > 0);
@@ -1803,14 +1926,16 @@ const AdmissionView = () => {
         idPaciente: safeParseInt(formData.idPaciente), // Buscado pelo CPF durante OCR OU EDITADO MANUALMENTE
         dtaColeta: dtaColetaFinal, // Garantir que sempre tenha data
         idConvenio: safeParseInt(formData.idConvenio),
+        convenio: valorTextoValido(formData.convenio) || valorTextoValido(patientData?.insurance) || '',
         idLocalOrigem: safeParseInt(formData.idLocalOrigem) || 1,
+        localOrigem: valorTextoValido(formData.localOrigem) || valorTextoValido(patientData?.origin) || '',
         idFontePagadora: safeParseInt(formData.idFontePagadora),
         idMedico: safeParseInt(formData.idMedico), // Buscado pelo CRM durante OCR
         idExame: idsExames[0], // Primeiro exame como principal
         examesConvenio: idsExames, // Array com todos os IDs
         numGuia: formData.numGuia || '', // 🆕 Incluir número da guia
         matConvenio: matConvenioFinal, // 🆕 Incluir matrícula do convênio (SINCRONIZADO do patientData)
-        fontePagadora: formData.fontePagadora || '', // 🆕 Incluir fonte pagadora (nome)
+        fontePagadora: valorTextoValido(formData.fontePagadora) || valorTextoValido(patientData?.payingSource) || '', // 🆕 Incluir fonte pagadora (nome)
         // 🆕 CREDENCIAIS DO APLIS DO USUÁRIO LOGADO
         aplis_usuario: usuario?.aplis_usuario || null,
         aplis_senha: usuario?.aplis_senha || null
@@ -1821,9 +1946,29 @@ const AdmissionView = () => {
         tem_senha: !!usuario?.aplis_senha
       });
 
-      // 🆕 Se idPaciente estiver vazio, incluir dados do paciente do OCR para criação automática
+      // 🆕 SEMPRE incluir CPF, nome e data de nascimento (para criar novo paciente OU atualizar existente no apLIS)
+      if (patientData) {
+        if (patientData.cpf) {
+          dados.NumCPF = patientData.cpf.replace(/\D/g, ''); // Remove formatação
+          console.log('[SALVAR]   ✓ CPF:', dados.NumCPF);
+        }
+        if (patientData.name) {
+          dados.NomPaciente = patientData.name;
+          console.log('[SALVAR]   ✓ Nome:', dados.NomPaciente);
+        }
+        if (patientData.birthDate) {
+          // Converter de DD/MM/YYYY para YYYY-MM-DD
+          const partes = patientData.birthDate.split('/');
+          if (partes.length === 3) {
+            dados.DtaNasc = `${partes[2]}-${partes[1]}-${partes[0]}`;
+            console.log('[SALVAR]   ✓ Data Nascimento:', dados.DtaNasc);
+          }
+        }
+      }
+
+      // 🆕 Se idPaciente estiver vazio, incluir dados adicionais do paciente para criação automática
       if (!dados.idPaciente && patientData) {
-        console.log('[SALVAR] 🆕 idPaciente não informado - incluindo dados do paciente do OCR para criação automática');
+        console.log('[SALVAR] 🆕 idPaciente não informado - incluindo dados adicionais do paciente para criação automática');
         
         // ⚠️ AVISO: Verificar se CPF foi validado na Receita Federal
         if (patientData.cpf && !receitaFederalStatus?.validado) {
@@ -1849,29 +1994,9 @@ const AdmissionView = () => {
           console.log('[SALVAR] ⚠️ Usuário confirmou cadastro mesmo sem validação do CPF');
         }
         
-        // Incluir dados do paciente extraídos pelo OCR
-        if (patientData.cpf) {
-          dados.NumCPF = patientData.cpf.replace(/\D/g, ''); // Remove formatação
-          console.log('[SALVAR]   ✓ CPF:', dados.NumCPF);
-        }
-        
-        if (patientData.name) {
-          dados.NomPaciente = patientData.name;
-          console.log('[SALVAR]   ✓ Nome:', dados.NomPaciente);
-        }
-        
         if (patientData.phone) {
           dados.TelCelular = patientData.phone.replace(/\D/g, ''); // Remove formatação
           console.log('[SALVAR]   ✓ Telefone:', dados.TelCelular);
-        }
-        
-        if (patientData.birthDate) {
-          // Converter de DD/MM/YYYY para YYYY-MM-DD
-          const partes = patientData.birthDate.split('/');
-          if (partes.length === 3) {
-            dados.DtaNasc = `${partes[2]}-${partes[1]}-${partes[0]}`;
-            console.log('[SALVAR]   ✓ Data Nascimento:', dados.DtaNasc);
-          }
         }
         
         if (patientData.rg) {
@@ -1889,7 +2014,7 @@ const AdmissionView = () => {
           console.log('[SALVAR]   ✓ Email:', dados.Email);
         }
 
-        console.log('[SALVAR] 📋 Dados do paciente incluídos para criação automática');
+        console.log('[SALVAR] 📋 Dados adicionais do paciente incluídos para criação automática');
       }
 
       console.log('[SALVAR] 🔍 Valor de idPaciente após processamento:');
@@ -2131,17 +2256,47 @@ const AdmissionView = () => {
   };
 
   // Versão do handleSubmit sem confirmações (para modo automático)
-  const handleSubmitAutomatico = async () => {
+  const handleSubmitAutomatico = async (codRequisicaoForcado = null) => {
     console.log('[AUTO-SAVE] Iniciando salvamento automático...');
     setLoading(true);
     setMessage({ type: 'info', text: 'Salvando admissão automaticamente...' });
 
     try {
-      if (!formData.codRequisicao) {
+      let codRequisicaoFinal = resolverCodigoCanonico(
+        codRequisicaoForcado,
+        formData.codRequisicao,
+        requisicaoData?.codRequisicao
+      );
+
+      if (codRequisicaoFinal && !codigoRequisicaoValido(codRequisicaoFinal)) {
+        const codigoCanonico = await buscarCodigoCanonicoNaApi(codRequisicaoFinal);
+        if (codigoRequisicaoValido(codigoCanonico)) {
+          codRequisicaoFinal = codigoCanonico;
+          setFormData(prev => ({ ...prev, codRequisicao: codigoCanonico }));
+          console.log('[AUTO-SAVE] Código inválido corrigido automaticamente:', codigoCanonico);
+        }
+      }
+
+      if (!codRequisicaoFinal) {
         throw new Error('Código da requisição não informado');
       }
 
-      if (!formData.examesConvenio || formData.examesConvenio.trim() === '') {
+      if (!codigoRequisicaoValido(codRequisicaoFinal)) {
+        throw new Error(`Código de requisição inválido (${codRequisicaoFinal})`);
+      }
+
+      // Verificar campos obrigatórios do paciente
+      const camposFaltandoAuto = [];
+      if (!patientData?.name || patientData.name.trim() === '') camposFaltandoAuto.push('Nome Completo');
+      if (!patientData?.cpf || patientData.cpf.trim() === '') camposFaltandoAuto.push('CPF');
+      if (!patientData?.birthDate || patientData.birthDate.trim() === '') camposFaltandoAuto.push('Data de Nascimento');
+
+      if (camposFaltandoAuto.length > 0) {
+        throw new Error(`Preencha os campos obrigatórios: ${camposFaltandoAuto.join(', ')}`);
+      }
+
+      const examesConvenioStr2 = Array.isArray(formData.examesConvenio) ? formData.examesConvenio.join(', ') : String(formData.examesConvenio || '');
+      if (!examesConvenioStr2 || examesConvenioStr2.trim() === '') {
         throw new Error('Nenhum exame encontrado para salvar');
       }
 
@@ -2151,7 +2306,7 @@ const AdmissionView = () => {
       };
 
       // Converter nomes de exames para IDs
-      const nomesExames = formData.examesConvenio.split(',').map(nome => nome.trim()).filter(nome => nome.length > 0);
+      const nomesExames = examesConvenioStr2.split(',').map(nome => nome.trim()).filter(nome => nome.length > 0);
       const responseBusca = await apiFetch(`${API_BASE_URL}/api/exames/buscar-por-nome`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2175,33 +2330,40 @@ const AdmissionView = () => {
 
       const dados = {
         ...formData,
+        codRequisicao: codRequisicaoFinal,
         idLaboratorio: safeParseInt(formData.idLaboratorio) || 1,
         idUnidade: safeParseInt(formData.idUnidade) || 1,
         idPaciente: safeParseInt(formData.idPaciente),
         dtaColeta: formData.dtaColeta || new Date().toISOString().split('T')[0],
         idConvenio: safeParseInt(formData.idConvenio),
+        convenio: valorTextoValido(formData.convenio) || valorTextoValido(patientData?.insurance) || '',
         idLocalOrigem: safeParseInt(formData.idLocalOrigem) || 1,
+        localOrigem: valorTextoValido(formData.localOrigem) || valorTextoValido(patientData?.origin) || '',
         idFontePagadora: safeParseInt(formData.idFontePagadora),
         idMedico: safeParseInt(formData.idMedico),
         idExame: idsExames[0],
         examesConvenio: idsExames,
         numGuia: formData.numGuia || '',
         matConvenio: matConvenioFinal,
-        fontePagadora: formData.fontePagadora || '',
+        fontePagadora: valorTextoValido(formData.fontePagadora) || valorTextoValido(patientData?.payingSource) || '',
         aplis_usuario: usuario?.aplis_usuario || null,
         aplis_senha: usuario?.aplis_senha || null
       };
 
-      // Se idPaciente vazio, incluir dados do paciente para criação automática (SEM confirmação)
-      if (!dados.idPaciente && patientData) {
-        console.log('[AUTO-SAVE] idPaciente vazio - incluindo dados do paciente para criação automática');
+      // SEMPRE incluir CPF, nome e data de nascimento (para criar novo paciente OU atualizar existente)
+      if (patientData) {
         if (patientData.cpf) dados.NumCPF = patientData.cpf.replace(/\D/g, '');
         if (patientData.name) dados.NomPaciente = patientData.name;
-        if (patientData.phone) dados.TelCelular = patientData.phone.replace(/\D/g, '');
         if (patientData.birthDate) {
           const partes = patientData.birthDate.split('/');
           if (partes.length === 3) dados.DtaNasc = `${partes[2]}-${partes[1]}-${partes[0]}`;
         }
+      }
+
+      // Se idPaciente vazio, incluir dados adicionais do paciente para criação automática
+      if (!dados.idPaciente && patientData) {
+        console.log('[AUTO-SAVE] idPaciente vazio - incluindo dados adicionais do paciente para criação automática');
+        if (patientData.phone) dados.TelCelular = patientData.phone.replace(/\D/g, '');
         if (patientData.rg) dados.RGNumero = patientData.rg;
         if (patientData.address) dados.DscEndereco = patientData.address;
         if (patientData.email) dados.Email = patientData.email;
@@ -2253,6 +2415,8 @@ const AdmissionView = () => {
       numGuia: '',
       matConvenio: '',
       fontePagadora: '',
+      convenio: '',
+      localOrigem: '',
       dadosClinicos: ''
     });
     setPatientData(null);
@@ -2377,7 +2541,7 @@ const AdmissionView = () => {
         break;
       }
 
-      const codRequisicao = item.cod_requisicao || item.codRequisicao;
+      const codRequisicao = resolverCodigoCanonico(item.cod_requisicao, item.codRequisicao);
       console.log(`[AUTO] Processando ${i + 1}/${total}: ${codRequisicao}`);
       setFilaIndice(i);
       setMessage({ type: 'info', text: `[${i + 1}/${total}] Processando OCR: ${codRequisicao}...` });
@@ -2418,8 +2582,15 @@ const AdmissionView = () => {
               setResultadoConsolidadoFinal(currentResultado => {
                 // Salvar snapshot no Supabase
                 if (item.id) {
+                  const codRequisicaoSnapshot = resolverCodigoCanonico(
+                    currentFormData?.codRequisicao,
+                    item.cod_requisicao,
+                    item.codRequisicao
+                  );
+
                   atualizarItem(item.id, {
                     status: 'processado',
+                    cod_requisicao: codRequisicaoSnapshot,
                     form_data_snapshot: { ...currentFormData },
                     patient_data_snapshot: currentPatientData ? { ...currentPatientData } : null,
                     resultado_consolidado: currentResultado,
@@ -2458,8 +2629,35 @@ const AdmissionView = () => {
     setMessage({ type: 'success', text: `OCR concluído! Revise e aprove cada requisição.` });
   };
 
+  // Sanitiza o formSnapshot para garantir que todos os campos sejam do tipo correto
+  const sanitizarFormSnapshot = (snapshot) => {
+    if (!snapshot || typeof snapshot !== 'object') return snapshot;
+    const s = { ...snapshot };
+    // examesConvenio deve ser string (pode vir como array de IDs do banco)
+    if (Array.isArray(s.examesConvenio)) {
+      s.examesConvenio = s.examesConvenio.join(', ');
+    } else if (s.examesConvenio == null) {
+      s.examesConvenio = '';
+    } else {
+      s.examesConvenio = String(s.examesConvenio);
+    }
+    // Garantir que campos de ID sejam strings
+    ['idConvenio', 'idLocalOrigem', 'idFontePagadora', 'idMedico', 'idExame', 'idPaciente', 'idLaboratorio', 'idUnidade'].forEach(campo => {
+      if (s[campo] != null && typeof s[campo] !== 'string') {
+        s[campo] = String(s[campo]);
+      } else if (s[campo] == null) {
+        s[campo] = '';
+      }
+    });
+    // Garantir que codRequisicao seja string
+    if (s.codRequisicao == null) s.codRequisicao = '';
+    else s.codRequisicao = String(s.codRequisicao);
+    return s;
+  };
+
   // Carregar uma requisição processada no formulário para revisão (com lock)
   const carregarRequisicaoDaFila = async (indice) => {
+    try {
     const item = filaRequisicoes[indice];
     if (!item) {
       console.warn('[AUTO] Item não encontrado:', indice);
@@ -2467,16 +2665,29 @@ const AdmissionView = () => {
     }
 
     // Verificar se tem snapshot (campos do Supabase usam snake_case)
-    const formSnapshot = item.form_data_snapshot || item.formDataSnapshot;
+    const formSnapshotRaw = item.form_data_snapshot || item.formDataSnapshot;
+    let formSnapshot = sanitizarFormSnapshot(formSnapshotRaw);
     const patientSnapshot = item.patient_data_snapshot || item.patientDataSnapshot;
     const resultado = item.resultado_consolidado || item.resultadoConsolidado;
-    const codRequisicao = item.cod_requisicao || item.codRequisicao;
+    const codRequisicao = resolverCodigoCanonico(
+      item.cod_requisicao,
+      item.codRequisicao,
+      formSnapshot?.codRequisicao
+    );
+    const codRequisicaoCanonico = normalizarCodigoRequisicao(codRequisicao);
+
+    if (formSnapshot && codRequisicaoCanonico) {
+      formSnapshot = {
+        ...formSnapshot,
+        codRequisicao: codRequisicaoCanonico
+      };
+    }
 
     // Se não tem snapshot mas é salvo/pulado, carregar direto pela API
     if (!formSnapshot && (item.status === 'salvo' || item.status === 'pulado')) {
       console.log(`[AUTO] Sem snapshot - carregando via API: ${codRequisicao}`);
       setFilaRevisaoIndice(indice);
-      setFormData(prev => ({ ...prev, codRequisicao: codRequisicao || '' }));
+      setFormData(prev => ({ ...prev, codRequisicao: codRequisicaoCanonico || '' }));
       if (codRequisicao) {
         await buscarRequisicao(codRequisicao);
       }
@@ -2515,17 +2726,72 @@ const AdmissionView = () => {
     setPatientData(patientSnapshot);
     if (resultado) setResultadoConsolidadoFinal(resultado);
 
-    // Buscar imagens via API (não ficam salvas no snapshot)
+    // Buscar dados frescos da API (imagens + complementar snapshot com dados incompletos às 4h30)
     if (codRequisicao) {
       try {
         const imgResp = await apiFetch(`${API_BASE_URL}/api/requisicao/${codRequisicao}`);
         const imgData = await imgResp.json();
-        if (imgResp.ok && imgData.imagens) {
-          setImagens(imgData.imagens);
-          setRequisicaoData(imgData.requisicao || null);
+        if (imgResp.ok) {
+          const apiReq = imgData.requisicao || {};
+          const apiPac = imgData.paciente || {};
+          const apiConv = imgData.convenio || {};
+          const apiLocal = imgData.localOrigem || {};
+          const apiFonteP = imgData.fontePagadora || {};
+          const apiMed = imgData.medico || {};
+
+          if (imgData.imagens) {
+            setImagens(imgData.imagens);
+            setRequisicaoData(apiReq || null);
+          }
+
+          // Enriquecer formData: IDs que podem estar vazios no snapshot (APLIS incompleto às 4h30)
+          setFormData(prev => ({
+            ...prev,
+            codRequisicao: resolverCodigoCanonico(
+              prev.codRequisicao,
+              apiReq.codRequisicao,
+              codRequisicaoCanonico
+            ),
+            idConvenio: prev.idConvenio || apiReq.idConvenio?.toString() || apiConv.id?.toString() || '',
+            convenio: valorTextoValido(prev.convenio) || valorTextoValido(apiReq.convenio) || valorTextoValido(apiConv.nome) || '',
+            idMedico: prev.idMedico || apiReq.idMedico?.toString() || '',
+            idLocalOrigem: (prev.idLocalOrigem && prev.idLocalOrigem !== '1')
+              ? prev.idLocalOrigem
+              : (apiReq.idLocalOrigem?.toString() || apiLocal.id?.toString() || prev.idLocalOrigem || '1'),
+            localOrigem: valorTextoValido(prev.localOrigem) || valorTextoValido(apiReq.localOrigem) || valorTextoValido(apiLocal.nome) || '',
+            idFontePagadora: prev.idFontePagadora || apiReq.idFontePagadora?.toString() || apiFonteP.id?.toString() || '',
+            fontePagadora: valorTextoValido(prev.fontePagadora) || valorTextoValido(apiReq.fontePagadora) || valorTextoValido(apiFonteP.nome) || '',
+            idPaciente: prev.idPaciente || (apiPac.idPaciente || apiPac.CodPaciente)?.toString() || '',
+            dadosClinicos: prev.dadosClinicos || apiReq.dadosClinicos || '',
+            dtaColeta: prev.dtaColeta || converterDataParaISO(apiReq.dtaColeta) || '',
+          }));
+
+          // Enriquecer patientData: informações do paciente podem estar vazias no snapshot
+          if (imgData.paciente) {
+            const idadeApi = calcularIdade(apiPac.dtaNasc);
+            setPatientData(prev => ({
+              ...prev,
+              idPaciente: prev?.idPaciente || (apiPac.idPaciente || apiPac.CodPaciente) || '',
+              name: prev?.name || apiPac.nome || '',
+              cpf: prev?.cpf || apiPac.cpf || '',
+              age: prev?.age || (idadeApi ? `${idadeApi} anos` : ''),
+              birthDate: prev?.birthDate || formatarData(apiPac.dtaNasc) || '',
+              origin: (prev?.origin && prev.origin !== 'Nao informado') ? prev.origin : (apiLocal.nome || ''),
+              payingSource: (prev?.payingSource && prev.payingSource !== 'Particular' && prev.payingSource !== 'Nao informado') ? prev.payingSource : (apiFonteP.nome || ''),
+              insurance: (prev?.insurance && prev.insurance !== 'Nao informado') ? prev.insurance : (apiConv.nome || ''),
+              doctorName: (prev?.doctorName && prev.doctorName !== 'Nao informado') ? prev.doctorName : (apiMed.nome || ''),
+              doctorCRM: (prev?.doctorCRM && prev.doctorCRM !== 'Nao informado') ? prev.doctorCRM : (apiMed.crm ? `CRM: ${apiMed.crm}/${apiMed.uf}` : ''),
+              collectionDate: prev?.collectionDate || formatarData(apiReq.dtaColeta) || '',
+              phone: prev?.phone || apiPac.telCelular || '',
+              email: prev?.email || apiPac.email || '',
+              address: prev?.address || formatarEndereco(apiPac.endereco) || '',
+              sexo: prev?.sexo || apiPac.sexo || apiPac.DesSexo || '',
+              gender: prev?.gender || apiPac.sexo || apiPac.DesSexo || '',
+            }));
+          }
         }
       } catch (e) {
-        console.warn('[AUTO] Erro ao buscar imagens:', e);
+        console.warn('[AUTO] Erro ao buscar dados atualizados:', e);
       }
     }
 
@@ -2533,39 +2799,80 @@ const AdmissionView = () => {
       ? `Visualizando (${item.status === 'salvo' ? 'Salvo no apLIS' : 'Pulado'}): ${codRequisicao} — ${patientSnapshot?.name || item.paciente_nome || 'Paciente'}`
       : `Revisando: ${codRequisicao} — ${patientSnapshot?.name || item.paciente_nome || 'Paciente'}`;
     setMessage({ type: jaFinalizado ? 'success' : 'info', text: msgLabel });
+    } catch (error) {
+      console.error('[AUTO] Erro ao carregar requisição da fila:', error);
+      setMessage({ type: 'error', text: `Erro ao carregar requisição: ${error.message}` });
+    }
   };
 
   // Aprovar requisição: salvar no APLIS + marcar no Supabase
   const aprovarRequisicao = async () => {
     if (filaRevisaoIndice < 0) return;
     const item = filaRequisicoes[filaRevisaoIndice];
-    const codRequisicao = formData.codRequisicao || item.cod_requisicao || item.codRequisicao;
+    const codRequisicao = resolverCodigoCanonico(
+      item.cod_requisicao,
+      item.codRequisicao,
+      requisicaoData?.codRequisicao,
+      formData.codRequisicao
+    );
 
-    console.log(`[AUTO] Aprovando requisição ${codRequisicao}...`);
-    setMessage({ type: 'info', text: `Salvando ${codRequisicao}...` });
+    if (!codRequisicao) {
+      setMessage({ type: 'error', text: 'Código da requisição não encontrado para aprovação.' });
+      return;
+    }
+
+    let codRequisicaoFinal = codRequisicao;
+    if (!codigoRequisicaoValido(codRequisicaoFinal)) {
+      const codApiAtual = normalizarCodigoRequisicao(requisicaoData?.codRequisicao);
+      const codCanonico = codigoRequisicaoValido(codApiAtual)
+        ? codApiAtual
+        : await buscarCodigoCanonicoNaApi(codRequisicaoFinal);
+
+      if (!codigoRequisicaoValido(codCanonico)) {
+        setMessage({
+          type: 'error',
+          text: `Código da requisição inválido para aprovação (${codRequisicaoFinal}). Não foi possível sincronizar automaticamente.`
+        });
+        return;
+      }
+
+      codRequisicaoFinal = codCanonico;
+      setFormData(prev => ({ ...prev, codRequisicao: codRequisicaoFinal }));
+      if (item.id) {
+        await atualizarItem(item.id, { cod_requisicao: codRequisicaoFinal });
+      }
+      setMessage({
+        type: 'info',
+        text: `Código corrigido automaticamente para ${codRequisicaoFinal}. Prosseguindo com o salvamento...`
+      });
+    }
+
+    console.log(`[AUTO] Aprovando requisição ${codRequisicaoFinal}...`);
+    setMessage({ type: 'info', text: `Salvando ${codRequisicaoFinal}...` });
 
     try {
-      const saveResult = await handleSubmitAutomatico();
+      setFormData(prev => ({ ...prev, codRequisicao: codRequisicaoFinal }));
+      const saveResult = await handleSubmitAutomatico(codRequisicaoFinal);
 
       // Marcar como salvo no Supabase
       if (item.id) await aprovarItemSupabase(item.id, usuario?.id);
 
       setFilaLog(prev => [...prev, {
-        codRequisicao,
+        codRequisicao: codRequisicaoFinal,
         status: 'sucesso',
         mensagem: `Salvo por ${usuario?.nome_completo || usuario?.username || 'usuário'}`,
         timestamp: new Date().toLocaleTimeString()
       }]);
 
-      setMessage({ type: 'success', text: `${codRequisicao} salvo com sucesso!` });
-      console.log(`[AUTO] ${codRequisicao} salvo!`);
+      setMessage({ type: 'success', text: `${codRequisicaoFinal} salvo com sucesso!` });
+      console.log(`[AUTO] ${codRequisicaoFinal} salvo!`);
 
       limparFormulario();
       setFilaRevisaoIndice(-1);
 
     } catch (error) {
-      console.error(`[AUTO] Erro ao salvar ${codRequisicao}:`, error);
-      setMessage({ type: 'error', text: `Erro ao salvar ${codRequisicao}: ${error.message}` });
+      console.error(`[AUTO] Erro ao salvar ${codRequisicaoFinal}:`, error);
+      setMessage({ type: 'error', text: `Erro ao salvar ${codRequisicaoFinal}: ${error.message}` });
     }
   };
 
@@ -2608,7 +2915,9 @@ const AdmissionView = () => {
         idMedico: parseInt(formData.idMedico) || undefined,
         idExame: parseInt(formData.idExame) || undefined,
         examesConvenio: formData.examesConvenio ?
-          formData.examesConvenio.split(',').map(e => parseInt(e.trim())) : undefined
+          (Array.isArray(formData.examesConvenio)
+            ? formData.examesConvenio.map(e => parseInt(e))
+            : String(formData.examesConvenio).split(',').map(e => parseInt(e.trim()))) : undefined
       };
 
       const response = await apiFetch(`${API_BASE_URL}/api/admissao/validar`, {
@@ -2972,12 +3281,20 @@ const AdmissionView = () => {
   const abrirImagem = (imagem) => {
     setImagemSelecionada(imagem);
     setZoomLevel(1); // Resetar zoom ao abrir
+    setRotacao(0); // Resetar rotação ao abrir
+    requestAnimationFrame(() => {
+      if (imageContainerRef.current) {
+        imageContainerRef.current.scrollTop = 0;
+        imageContainerRef.current.scrollLeft = 0;
+      }
+    });
   };
 
   // Fechar modal de imagem
   const fecharModal = () => {
     setImagemSelecionada(null);
     setZoomLevel(1); // Resetar zoom ao fechar
+    setRotacao(0); // Resetar rotação ao fechar
     setModoEdicaoModal(false); // Resetar modo edição
     setDadosEditaveis(null);
     setDadosRequisicaoEditaveis(null);
@@ -2985,6 +3302,7 @@ const AdmissionView = () => {
 
   // Iniciar edição no modal
   const iniciarEdicaoModal = () => {
+    setErroModal(null);
     setDadosEditaveis({
       nome: patientData?.name || '',
       dataNascimento: patientData?.birthDate || '',
@@ -2997,10 +3315,14 @@ const AdmissionView = () => {
     });
     setDadosRequisicaoEditaveis({
       dataColeta: patientData?.collectionDate || '',
-      convenio: patientData?.insurance || '',
-      origem: patientData?.origin || '',
-      fontePagadora: patientData?.payingSource || '',
+      convenio: formData?.convenio || patientData?.insurance || '',
+      idConvenio: formData?.idConvenio || '',
+      origem: formData?.localOrigem || patientData?.origin || '',
+      idLocalOrigem: formData?.idLocalOrigem || '',
+      fontePagadora: formData?.fontePagadora || patientData?.payingSource || '',
+      idFontePagadora: formData?.idFontePagadora || '',
       medico: patientData?.doctorName || '',
+      idMedico: formData?.idMedico || '',
       crm: patientData?.doctorCRM || '',
       numGuia: requisicaoData?.requisicao?.numGuia || '',
       dadosClinicos: requisicaoData?.requisicao?.dadosClinicos || ''
@@ -3013,126 +3335,101 @@ const AdmissionView = () => {
     setModoEdicaoModal(false);
     setDadosEditaveis(null);
     setDadosRequisicaoEditaveis(null);
+    setErroModal(null);
   };
 
-  // Salvar alterações do modal
-  const salvarAlteracoesModal = async () => {
-    if (!requisicaoData?.paciente?.idPaciente) {
-      setMessage({ type: 'error', text: 'ID do paciente não encontrado.' });
-      return;
+  // Salvar alterações do modal (apenas localmente na sessão)
+  const salvarAlteracoesModal = () => {
+    const novaIdade = calcularIdade(converterDataParaISO(dadosEditaveis.dataNascimento));
+
+    // Atualizar patientData — reflete em todos os lugares da tela
+    setPatientData(prev => ({
+      ...prev,
+      name: dadosEditaveis.nome,
+      birthDate: dadosEditaveis.dataNascimento,
+      age: `${novaIdade} anos`,
+      cpf: dadosEditaveis.cpf,
+      rg: dadosEditaveis.rg,
+      phone: dadosEditaveis.telefone,
+      email: dadosEditaveis.email,
+      insuranceCardNumber: dadosEditaveis.carteirinha,
+      address: dadosEditaveis.endereco,
+      collectionDate: dadosRequisicaoEditaveis?.dataColeta || prev.collectionDate,
+      insurance: dadosRequisicaoEditaveis?.convenio || prev.insurance,
+      origin: dadosRequisicaoEditaveis?.origem || prev.origin,
+      payingSource: dadosRequisicaoEditaveis?.fontePagadora || prev.payingSource,
+      doctorName: dadosRequisicaoEditaveis?.medico || prev.doctorName,
+      doctorCRM: dadosRequisicaoEditaveis?.crm || prev.doctorCRM,
+      numGuia: dadosRequisicaoEditaveis?.numGuia || prev.numGuia
+    }));
+
+    // Atualizar formData para manter campos do formulário sincronizados
+    setFormData(prev => ({
+      ...prev,
+      dtaColeta: converterDataParaISO(dadosRequisicaoEditaveis?.dataColeta) || prev.dtaColeta,
+      idConvenio: dadosRequisicaoEditaveis?.idConvenio || prev.idConvenio,
+      idLocalOrigem: dadosRequisicaoEditaveis?.idLocalOrigem || prev.idLocalOrigem,
+      idFontePagadora: dadosRequisicaoEditaveis?.idFontePagadora || prev.idFontePagadora,
+      idMedico: dadosRequisicaoEditaveis?.idMedico || prev.idMedico,
+      convenio: dadosRequisicaoEditaveis?.convenio || prev.convenio,
+      localOrigem: dadosRequisicaoEditaveis?.origem || prev.localOrigem,
+      fontePagadora: dadosRequisicaoEditaveis?.fontePagadora || prev.fontePagadora,
+      numGuia: dadosRequisicaoEditaveis?.numGuia || prev.numGuia,
+      dadosClinicos: dadosRequisicaoEditaveis?.dadosClinicos || prev.dadosClinicos,
+      matConvenio: dadosEditaveis.carteirinha || prev.matConvenio,
+    }));
+
+    // Atualizar requisicaoData se existir
+    if (requisicaoData) {
+      setRequisicaoData(prev => ({
+        ...prev,
+        requisicao: {
+          ...prev.requisicao,
+          numGuia: dadosRequisicaoEditaveis?.numGuia || prev.requisicao?.numGuia,
+          dadosClinicos: dadosRequisicaoEditaveis?.dadosClinicos || prev.requisicao?.dadosClinicos
+        }
+      }));
     }
 
-    setSalvandoDados(true);
-    try {
-      // Salvar dados do paciente
-      const responsePaciente = await apiFetch(`${API_BASE_URL}/api/paciente/${requisicaoData.paciente.idPaciente}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          nome: dadosEditaveis.nome,
-          dtaNasc: converterDataParaISO(dadosEditaveis.dataNascimento),
-          cpf: dadosEditaveis.cpf,
-          rg: dadosEditaveis.rg,
-          telCelular: dadosEditaveis.telefone,
-          email: dadosEditaveis.email,
-          matriculaConvenio: dadosEditaveis.carteirinha,
-          endereco: dadosEditaveis.endereco
-        })
-      });
-
-      const dataPaciente = await responsePaciente.json();
-
-      if (!responsePaciente.ok) {
-        setMessage({ type: 'error', text: dataPaciente.erro || 'Erro ao atualizar dados do paciente.' });
-        setSalvandoDados(false);
-        return;
-      }
-
-      // Salvar dados da requisição
-      const responseRequisicao = await apiFetch(`${API_BASE_URL}/api/requisicao/${formData.codRequisicao}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          dtaColeta: converterDataParaISO(dadosRequisicaoEditaveis.dataColeta),
-          convenio: dadosRequisicaoEditaveis.convenio,
-          origem: dadosRequisicaoEditaveis.origem,
-          fontePagadora: dadosRequisicaoEditaveis.fontePagadora,
-          medico: dadosRequisicaoEditaveis.medico,
-          crm: dadosRequisicaoEditaveis.crm,
-          numGuia: dadosRequisicaoEditaveis.numGuia,
-          dadosClinicos: dadosRequisicaoEditaveis.dadosClinicos
-        })
-      });
-
-      const dataRequisicao = await responseRequisicao.json();
-
-      if (responseRequisicao.ok) {
-        // Recalcular idade
-        const novaIdade = calcularIdade(converterDataParaISO(dadosEditaveis.dataNascimento));
-        
-        // Atualizar patientData com novos dados
-        setPatientData(prev => ({
-          ...prev,
-          name: dadosEditaveis.nome,
-          birthDate: dadosEditaveis.dataNascimento,
-          age: `${novaIdade} anos`,
-          cpf: dadosEditaveis.cpf,
-          rg: dadosEditaveis.rg,
-          phone: dadosEditaveis.telefone,
-          email: dadosEditaveis.email,
-          insuranceCardNumber: dadosEditaveis.carteirinha,
-          address: dadosEditaveis.endereco,
-          collectionDate: dadosRequisicaoEditaveis.dataColeta,
-          insurance: dadosRequisicaoEditaveis.convenio,
-          origin: dadosRequisicaoEditaveis.origem,
-          payingSource: dadosRequisicaoEditaveis.fontePagadora,
-          doctorName: dadosRequisicaoEditaveis.medico,
-          doctorCRM: dadosRequisicaoEditaveis.crm,
-          numGuia: dadosRequisicaoEditaveis.numGuia
-        }));
-
-        // Atualizar requisicaoData
-        setRequisicaoData(prev => ({
-          ...prev,
-          requisicao: {
-            ...prev.requisicao,
-            dtaColeta: converterDataParaISO(dadosRequisicaoEditaveis.dataColeta),
-            numGuia: dadosRequisicaoEditaveis.numGuia,
-            dadosClinicos: dadosRequisicaoEditaveis.dadosClinicos
-          }
-        }));
-
-        setMessage({ type: 'success', text: '✓ Todos os dados atualizados com sucesso!' });
-        setModoEdicaoModal(false);
-        setDadosEditaveis(null);
-        setDadosRequisicaoEditaveis(null);
-      } else {
-        setMessage({ type: 'error', text: dataRequisicao.erro || 'Erro ao atualizar dados da requisição.' });
-      }
-    } catch (error) {
-      console.error('Erro ao salvar alterações:', error);
-      setMessage({ type: 'error', text: 'Erro ao conectar com o servidor.' });
-    } finally {
-      setSalvandoDados(false);
-    }
+    setModoEdicaoModal(false);
+    setDadosEditaveis(null);
+    setDadosRequisicaoEditaveis(null);
+    setErroModal(null);
+    setToastSalvo(true);
+    setTimeout(() => setToastSalvo(false), 3500);
   };
 
   // Controles de zoom
   const zoomIn = () => {
-    setZoomLevel(prev => Math.min(prev + 0.25, 3)); // Max 300%
+    setZoomLevel(prev => Math.min(parseFloat((prev + 0.25).toFixed(2)), 5));
   };
 
   const zoomOut = () => {
-    setZoomLevel(prev => Math.max(prev - 0.25, 0.5)); // Min 50%
+    setZoomLevel(prev => Math.max(parseFloat((prev - 0.25).toFixed(2)), 0.25));
   };
 
   const resetZoom = () => {
     setZoomLevel(1);
+    if (imageContainerRef.current) {
+      imageContainerRef.current.scrollTop = 0;
+      imageContainerRef.current.scrollLeft = 0;
+    }
   };
+
+  // Listener de roda do mouse (não-passivo, permite preventDefault para zoom com Ctrl+scroll)
+  useEffect(() => {
+    const el = imageContainerRef.current;
+    if (!el || !imagemSelecionada) return;
+    const handler = (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.15 : 0.15;
+        setZoomLevel(prev => Math.min(Math.max(parseFloat((prev + delta).toFixed(2)), 0.25), 5));
+      }
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, [imagemSelecionada]);
 
   // Função para atualizar dados do paciente editados no card
   const handlePatientUpdate = (updatedPatient) => {
@@ -3144,12 +3441,15 @@ const AdmissionView = () => {
       ...prev,
       // Sincronizar idPaciente se foi editado
       idPaciente: updatedPatient.idPaciente !== undefined ? updatedPatient.idPaciente : prev.idPaciente,
+      // Sincronizar carteirinha do convênio
+      matConvenio: updatedPatient.insuranceCardNumber !== undefined ? updatedPatient.insuranceCardNumber : prev.matConvenio,
       // Sincronizar exames se foram editados
       examesConvenio: updatedPatient.exams !== undefined ? updatedPatient.exams : prev.examesConvenio
     }));
 
     console.log('[PATIENT CARD] ✓ Dados sincronizados com formData');
     console.log('[PATIENT CARD]   - idPaciente:', updatedPatient.idPaciente);
+    console.log('[PATIENT CARD]   - matConvenio:', updatedPatient.insuranceCardNumber);
     console.log('[PATIENT CARD]   - exames:', updatedPatient.exams);
 
     setMessage({
@@ -3285,6 +3585,7 @@ const AdmissionView = () => {
         patient={patientData}
         onPatientUpdate={handlePatientUpdate}
         onValidarCPF={validarCPFManualmente}
+        validandoCPF={validandoCPF}
       />
 
       <div className="flex-1 p-6 bg-slate-50 dark:bg-neutral-900 overflow-y-auto" style={{ order: 1 }}>
@@ -3324,34 +3625,33 @@ const AdmissionView = () => {
         {/* Conteúdo da aba de Admissão */}
         {abaPrincipal === 'admissao' && (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-        <div style={{ order: 2 }}>
+        <div className="mb-5">
         {/* Painel do Modo Automático — Compartilhado */}
-        <div className={`${
+        <div className={`rounded-xl shadow-sm p-4 ${
           filaStatus === 'processando' ? 'bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800' :
           filaStatus === 'revisao' ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800' :
           'bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700'
-        } rounded-xl shadow-sm`} style={{ marginBottom: '20px', padding: '16px' }}>
+        }`}>
 
           {/* Info da sessão ativa */}
           {sessaoAtiva && (
-            <div className="text-xs mb-2" style={{ opacity: 0.7 }}>
-              <span className="dark:text-neutral-400 text-slate-500">
-                Sessao iniciada por <strong>{sessaoAtiva.iniciado_por_nome || 'Desconhecido'}</strong>
-                {euSouProcessador && ' (voce)'}
-              </span>
-            </div>
+            <p className="text-xs text-slate-500 dark:text-neutral-400 opacity-70 mb-3">
+              Sessão iniciada por <strong className="font-semibold">{sessaoAtiva.iniciado_por_nome || 'Desconhecido'}</strong>
+              {euSouProcessador && ' (você)'}
+            </p>
           )}
 
           {/* Barra de controle */}
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="flex flex-wrap gap-2 items-center">
             {(filaStatus === 'idle' || filaStatus === 'concluido') && (
               <button
                 type="button"
                 onClick={iniciarModoAutomatico}
                 disabled={loading || loadingRequisicao}
-                style={{ padding: '12px 24px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1 }}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
               >
-                Iniciar Modo Automatico
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Iniciar Modo Automático
               </button>
             )}
 
@@ -3359,8 +3659,9 @@ const AdmissionView = () => {
               <button
                 type="button"
                 onClick={() => { autoStopRef.current = true; }}
-                style={{ padding: '12px 24px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition-colors shadow-sm"
               >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
                 Parar
               </button>
             )}
@@ -3370,130 +3671,109 @@ const AdmissionView = () => {
                 type="button"
                 onClick={resetarSessao}
                 title="Reseta a sessão travada e permite iniciar uma nova"
-                style={{ padding: '12px 24px', background: '#6b7280', color: 'white', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-slate-600 dark:text-neutral-300 hover:bg-slate-50 dark:hover:bg-neutral-700 text-sm font-semibold transition-colors shadow-sm"
               >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.48"/></svg>
                 Reiniciar Sessão
               </button>
             )}
 
             {filaStatus === 'buscando_fila' && (
-              <span className="text-blue-500 dark:text-blue-400" style={{ fontWeight: '500', fontSize: '14px' }}>Buscando requisicoes pendentes...</span>
+              <span className="text-blue-500 dark:text-blue-400 text-sm font-medium flex items-center gap-1.5">
+                <div className="animate-spin h-3.5 w-3.5 border-2 border-blue-400 border-t-transparent rounded-full" />
+                Buscando requisições pendentes...
+              </span>
             )}
 
             {filaStatus === 'processando' && (
-              <span className="text-blue-500 dark:text-blue-400" style={{ fontWeight: '600', fontSize: '15px' }}>
+              <span className="text-blue-600 dark:text-blue-400 text-sm font-semibold">
                 Processando OCR {(sessaoAtiva?.itens_processados || filaIndice) + 1}/{filaRequisicoes.length}
               </span>
             )}
 
             {filaStatus === 'revisao' && (
-              <span className="text-amber-500 dark:text-amber-400" style={{ fontWeight: '600', fontSize: '15px' }}>
-                Revisao — {filaRequisicoes.filter(r => r.status === 'salvo').length} salvos, {filaRequisicoes.filter(r => r.status === 'processado' || r.status === 'em_revisao').length} aguardando
+              <span className="text-amber-600 dark:text-amber-400 text-sm font-semibold">
+                Revisão — {filaRequisicoes.filter(r => r.status === 'salvo').length} salvos, {filaRequisicoes.filter(r => r.status === 'processado' || r.status === 'em_revisao').length} aguardando
               </span>
             )}
 
             {filaStatus === 'concluido' && (
-              <span className="text-green-600 dark:text-green-400" style={{ fontWeight: '600', fontSize: '15px' }}>
-                Concluido — {filaRequisicoes.filter(r => r.status === 'salvo').length} salvos de {filaRequisicoes.length}
+              <span className="text-emerald-600 dark:text-emerald-400 text-sm font-semibold">
+                Concluído — {filaRequisicoes.filter(r => r.status === 'salvo').length} salvos de {filaRequisicoes.length}
               </span>
             )}
           </div>
 
           {/* Lista de requisições processadas para revisão */}
           {(filaStatus === 'revisao' || filaStatus === 'processando' || filaStatus === 'concluido') && filaRequisicoes.length > 0 && (
-            <div className="border border-slate-200 dark:border-neutral-600" style={{ marginTop: '12px', borderRadius: '8px', overflow: 'hidden' }}>
+            <div className="mt-3 rounded-xl border border-slate-200 dark:border-neutral-700 overflow-hidden">
               {/* Cabeçalho das colunas */}
-              <div style={{
-                display: 'flex',
-                gap: '16px',
-                alignItems: 'center',
-                padding: '7px 18px',
-                background: document.documentElement.classList.contains('dark') ? '#1a1a1a' : '#f1f5f9',
-                borderBottom: document.documentElement.classList.contains('dark') ? '1px solid #333' : '1px solid #e2e8f0'
-              }}>
-                <div style={{ minWidth: '130px', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>Cód. Requisição</div>
-                <div style={{ flex: 1, fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>Paciente</div>
-                <div style={{ minWidth: '110px', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>CPF</div>
-                <div style={{ minWidth: '110px', textAlign: 'right', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.07em', color: '#64748b' }}>Situação</div>
+              <div className="flex gap-4 items-center px-4 py-2 bg-slate-50 dark:bg-neutral-800/80 border-b border-slate-200 dark:border-neutral-700">
+                <div className="min-w-[130px] text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-neutral-500">Cód. Requisição</div>
+                <div className="flex-1 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-neutral-500">Paciente</div>
+                <div className="min-w-[110px] text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-neutral-500">CPF</div>
+                <div className="min-w-[130px] text-right text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-neutral-500">Situação</div>
               </div>
-              <div style={{ maxHeight: '350px', overflowY: 'auto' }}>
+              <div className="max-h-[350px] overflow-y-auto divide-y divide-slate-100 dark:divide-neutral-800">
               {filaRequisicoes.map((item, idx) => {
                 const isSelected = idx === filaRevisaoIndice;
-                const isDark = document.documentElement.classList.contains('dark');
                 const codReq = item.cod_requisicao || item.codRequisicao;
                 const nome = item.patient_data_snapshot?.name || item.patientDataSnapshot?.name || item.paciente_nome || item.paciente || '—';
                 const cpfItem = item.patient_data_snapshot?.cpf || item.patientDataSnapshot?.cpf || item.cpf || '';
                 const isLockedByOther = item.status === 'em_revisao' && item.revisado_por !== usuario?.id;
                 const canClick = item.status === 'salvo' || item.status === 'pulado' ||
                   ((item.status === 'processado' || (item.status === 'em_revisao' && item.revisado_por === usuario?.id)) && (filaStatus === 'revisao' || filaStatus === 'processando'));
-                const statusColors = {
-                  pendente: { bg: isDark ? '#1c1c1c' : '#f8fafc', text: '#94a3b8', label: 'Pendente' },
-                  processando: { bg: isDark ? '#172554' : '#eff6ff', text: '#60a5fa', label: 'Processando...' },
-                  processado: { bg: isDark ? '#1a1a1a' : '#ffffff', text: '#fbbf24', label: 'Aguardando revisao' },
-                  em_revisao: { bg: isDark ? '#1e1b4b' : '#eef2ff', text: '#818cf8', label: isLockedByOther ? `Revisando: ${item.revisado_por_nome || '...'}` : 'Em revisao (voce)' },
-                  erro: { bg: isDark ? '#2a1215' : '#fef2f2', text: '#f87171', label: 'Erro' },
-                  salvo: { bg: isDark ? '#0a2618' : '#f0fdf4', text: '#4ade80', label: 'Salvo no apLIS' },
-                  pulado: { bg: isDark ? '#1c1c1c' : '#f8fafc', text: '#94a3b8', label: 'Pulado' }
+                const statusConfig = {
+                  pendente:    { pill: 'bg-slate-100 dark:bg-neutral-700 text-slate-500 dark:text-neutral-400',        label: 'Pendente' },
+                  processando: { pill: 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400',            label: 'Processando...' },
+                  processado:  { pill: 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400',        label: 'Aguardando revisão' },
+                  em_revisao:  { pill: 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400',    label: isLockedByOther ? `Revisando: ${item.revisado_por_nome || '...'}` : 'Em revisão (você)' },
+                  erro:        { pill: 'bg-red-100 dark:bg-red-900/30 text-red-500 dark:text-red-400',                label: 'Erro' },
+                  salvo:       { pill: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400', label: 'Salvo no apLIS' },
+                  pulado:      { pill: 'bg-slate-100 dark:bg-neutral-700 text-slate-500 dark:text-neutral-400',        label: 'Pulado' },
                 };
-                const st = statusColors[item.status] || statusColors.pendente;
+                const sc = statusConfig[item.status] || statusConfig.pendente;
 
                 return (
                   <div
                     key={item.id || idx}
                     onClick={() => { if (canClick) carregarRequisicaoDaFila(idx); }}
-                    style={{
-                      padding: '10px 14px',
-                      borderBottom: isDark ? '1px solid #333' : '1px solid #f1f5f9',
-                      background: isSelected ? (isDark ? '#422006' : '#fef3c7') : st.bg,
-                      cursor: canClick ? 'pointer' : 'default',
-                      opacity: isLockedByOther ? 0.6 : 1,
-                      display: 'flex',
-                      gap: '16px',
-                      alignItems: 'center',
-                      transition: 'background 0.15s',
-                      borderLeft: isSelected ? '4px solid #f59e0b' : '4px solid transparent'
-                    }}
+                    className={`flex gap-4 items-center px-4 py-3 transition-colors border-l-4 ${
+                      isSelected
+                        ? 'bg-amber-50 dark:bg-amber-950/20 border-l-amber-400'
+                        : `border-l-transparent ${canClick ? 'hover:bg-slate-50 dark:hover:bg-neutral-800/60' : ''}`
+                    } ${canClick ? 'cursor-pointer' : 'cursor-default'} ${isLockedByOther ? 'opacity-50' : ''}`}
                   >
                     {/* Código da Requisição */}
-                    <div style={{ minWidth: '130px' }}>
-                      <div style={{ fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: isDark ? '#525252' : '#94a3b8', marginBottom: '2px' }}>Cód. Requisição</div>
-                      <div style={{ fontWeight: '700', fontSize: '13px', color: isDark ? '#e5e5e5' : '#1e293b', fontFamily: 'monospace', letterSpacing: '0.03em' }}>{codReq}</div>
+                    <div className="min-w-[130px]">
+                      <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-neutral-500 mb-0.5">Cód. Req.</div>
+                      <div className="font-bold text-[13px] text-slate-800 dark:text-neutral-100 font-mono tracking-wide">{codReq}</div>
                     </div>
 
                     {/* Nome do Paciente */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: isDark ? '#525252' : '#94a3b8', marginBottom: '2px' }}>Paciente</div>
-                      <div style={{ fontSize: '13px', color: isDark ? '#d4d4d4' : '#334155', fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nome}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-neutral-500 mb-0.5">Paciente</div>
+                      <div className="text-[13px] text-slate-600 dark:text-neutral-300 font-medium truncate">{nome}</div>
                     </div>
 
                     {/* CPF */}
                     {cpfItem && (
-                      <div style={{ minWidth: '110px' }}>
-                        <div style={{ fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: isDark ? '#525252' : '#94a3b8', marginBottom: '2px' }}>CPF</div>
-                        <div style={{ fontSize: '12px', color: isDark ? '#737373' : '#64748b', fontFamily: 'monospace' }}>{cpfItem}</div>
+                      <div className="min-w-[110px]">
+                        <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-neutral-500 mb-0.5">CPF</div>
+                        <div className="text-[12px] text-slate-500 dark:text-neutral-400 font-mono">{cpfItem}</div>
                       </div>
                     )}
 
                     {/* Status */}
-                    <div style={{ minWidth: '110px', textAlign: 'right' }}>
-                      <div style={{ fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: isDark ? '#525252' : '#94a3b8', marginBottom: '4px' }}>Situação</div>
-                      <span style={{
-                        fontSize: '11px',
-                        fontWeight: '600',
-                        color: st.text,
-                        background: isDark ? '#262626' : st.bg,
-                        padding: '3px 10px',
-                        borderRadius: '12px',
-                        border: `1px solid ${st.text}30`,
-                        whiteSpace: 'nowrap'
-                      }}>
-                        {st.label}
+                    <div className="min-w-[130px] text-right">
+                      <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-neutral-500 mb-1">Situação</div>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${sc.pill}`}>
+                        {sc.label}
                       </span>
+                      {item.status === 'erro' && item.erro && (
+                        <p className="text-[10px] text-red-500 mt-0.5">{item.erro}</p>
+                      )}
                     </div>
-
-                    {item.status === 'erro' && (
-                      <span style={{ fontSize: '11px', color: '#f87171' }}>{item.erro}</span>
-                    )}
                   </div>
                 );
               })}
@@ -3503,23 +3783,25 @@ const AdmissionView = () => {
 
           {/* Botões de ação quando uma requisição está selecionada para revisão */}
           {(filaStatus === 'revisao' || filaStatus === 'processando') && filaRevisaoIndice >= 0 && (
-            <div className="bg-amber-100 dark:bg-amber-900/30 border border-amber-400 dark:border-amber-600" style={{ marginTop: '12px', display: 'flex', gap: '12px', alignItems: 'center', padding: '12px', borderRadius: '8px' }}>
-              <span className="text-amber-800 dark:text-amber-300" style={{ fontSize: '14px', fontWeight: '500', flex: 1 }}>
-                Revisando: {filaRequisicoes[filaRevisaoIndice]?.cod_requisicao || filaRequisicoes[filaRevisaoIndice]?.codRequisicao} — Edite os campos se necessario, depois aprove ou pule.
+            <div className="mt-3 flex flex-wrap gap-3 items-center p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
+              <span className="flex-1 text-sm font-medium text-amber-800 dark:text-amber-300">
+                Revisando: <strong className="font-semibold">{filaRequisicoes[filaRevisaoIndice]?.cod_requisicao || filaRequisicoes[filaRevisaoIndice]?.codRequisicao}</strong> — Edite os campos se necessário, depois aprove ou pule.
               </span>
               <button
                 type="button"
                 onClick={aprovarRequisicao}
                 disabled={loading}
-                style={{ padding: '10px 20px', background: '#16a34a', color: 'white', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors disabled:opacity-50 shadow-sm"
               >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                 Aprovar e Salvar
               </button>
               <button
                 type="button"
                 onClick={pularRequisicao}
-                style={{ padding: '10px 20px', background: '#94a3b8', color: 'white', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-slate-600 dark:text-neutral-300 hover:bg-slate-50 dark:hover:bg-neutral-700 text-sm font-semibold transition-colors shadow-sm"
               >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.18-4.96"/></svg>
                 Pular
               </button>
             </div>
@@ -3527,281 +3809,227 @@ const AdmissionView = () => {
 
           {/* Instrução quando em modo revisão sem seleção */}
           {filaStatus === 'revisao' && filaRevisaoIndice < 0 && filaRequisicoes.some(r => r.status === 'processado') && (
-            <div className="bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-300" style={{ marginTop: '12px', padding: '12px', borderRadius: '8px', fontSize: '14px', fontWeight: '500' }}>
-              Clique em uma requisicao da lista acima para revisar e aprovar.
+            <div className="mt-3 flex items-center gap-2 p-3.5 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-sm font-medium">
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              Clique em uma requisição da lista acima para revisar e aprovar.
             </div>
           )}
 
           {/* Verificar se todas foram revisadas */}
           {filaStatus === 'revisao' && !filaRequisicoes.some(r => r.status === 'processado' || r.status === 'em_revisao') && (
-            <div className="bg-green-50 dark:bg-green-950/30 text-green-800 dark:text-green-300" style={{ marginTop: '12px', padding: '12px', borderRadius: '8px', fontSize: '14px', fontWeight: '500' }}>
-              Todas as requisicoes foram revisadas! {filaRequisicoes.filter(r => r.status === 'salvo').length} salvas, {filaRequisicoes.filter(r => r.status === 'pulado').length} puladas, {filaRequisicoes.filter(r => r.status === 'erro').length} com erro.
+            <div className="mt-3 flex items-center gap-2 p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-sm font-medium">
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              Todas as requisições foram revisadas! {filaRequisicoes.filter(r => r.status === 'salvo').length} salvas, {filaRequisicoes.filter(r => r.status === 'pulado').length} puladas, {filaRequisicoes.filter(r => r.status === 'erro').length} com erro.
             </div>
           )}
         </div>
         </div>
 
-        <div style={{ order: 1, marginBottom: '24px' }}>
+        <div style={{ marginBottom: '24px' }}>
         {/* Botão para abrir histórico */}
-        <div style={{ marginBottom: '16px' }}>
+        <div className="mb-4">
           <button
             type="button"
             onClick={() => {
               setMostrarHistorico(!mostrarHistorico);
-              if (!mostrarHistorico) {
-                buscarRequisicoesHistorico();
-              }
+              if (!mostrarHistorico) buscarRequisicoesHistorico();
             }}
-            className={`w-full flex items-center justify-between px-5 py-3.5 rounded-xl border text-sm font-semibold transition-all duration-200 ${
+            className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border text-sm font-semibold transition-all duration-200 ${
               mostrarHistorico
-                ? 'bg-slate-700 dark:bg-neutral-700 text-white border-slate-600 dark:border-neutral-600'
-                : 'bg-white dark:bg-neutral-800 text-slate-600 dark:text-neutral-300 border-slate-200 dark:border-neutral-700 hover:border-blue-300 dark:hover:border-blue-600 hover:text-blue-600 dark:hover:text-blue-400'
+                ? 'bg-indigo-600 dark:bg-indigo-700 text-white border-indigo-600 dark:border-indigo-700 shadow-md shadow-indigo-900/20'
+                : 'bg-white dark:bg-neutral-800 text-slate-600 dark:text-neutral-300 border-slate-200 dark:border-neutral-700 hover:border-indigo-400 dark:hover:border-indigo-600 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30'
             }`}
           >
             <span className="flex items-center gap-2.5">
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-              {mostrarHistorico ? 'Fechar Histórico' : 'Requisições Incompletas'}
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+              Requisições Incompletas
+              {!mostrarHistorico && requisicoesHistorico.length > 0 && (
+                <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold bg-red-500 text-white rounded-full">{requisicoesHistorico.length}</span>
+              )}
             </span>
-            <svg xmlns="http://www.w3.org/2000/svg" className={`w-4 h-4 transition-transform ${mostrarHistorico ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" className={`w-4 h-4 transition-transform duration-200 ${mostrarHistorico ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
         </div>
 
-        {/* 🆕 Painel de histórico */}
+        {/* Painel de histórico */}
         {mostrarHistorico && (
-          <div className="bg-white dark:bg-neutral-800 border-2 border-emerald-500 dark:border-emerald-600 dark:shadow-lg dark:shadow-emerald-900/20" style={{
-            borderRadius: '12px',
-            padding: '20px',
-            marginBottom: '20px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-          }}>
-            <h3 className="text-emerald-600 dark:text-emerald-400" style={{
-              margin: '0 0 20px 0',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px'
-            }}>
-              <span>📋</span> Histórico de Requisições
-            </h3>
+          <div className="bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-700 rounded-2xl shadow-lg shadow-slate-900/5 dark:shadow-neutral-950/30 mb-5 overflow-hidden">
+            {/* Header do painel */}
+            <div className="px-5 py-4 border-b border-slate-100 dark:border-neutral-800 bg-gradient-to-r from-indigo-50 to-slate-50 dark:from-indigo-950/30 dark:to-neutral-900 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-indigo-500 dark:text-indigo-400 uppercase tracking-widest leading-none mb-0.5">Histórico</p>
+                  <h3 className="text-sm font-bold text-slate-800 dark:text-neutral-100 leading-none">Requisições Incompletas</h3>
+                </div>
+              </div>
+              {requisicoesHistorico.length > 0 && (
+                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                  {requisicoesHistorico.length} {requisicoesHistorico.length === 1 ? 'registro' : 'registros'}
+                </span>
+              )}
+            </div>
 
-            {/* Campo de busca */}
-            <div style={{ marginBottom: '15px' }}>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <input
-                  type="text"
-                  value={buscaHistorico}
-                  onChange={(e) => setBuscaHistorico(e.target.value)}
-                  placeholder="Buscar por código ou CPF..."
-                  className="bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-600 text-gray-900 dark:text-neutral-100 placeholder:text-gray-400 dark:placeholder:text-neutral-400"
-                  style={{
-                    flex: 1,
-                    padding: '10px 15px',
-                    border: '2px solid #d1d5db',
-                    borderRadius: '6px',
-                    fontSize: '14px'
-                  }}
-                  onKeyPress={(e) => {
-                    if (e.key === 'Enter') {
-                      buscarRequisicoesHistorico(buscaHistorico);
-                    }
-                  }}
-                />
+            <div className="p-4">
+              {/* Barra de busca */}
+              <div className="relative flex gap-2 mb-4">
+                <div className="relative flex-1">
+                  <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-slate-400 dark:text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  </div>
+                  <input
+                    type="text"
+                    value={buscaHistorico}
+                    onChange={(e) => setBuscaHistorico(e.target.value)}
+                    placeholder="Código da requisição ou CPF (11 dígitos)..."
+                    className="w-full pl-10 pr-4 py-2.5 text-sm border border-slate-200 dark:border-neutral-700 rounded-lg bg-white dark:bg-neutral-800 text-slate-800 dark:text-neutral-100 placeholder:text-slate-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 dark:focus:border-indigo-400 transition-all"
+                    onKeyDown={(e) => e.key === 'Enter' && buscarRequisicoesHistorico(buscaHistorico)}
+                  />
+                </div>
                 <button
                   type="button"
                   onClick={() => buscarRequisicoesHistorico(buscaHistorico)}
                   disabled={loadingHistorico}
-                  className="dark:shadow-lg dark:shadow-sky-900/20"
-                  style={{
-                    padding: '10px 20px',
-                    background: '#0ea5e9',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: loadingHistorico ? 'not-allowed' : 'pointer',
-                    fontWeight: '600',
-                    opacity: loadingHistorico ? 0.5 : 1
-                  }}
+                  className="px-4 py-2.5 text-sm font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-sm"
                 >
-                  {loadingHistorico ? '🔄' : '🔍'} Buscar
+                  {loadingHistorico ? (
+                    <div className="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full" />
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  )}
+                  Buscar
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBuscaHistorico('');
-                    buscarRequisicoesHistorico('');
-                  }}
-                  disabled={loadingHistorico}
-                  className="bg-gray-600 dark:bg-neutral-700 dark:shadow-lg dark:shadow-neutral-900/20"
-                  style={{
-                    padding: '10px 20px',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: loadingHistorico ? 'not-allowed' : 'pointer',
-                    fontWeight: '600',
-                    opacity: loadingHistorico ? 0.5 : 1
-                  }}
-                >
-                  Limpar
-                </button>
-              </div>
-              <small className="text-gray-500 dark:text-neutral-400" style={{ display: 'block', marginTop: '8px' }}>
-                💡 Digite o código da requisição ou CPF do paciente (11 dígitos)
-              </small>
-            </div>
-
-            {/* Lista de requisições */}
-            {loadingHistorico ? (
-              <div className="text-gray-500 dark:text-neutral-400" style={{ textAlign: 'center', padding: '30px' }}>
-                <div style={{ fontSize: '32px', marginBottom: '10px' }}>🔄</div>
-                <div>Buscando requisições...</div>
-              </div>
-            ) : requisicoesHistorico.length === 0 ? (
-              <div className="text-gray-500 dark:text-neutral-400" style={{ textAlign: 'center', padding: '30px' }}>
-                <div style={{ fontSize: '32px', marginBottom: '10px' }}>📋</div>
-                <div>Nenhuma requisição encontrada</div>
-                <small>Processe algumas requisições para vê-las aqui</small>
-              </div>
-            ) : (
-              <div style={{
-                maxHeight: '400px',
-                overflowY: 'auto',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '10px'
-              }}>
-                {requisicoesHistorico.map((req, idx) => (
-                  <div
-                    key={idx}
-                    className="bg-gray-50 dark:bg-neutral-700 border border-gray-200 dark:border-neutral-600"
-                    style={{
-                      borderRadius: '8px',
-                      padding: '15px',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      transition: 'all 0.2s ease',
-                      cursor: 'pointer'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = document.documentElement.classList.contains('dark') ? '#3f3f46' : '#f3f4f6';
-                      e.currentTarget.style.borderColor = '#10b981';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = document.documentElement.classList.contains('dark') ? '#404040' : '#f9fafb';
-                      e.currentTarget.style.borderColor = document.documentElement.classList.contains('dark') ? '#525252' : '#e5e7eb';
-                    }}
+                {buscaHistorico && (
+                  <button
+                    type="button"
+                    onClick={() => { setBuscaHistorico(''); buscarRequisicoesHistorico(''); }}
+                    className="px-3 py-2.5 text-sm font-medium rounded-lg border border-slate-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-slate-500 dark:text-neutral-400 hover:bg-slate-50 dark:hover:bg-neutral-700 transition-colors"
                   >
-                    <div style={{ flex: 1 }}>
-                      <div className="text-gray-900 dark:text-neutral-100" style={{ fontWeight: 'bold', marginBottom: '5px' }}>
-                        📄 {req.cod_requisicao}
-                      </div>
-                      <div className="text-gray-600 dark:text-neutral-300" style={{ fontSize: '13px' }}>
-                        👤 {req.nome_paciente || 'Nome não disponível'}
-                      </div>
-                      {req.cpf_paciente && (
-                        <div className="text-gray-600 dark:text-neutral-300" style={{ fontSize: '12px' }}>
-                          📋 CPF: {req.cpf_paciente}
-                        </div>
-                      )}
-                      {req.exames && req.exames.length > 0 && (
-                        <div className="text-emerald-600 dark:text-emerald-400" style={{ fontSize: '12px', marginTop: '5px' }}>
-                          🧪 {req.exames.length} exame(s): {req.exames.slice(0, 2).join(', ')}
-                          {req.exames.length > 2 && '...'}
-                        </div>
-                      )}
-                      <div className="text-gray-400 dark:text-neutral-500" style={{ fontSize: '11px', marginTop: '5px' }}>
-                        🕒 {new Date(req.created_at).toLocaleString('pt-BR')}
-                      </div>
-
-                      {/* Aviso de Campos Faltantes */}
-                      {(() => {
-                        // Pegar dados do paciente do campo dados_paciente
-                        const dadosPaciente = req.dados_paciente || {};
-
-                        // Apenas campos REALMENTE obrigatórios para cadastro pela API
-                        const camposObrigatorios = [
-                          { campo: 'nome', label: 'Nome', valor: dadosPaciente.nome || dadosPaciente.name || req.nome_paciente },
-                          { campo: 'dtaNasc', label: 'Data Nasc.', valor: dadosPaciente.dtaNasc || dadosPaciente.birthDate || req.data_nascimento },
-                          { campo: 'cpf', label: 'CPF', valor: dadosPaciente.cpf || req.cpf_paciente },
-                          { campo: 'sexo', label: 'Sexo', valor: dadosPaciente.sexo || dadosPaciente.gender }
-                        ];
-
-                        const camposFaltantes = camposObrigatorios.filter(item =>
-                          !item.valor || (typeof item.valor === 'string' && item.valor.trim() === '')
-                        );
-
-                        if (camposFaltantes.length > 0) {
-                          return (
-                            <div style={{
-                              marginTop: '10px',
-                              padding: '10px 12px',
-                              background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
-                              border: '2px solid #ef4444',
-                              borderRadius: '6px',
-                              fontSize: '12px'
-                            }}>
-                              <div style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                                marginBottom: '6px',
-                                color: '#991b1b',
-                                fontWeight: '700'
-                              }}>
-                                <span>⚠️</span>
-                                <span>Campos obrigatórios faltando:</span>
-                              </div>
-                              <div style={{
-                                display: 'flex',
-                                flexWrap: 'wrap',
-                                gap: '5px'
-                              }}>
-                                {camposFaltantes.map((item, i) => (
-                                  <span
-                                    key={i}
-                                    style={{
-                                      background: '#dc2626',
-                                      color: 'white',
-                                      padding: '3px 8px',
-                                      borderRadius: '4px',
-                                      fontSize: '11px',
-                                      fontWeight: '600',
-                                      whiteSpace: 'nowrap'
-                                    }}
-                                  >
-                                    {item.label}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => carregarRequisicaoDoHistorico(req)}
-                      className="dark:shadow-lg dark:shadow-emerald-900/20"
-                      style={{
-                        padding: '10px 20px',
-                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        fontWeight: '600',
-                        fontSize: '14px',
-                        whiteSpace: 'nowrap',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-                      }}
-                    >
-                      ⚡ Carregar
-                    </button>
-                  </div>
-                ))}
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                )}
               </div>
-            )}
+
+              {/* Lista de requisições */}
+              {loadingHistorico ? (
+                <div className="flex flex-col items-center justify-center py-12 text-slate-400 dark:text-neutral-500">
+                  <div className="animate-spin h-8 w-8 border-3 border-indigo-500 border-t-transparent rounded-full mb-3" style={{ borderWidth: '3px' }} />
+                  <p className="text-sm font-medium">Buscando requisições...</p>
+                </div>
+              ) : requisicoesHistorico.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-slate-400 dark:text-neutral-500">
+                  <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-neutral-800 flex items-center justify-center mb-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-7 h-7 text-slate-300 dark:text-neutral-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                  </div>
+                  <p className="text-sm font-semibold text-slate-500 dark:text-neutral-400 mb-1">Nenhuma requisição encontrada</p>
+                  <p className="text-xs text-slate-400 dark:text-neutral-500">Processe requisições para visualizá-las aqui</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2.5 max-h-[440px] overflow-y-auto pr-1 scrollbar-custom">
+                  {requisicoesHistorico.map((req, idx) => {
+                    const dadosPaciente = req.dados_paciente || {};
+                    const camposObrigatorios = [
+                      { campo: 'nome',   label: 'Nome',       valor: dadosPaciente.nome || dadosPaciente.name || req.nome_paciente },
+                      { campo: 'dtaNasc',label: 'Data Nasc.', valor: dadosPaciente.dtaNasc || dadosPaciente.DtaNasc || dadosPaciente.birthDate || dadosPaciente.DtaNascimento || req.data_nascimento },
+                      { campo: 'cpf',    label: 'CPF',        valor: dadosPaciente.cpf || dadosPaciente.NumCPF || req.cpf_paciente },
+                      { campo: 'sexo',   label: 'Sexo',       valor: dadosPaciente.sexo || dadosPaciente.Sexo || dadosPaciente.gender || dadosPaciente.DesSexo },
+                    ];
+                    const camposFaltantes = camposObrigatorios.filter(item => !item.valor || (typeof item.valor === 'string' && !item.valor.trim()));
+                    const completo = camposFaltantes.length === 0;
+                    const inicialNome = (req.nome_paciente || dadosPaciente.name || dadosPaciente.nome || '?')[0].toUpperCase();
+                    const avatarColors = ['bg-blue-500','bg-violet-500','bg-emerald-500','bg-amber-500','bg-rose-500','bg-cyan-500'];
+                    const avatarColor = avatarColors[inicialNome.charCodeAt(0) % avatarColors.length];
+
+                    return (
+                      <div
+                        key={idx}
+                        className="group flex items-start gap-3 p-3.5 rounded-xl border border-slate-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-md hover:shadow-indigo-900/5 transition-all duration-200 cursor-default"
+                      >
+                        {/* Avatar com inicial */}
+                        <div className={`w-9 h-9 rounded-lg ${avatarColor} flex items-center justify-center flex-shrink-0 text-white text-sm font-bold shadow-sm`}>
+                          {inicialNome}
+                        </div>
+
+                        {/* Conteúdo */}
+                        <div className="flex-1 min-w-0">
+                          {/* Linha 1: código + status */}
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-bold font-mono text-slate-800 dark:text-neutral-100 truncate">
+                              {req.cod_requisicao}
+                            </span>
+                            {completo ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 flex-shrink-0">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                                Completo
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 flex-shrink-0">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                                Incompleto
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Linha 2: nome do paciente */}
+                          <p className="text-sm font-semibold text-slate-700 dark:text-neutral-200 truncate leading-tight mb-1">
+                            {req.nome_paciente || dadosPaciente.name || dadosPaciente.nome || <span className="font-normal italic text-slate-400 dark:text-neutral-500">Nome não disponível</span>}
+                          </p>
+
+                          {/* Linha 3: CPF + data */}
+                          <div className="flex items-center gap-3 text-[11px] text-slate-400 dark:text-neutral-500 mb-2">
+                            {req.cpf_paciente && (
+                              <span className="flex items-center gap-1">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 15h0M2 9.5h20"/></svg>
+                                {req.cpf_paciente}
+                              </span>
+                            )}
+                            <span className="flex items-center gap-1">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                              {new Date(req.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                            </span>
+                          </div>
+
+                          {/* Linha 4: exames */}
+                          {req.exames && req.exames.length > 0 && (
+                            <p className="text-[11px] text-indigo-600 dark:text-indigo-400 truncate mb-2">
+                              <span className="font-semibold">{req.exames.length} exame{req.exames.length > 1 ? 's' : ''}:</span>{' '}
+                              {req.exames.slice(0, 2).join(', ')}{req.exames.length > 2 && ` +${req.exames.length - 2}`}
+                            </p>
+                          )}
+
+                          {/* Campos faltantes */}
+                          {camposFaltantes.length > 0 && (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[10px] font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Faltando:</span>
+                              {camposFaltantes.map((item, i) => (
+                                <span
+                                  key={i}
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800"
+                                >
+                                  {item.label}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Botão Carregar */}
+                        <button
+                          type="button"
+                          onClick={() => carregarRequisicaoDoHistorico(req)}
+                          className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition-colors shadow-sm shadow-indigo-900/20 self-start mt-0.5"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+                          Carregar
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -4002,6 +4230,16 @@ const AdmissionView = () => {
         )}
 
         <form onSubmit={handleSubmit} className="bg-white dark:bg-neutral-900 rounded-none p-0" noValidate>
+          <div className="flex justify-end gap-6 pb-4 border-b-2 border-gray-200 dark:border-neutral-700">
+            <button
+              type="submit"
+              className="px-10 py-4 bg-blue-600 hover:bg-blue-700 text-white border-0 rounded-lg text-base font-bold cursor-pointer transition-all hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
+              disabled={loading || loadingRequisicao}
+            >
+              {loading ? 'Salvando...' : 'Salvar No Aplis'}
+            </button>
+          </div>
+
           <div className="mb-7 pb-5 border-b border-gray-200 dark:border-neutral-700 last:border-b-0">
             <h3></h3>
 
@@ -4161,18 +4399,6 @@ const AdmissionView = () => {
               {message.text}
             </div>
           )}
-
-          <div className="flex justify-end gap-6 pt-8 border-t-2 border-gray-200 dark:border-neutral-700">
-            {/* Análise automática disparada ao carregar imagens - não precisa de botão */}
-
-            <button
-              type="submit"
-              className="px-10 py-4 bg-blue-600 hover:bg-blue-700 text-white border-0 rounded-lg text-base font-bold cursor-pointer transition-all hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
-              disabled={loading || loadingRequisicao}
-            >
-              {loading ? 'Salvando...' : 'Salvar No Aplis'}
-            </button>
-          </div>
         </form>
           </div>
           </div>
@@ -4180,314 +4406,76 @@ const AdmissionView = () => {
 
         {/* Conteúdo da aba de Visualizar Imagens e Dados */}
         {abaPrincipal === 'visualizar' && (
-          <div className="bg-white dark:bg-neutral-800 dark:shadow-lg dark:shadow-neutral-900/20" style={{
-            borderRadius: '12px',
-            padding: '30px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-          }}>
-            <h2 className="text-emerald-600 dark:text-emerald-400" style={{
-              margin: '0 0 25px 0',
-              fontSize: '24px',
-              fontWeight: '700',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px'
-            }}>
-              <span></span> Visualizar Imagens e Dados do Paciente
-            </h2>
-
-            {/* Aviso de Campos Obrigatórios Faltantes */}
-            {patientData && (() => {
-              // Apenas campos REALMENTE obrigatórios para cadastro pela API
-              const camposObrigatorios = [
-                { campo: 'nome', label: 'Nome', valor: patientData.nome },
-                { campo: 'dtaNasc', label: 'Data Nasc.', valor: patientData.dtaNasc },
-                { campo: 'cpf', label: 'CPF', valor: patientData.cpf },
-                { campo: 'sexo', label: 'Sexo', valor: patientData.sexo }
-              ];
-
-              const camposFaltantes = camposObrigatorios.filter(item => !item.valor || (typeof item.valor === 'string' && item.valor.trim() === ''));
-
-              if (camposFaltantes.length > 0) {
-                return (
-                  <div style={{
-                    background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
-                    color: 'white',
-                    padding: '20px 25px',
-                    borderRadius: '12px',
-                    marginBottom: '25px',
-                    boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)',
-                    border: '2px solid #b91c1c'
-                  }}>
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: '15px'
-                    }}>
-                      <div style={{
-                        fontSize: '32px',
-                        lineHeight: '1'
-                      }}>
-                        ⚠️
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <h3 style={{
-                          margin: '0 0 12px 0',
-                          fontSize: '18px',
-                          fontWeight: '700',
-                          letterSpacing: '0.5px'
-                        }}>
-                          ATENÇÃO: Dados Obrigatórios Não Preenchidos
-                        </h3>
-                        <p style={{
-                          margin: '0 0 15px 0',
-                          fontSize: '14px',
-                          opacity: 0.95
-                        }}>
-                          Os seguintes campos são obrigatórios para salvar no APLIS:
-                        </p>
-                        <div style={{
-                          background: 'rgba(255, 255, 255, 0.15)',
-                          padding: '15px',
-                          borderRadius: '8px',
-                          backdropFilter: 'blur(10px)',
-                          display: 'flex',
-                          flexWrap: 'wrap',
-                          gap: '8px'
-                        }}>
-                          {camposFaltantes.map((item, idx) => (
-                            <span
-                              key={idx}
-                              style={{
-                                background: '#7f1d1d',
-                                padding: '8px 12px',
-                                borderRadius: '6px',
-                                fontSize: '13px',
-                                fontWeight: '700',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                                border: '1px solid rgba(255,255,255,0.2)'
-                              }}
-                            >
-                              <span>❌</span>
-                              <span>{item.label}</span>
-                            </span>
-                          ))}
-                        </div>
-                        <p style={{
-                          margin: '15px 0 0 0',
-                          fontSize: '13px',
-                          opacity: 0.9,
-                          fontWeight: '600'
-                        }}>
-                          💡 Preencha os campos faltantes na aba "Sistema Admissão com OCR" antes de salvar.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                );
-              }
-              return null;
-            })()}
+          <div className="flex flex-col gap-5">
 
             {/* Galeria de Imagens */}
-            <div>
-              <h3 className="text-emerald-600 dark:text-emerald-400" style={{
-                margin: '0 0 20px 0',
-                fontSize: '18px',
-                fontWeight: '700',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <span></span> Imagens Carregadas ({imagens.length})
+            <div className="bg-white dark:bg-neutral-800 rounded-xl border border-slate-200 dark:border-neutral-700 shadow-sm p-6">
+              <h3 className="flex items-center gap-2 text-base font-bold text-slate-700 dark:text-neutral-200 mb-5 pb-3 border-b border-slate-200 dark:border-neutral-700">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                Imagens Carregadas
+                <span className="ml-1 bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 text-xs font-bold px-2 py-0.5 rounded-full">{imagens.length}</span>
               </h3>
 
               {imagens.length === 0 ? (
-                <div className="bg-gray-50 dark:bg-neutral-700 border-2 border-dashed border-gray-300 dark:border-neutral-600" style={{
-                  textAlign: 'center',
-                  padding: '60px 20px',
-                  borderRadius: '12px'
-                }}>
-                  <div style={{ fontSize: '64px', marginBottom: '15px', opacity: 0.5 }}>🖼️</div>
-                  <div className="text-gray-600 dark:text-neutral-300" style={{ fontSize: '18px', fontWeight: '600', marginBottom: '8px' }}>
-                    Nenhuma imagem carregada
-                  </div>
-                  <div className="text-gray-400 dark:text-neutral-500" style={{ fontSize: '14px' }}>
-                    As imagens aparecerão aqui quando você processar uma requisição
-                  </div>
+                <div className="flex flex-col items-center justify-center py-16 text-center bg-slate-50 dark:bg-neutral-700/40 rounded-xl border-2 border-dashed border-slate-200 dark:border-neutral-600">
+                  <span className="text-5xl mb-4 opacity-40">🖼️</span>
+                  <p className="text-slate-600 dark:text-neutral-300 font-semibold text-base mb-1">Nenhuma imagem carregada</p>
+                  <p className="text-slate-400 dark:text-neutral-500 text-sm">As imagens aparecerão aqui quando você processar uma requisição</p>
                 </div>
               ) : (
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                  gap: '20px'
-                }}>
+                <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
                   {imagens.map((img, idx) => {
                     const isPDF = img.nome?.toUpperCase().endsWith('.PDF');
-                    
-                    // Debug: Log da imagem
-                    console.log(`[IMAGEM ${idx}]`, {
-                      nome: img.nome,
-                      url: img.url,
-                      tipo: img.tipo,
-                      isPDF
-                    });
-                    
+                    const processado = imagensProcessadas.has(img.nome);
                     return (
-                    <div
-                      key={img.nome || idx}
-                      style={{
-                        background: 'white',
-                        border: imagensProcessadas.has(img.nome) ? '2px solid #10b981' : '2px solid #e5e7eb',
-                        borderRadius: '12px',
-                        padding: '15px',
-                        cursor: 'pointer',
-                        transition: 'all 0.3s ease',
-                        position: 'relative',
-                        boxShadow: imagensProcessadas.has(img.nome) ? '0 4px 12px rgba(16, 185, 129, 0.2)' : '0 2px 4px rgba(0,0,0,0.05)'
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.borderColor = '#10b981';
-                        e.currentTarget.style.boxShadow = '0 8px 20px rgba(16, 185, 129, 0.3)';
-                        e.currentTarget.style.transform = 'translateY(-5px)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.borderColor = imagensProcessadas.has(img.nome) ? '#10b981' : '#e5e7eb';
-                        e.currentTarget.style.boxShadow = imagensProcessadas.has(img.nome) ? '0 4px 12px rgba(16, 185, 129, 0.2)' : '0 2px 4px rgba(0,0,0,0.05)';
-                        e.currentTarget.style.transform = 'translateY(0)';
-                      }}
-                    >
-                      {imagensProcessadas.has(img.nome) && (
-                        <div style={{
-                          position: 'absolute',
-                          top: '10px',
-                          right: '10px',
-                          background: '#10b981',
-                          color: 'white',
-                          padding: '4px 8px',
-                          borderRadius: '6px',
-                          fontSize: '11px',
-                          fontWeight: '700',
-                          boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-                        }}>
-                          ✓ OCR Processado
-                        </div>
-                      )}
-
                       <div
-                        onClick={() => setImagemSelecionada(img)}
-                        style={{ position: 'relative' }}
+                        key={img.nome || idx}
+                        className={`relative rounded-xl border-2 p-4 transition-all duration-200 hover:-translate-y-1 hover:shadow-lg cursor-pointer
+                          ${processado
+                            ? 'border-emerald-400 dark:border-emerald-500 bg-emerald-50 dark:bg-emerald-900/10 shadow-emerald-100 dark:shadow-emerald-900/20'
+                            : 'border-slate-200 dark:border-neutral-600 bg-white dark:bg-neutral-700/50 hover:border-blue-300 dark:hover:border-blue-500'
+                          }`}
                       >
-                        {isPDF ? (
-                          <div style={{
-                            width: '100%',
-                            height: '200px',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
-                            borderRadius: '8px',
-                            marginBottom: '12px',
-                            boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)'
-                          }}>
-                            <div style={{
-                              fontSize: '72px',
-                              marginBottom: '12px',
-                              filter: 'drop-shadow(0 4px 6px rgba(0,0,0,0.3))'
-                            }}>
-                              📄
-                            </div>
-                            <div style={{
-                              color: 'white',
-                              fontSize: '18px',
-                              fontWeight: '700',
-                              textShadow: '0 2px 4px rgba(0,0,0,0.3)',
-                              letterSpacing: '1px'
-                            }}>
-                              DOCUMENTO PDF
-                            </div>
-                            <div style={{
-                              color: 'rgba(255,255,255,0.9)',
-                              fontSize: '12px',
-                              marginTop: '8px',
-                              textShadow: '0 1px 2px rgba(0,0,0,0.2)'
-                            }}>
-                              Clique para visualizar
-                            </div>
-                          </div>
-                        ) : (
-                          <img
-                            src={img.url}
-                            alt={img.nome}
-                            style={{
-                              width: '100%',
-                              height: '200px',
-                              objectFit: 'cover',
-                              borderRadius: '8px',
-                              marginBottom: '12px'
-                            }}
-                            onError={(e) => {
-                              console.error('Erro ao carregar imagem:', img.nome, img.url);
-                              e.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect fill="%23ddd" width="200" height="200"/%3E%3Ctext fill="%23999" x="50%25" y="50%25" text-anchor="middle" dy=".3em"%3EErro ao carregar%3C/text%3E%3C/svg%3E';
-                            }}
-                          />
+                        {processado && (
+                          <span className="absolute top-3 right-3 bg-emerald-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow">
+                            ✓ OCR Processado
+                          </span>
                         )}
-                      </div>
 
-                      <div style={{ marginBottom: '12px' }}>
-                        <div className="text-emerald-600 dark:text-emerald-400" style={{
-                          fontSize: '13px',
-                          fontWeight: '700',
-                          marginBottom: '4px'
-                        }}>
-                          TIPO: {img.tipo}
+                        <div onClick={() => abrirImagem(img)} className="mb-3">
+                          {isPDF ? (
+                            <div className="w-full h-44 flex flex-col items-center justify-center bg-gradient-to-br from-red-500 to-red-700 rounded-lg shadow-md">
+                              <span className="text-6xl mb-2 drop-shadow">📄</span>
+                              <span className="text-white text-sm font-bold tracking-wide">DOCUMENTO PDF</span>
+                              <span className="text-white/80 text-xs mt-1">Clique para visualizar</span>
+                            </div>
+                          ) : (
+                            <img
+                              src={img.url}
+                              alt={img.nome}
+                              className="w-full h-44 object-cover rounded-lg"
+                              onError={(e) => {
+                                e.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect fill="%23ddd" width="200" height="200"/%3E%3Ctext fill="%23999" x="50%25" y="50%25" text-anchor="middle" dy=".3em"%3EErro ao carregar%3C/text%3E%3C/svg%3E';
+                              }}
+                            />
+                          )}
                         </div>
-                        <div className="text-gray-600 dark:text-neutral-300" style={{
-                          fontSize: '12px',
-                          wordBreak: 'break-all'
-                        }}>
-                          {img.nome}
-                        </div>
-                      </div>
 
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          processarOCR(img.url, img.nome, false);
-                        }}
-                        disabled={loadingOCR || imagensProcessadas.has(img.nome)}
-                        style={{
-                          width: '100%',
-                          padding: '10px',
-                          background: imagensProcessadas.has(img.nome)
-                            ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
-                            : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '8px',
-                          fontSize: '13px',
-                          fontWeight: '700',
-                          cursor: (loadingOCR || imagensProcessadas.has(img.nome)) ? 'not-allowed' : 'pointer',
-                          opacity: (loadingOCR || imagensProcessadas.has(img.nome)) ? 0.7 : 1,
-                          transition: 'all 0.2s ease',
-                          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!loadingOCR && !imagensProcessadas.has(img.nome)) {
-                            e.currentTarget.style.transform = 'scale(1.05)';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.transform = 'scale(1)';
-                        }}
-                      >
-                        {imagensProcessadas.has(img.nome) ? '✓ Processado' : loadingOCR ? '⏳ Processando...' : '🔍 PROCESSAR OCR'}
-                      </button>
-                    </div>
+                        <p className="text-xs text-slate-500 dark:text-neutral-400 truncate mb-3" title={img.nome}>{img.nome}</p>
+
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); processarOCR(img.url, img.nome, false); }}
+                          disabled={loadingOCR || processado}
+                          className={`w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed
+                            ${processado
+                              ? 'bg-emerald-500 dark:bg-emerald-600'
+                              : 'bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 hover:-translate-y-0.5 hover:shadow-md'
+                            }`}
+                        >
+                          {processado ? '✓ Processado' : loadingOCR ? '⏳ Processando...' : '🔍 Processar OCR'}
+                        </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -4497,74 +4485,72 @@ const AdmissionView = () => {
         )}
       </div>
 
+      {/* Toast de confirmação de salvamento */}
+      {toastSalvo && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[10000] bg-emerald-500 text-white px-6 py-3 rounded-xl shadow-xl flex items-center gap-2.5 font-semibold text-sm animate-slideUp pointer-events-none">
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          Dados salvos com sucesso!
+        </div>
+      )}
+
       {/* Modal para visualizar imagem ou PDF */}
       {imagemSelecionada && (
         <div className="fixed inset-0 w-screen h-screen bg-black/90 dark:bg-black/95 flex items-center justify-center z-[9999] animate-fadeIn" onClick={fecharModal}>
-          <div className="relative max-w-[95vw] max-h-[95vh] bg-white dark:bg-neutral-800 rounded-2xl overflow-hidden shadow-[0_16px_48px_rgba(0,0,0,0.5)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.9)] animate-slideUp flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <button className="fixed top-6 right-6 bg-black/70 text-white border-0 w-10 h-10 rounded-full text-2xl cursor-pointer flex items-center justify-center transition-all z-[103] leading-none hover:bg-black/90 hover:rotate-90" onClick={fecharModal}>&times;</button>
-
-            {/* Botão Editar Fixo no Topo */}
-            {patientData && !modoEdicaoModal && (
-              <button
-                className="fixed top-6 right-[88px] bg-primary text-white border-0 px-5 py-2.5 rounded-lg text-sm font-semibold cursor-pointer transition-all flex items-center gap-1.5 z-[102] shadow-[0_2px_12px_rgba(102,126,234,0.4)] dark:shadow-[0_2px_12px_rgba(102,126,234,0.6)] h-10 hover:bg-primary-dark hover:-translate-y-0.5 hover:shadow-[0_4px_16px_rgba(102,126,234,0.5)]"
-                onClick={iniciarEdicaoModal}
-                title="Editar dados"
-              >
-                ✏️ Editar
-              </button>
-            )}
-
-            {/* Botões Salvar/Cancelar Fixos no Topo */}
-            {modoEdicaoModal && (
-              <div className="fixed top-6 right-[88px] flex gap-2.5 z-[102] items-center">
-                <button
-                  className="bg-gray-600 dark:bg-neutral-600 text-white border-0 px-5 py-2.5 rounded-lg text-sm font-semibold cursor-pointer transition-all shadow-[0_2px_12px_rgba(107,114,128,0.4)] dark:shadow-[0_2px_12px_rgba(82,82,91,0.6)] h-10 hover:bg-gray-700 dark:hover:bg-neutral-700 hover:-translate-y-0.5 hover:shadow-[0_4px_16px_rgba(107,114,128,0.5)] disabled:opacity-60 disabled:cursor-not-allowed"
-                  onClick={cancelarEdicaoModal}
-                  disabled={salvandoDados}
-                >
-                  Cancelar
-                </button>
-                <button
-                  className="bg-success text-white border-0 px-5 py-2.5 rounded-lg text-sm font-semibold cursor-pointer transition-all shadow-[0_2px_12px_rgba(16,185,129,0.4)] dark:shadow-[0_2px_12px_rgba(16,185,129,0.6)] h-10 hover:bg-success-dark hover:-translate-y-0.5 hover:shadow-[0_4px_16px_rgba(16,185,129,0.5)] disabled:opacity-60 disabled:cursor-not-allowed"
-                  onClick={salvarAlteracoesModal}
-                  disabled={salvandoDados}
-                >
-                  {salvandoDados ? 'Salvando...' : '✓ Salvar'}
-                </button>
-              </div>
-            )}
-
+          <div className="relative w-[95vw] h-[95vh] bg-white dark:bg-neutral-800 rounded-2xl overflow-hidden shadow-[0_16px_48px_rgba(0,0,0,0.5)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.9)] animate-slideUp flex flex-col" onClick={(e) => e.stopPropagation()}>
             {/* Container principal: Imagem + Dados do Paciente */}
-            <div className="flex gap-0 h-full overflow-hidden">
+            <div className="flex flex-1 min-h-0 overflow-hidden">
               {/* Coluna da Imagem */}
               <div className="flex-1 flex flex-col min-w-0 border-r-2 border-gray-200 dark:border-neutral-700">
                 {/* Controles de Zoom e Processar OCR */}
-                <div className="p-5 pr-20 pl-5 bg-black/5 dark:bg-neutral-900/50 border-b-2 border-gray-200 dark:border-neutral-700 flex justify-between items-center gap-7.5 flex-nowrap relative z-[1]">
+                <div className="p-4 px-5 bg-black/5 dark:bg-neutral-900/50 border-b-2 border-gray-200 dark:border-neutral-700 flex justify-between items-center gap-4 flex-nowrap relative z-[1]">
                   {/* Controles de Zoom */}
                   {!imagemSelecionada.nome.toUpperCase().endsWith('.PDF') && (
-                    <div className="flex gap-2.5 bg-black/70 px-4 py-2.5 rounded-[30px] backdrop-blur-[10px] flex-shrink-0">
-                      <button onClick={zoomOut} title="Diminuir zoom">-</button>
-                      <button onClick={resetZoom} title="Resetar zoom">{Math.round(zoomLevel * 100)}%</button>
-                      <button onClick={zoomIn} title="Aumentar zoom">+</button>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      {/* Controles de Zoom */}
+                      <div className="flex items-center gap-2 bg-black/70 px-4 py-2.5 rounded-[30px] backdrop-blur-[10px] text-white text-sm font-semibold">
+                        <button onClick={zoomOut} title="Diminuir zoom" className="w-6 h-6 flex items-center justify-center text-white/80 hover:text-white transition-colors cursor-pointer">−</button>
+                        <button onClick={resetZoom} title="Resetar zoom" className="px-1 text-white hover:text-white/80 transition-colors cursor-pointer min-w-[42px] text-center">{Math.round(zoomLevel * 100)}%</button>
+                        <button onClick={zoomIn} title="Aumentar zoom" className="w-6 h-6 flex items-center justify-center text-white/80 hover:text-white transition-colors cursor-pointer">+</button>
+                      </div>
+                      {/* Controles de Rotação */}
+                      <div className="flex items-center gap-2 bg-black/70 px-4 py-2.5 rounded-[30px] backdrop-blur-[10px] text-white text-sm font-semibold">
+                        <button onClick={() => setRotacao(r => r - 90)} title="Girar para esquerda" className="w-6 h-6 flex items-center justify-center text-white/80 hover:text-white transition-all hover:scale-110 cursor-pointer">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.63"/></svg>
+                        </button>
+                        <span className="text-white/70 text-xs min-w-[32px] text-center">{((rotacao % 360) + 360) % 360}°</span>
+                        <button onClick={() => setRotacao(r => r + 90)} title="Girar para direita" className="w-6 h-6 flex items-center justify-center text-white/80 hover:text-white transition-all hover:scale-110 cursor-pointer">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-3.63"/></svg>
+                        </button>
+                      </div>
                     </div>
                   )}
 
-                  {/* Botão Processar OCR */}
-                  <button
-                    className="bg-primary text-white border-0 px-7 py-3 rounded-lg text-sm font-semibold cursor-pointer transition-all shadow-[0_2px_8px_rgba(0,0,0,0.15)] hover:bg-primary-dark hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.25)] disabled:opacity-60 disabled:cursor-not-allowed"
-                    onClick={() => {
-                      processarOCR(imagemSelecionada.url, imagemSelecionada.nome);
-                      fecharModal();
-                    }}
-                    disabled={loadingOCR || imagensProcessadas.has(imagemSelecionada.nome)}
-                  >
-                    {imagensProcessadas.has(imagemSelecionada.nome)
-                      ? '✓ Já Processado'
-                      : (loadingOCR ? 'Processando OCR...' : 'Processar OCR')}
-                  </button>
+                  {/* Botão Processar OCR + Fechar */}
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
+                    <button
+                      className="bg-primary text-white border-0 px-5 py-2 rounded-lg text-sm font-semibold cursor-pointer transition-all shadow-[0_2px_8px_rgba(0,0,0,0.15)] hover:bg-primary-dark hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.25)] disabled:opacity-60 disabled:cursor-not-allowed"
+                      onClick={() => {
+                        processarOCR(imagemSelecionada.url, imagemSelecionada.nome);
+                        fecharModal();
+                      }}
+                      disabled={loadingOCR || imagensProcessadas.has(imagemSelecionada.nome)}
+                    >
+                      {imagensProcessadas.has(imagemSelecionada.nome)
+                        ? '✓ Já Processado'
+                        : (loadingOCR ? 'Processando OCR...' : 'Processar OCR')}
+                    </button>
+                    <button
+                      className="bg-black/60 text-white border-0 w-9 h-9 rounded-full text-xl cursor-pointer flex items-center justify-center transition-all leading-none hover:bg-black/90 flex-shrink-0"
+                      onClick={fecharModal}
+                    >&times;</button>
+                  </div>
                 </div>
 
-                <div className="image-container" style={{ overflow: 'auto', maxHeight: '70vh' }}>
+                <div
+                  ref={imageContainerRef}
+                  className="image-container"
+                  style={{ overflow: 'auto', flex: 1, minHeight: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-start' }}
+                >
                   {imagemSelecionada.nome.toUpperCase().endsWith('.PDF') ? (
                     <iframe
                       src={imagemSelecionada.url}
@@ -4572,16 +4558,31 @@ const AdmissionView = () => {
                       className="w-[90vw] h-[75vh] border-0 block"
                     />
                   ) : (
-                    <img
-                      src={imagemSelecionada.url}
-                      alt={imagemSelecionada.nome}
-                      style={{
-                        transform: `scale(${zoomLevel})`,
-                        transformOrigin: 'top left',
-                        transition: 'transform 0.2s ease',
-                        cursor: zoomLevel > 1 ? 'move' : 'default'
-                      }}
-                    />
+                    <div style={{
+                      width: zoomLevel > 1 ? `${zoomLevel * 100}%` : '100%',
+                      flexShrink: 0,
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      justifyContent: 'flex-start',
+                      padding: '0',
+                      boxSizing: 'border-box',
+                    }}>
+                      <img
+                        src={imagemSelecionada.url}
+                        alt={imagemSelecionada.nome}
+                        style={{
+                          width: zoomLevel > 1 ? '100%' : '100%',
+                          height: 'auto',
+                          maxWidth: zoomLevel > 1 ? 'none' : '100%',
+                          maxHeight: zoomLevel > 1 ? 'none' : 'none',
+                          transform: rotacao ? `rotate(${rotacao}deg)` : undefined,
+                          transformOrigin: 'center center',
+                          transition: 'transform 0.25s ease',
+                          cursor: zoomLevel > 1 ? 'grab' : 'default',
+                          display: 'block',
+                        }}
+                      />
+                    </div>
                   )}
                 </div>
 
@@ -4592,12 +4593,45 @@ const AdmissionView = () => {
 
               {/* Coluna dos Dados do Paciente */}
               {patientData && (
-                <div className="w-[350px] bg-gray-50 dark:bg-neutral-900 overflow-y-auto flex-shrink-0 relative">
-                  <div className="pt-20 px-6 pb-6">
-                    <h3 className="text-base font-bold text-gray-900 dark:text-neutral-100 my-0 mb-6 pb-3 border-b-[3px] border-primary uppercase tracking-wide">DADOS DO PACIENTE</h3>
-                    
-                    <div className="mb-5 pb-4 border-b border-gray-200 dark:border-neutral-700 last:border-b-0">
-                      <strong className="text-gray-700 dark:text-neutral-300">NOME COMPLETO</strong>
+                <div className="w-[360px] bg-white dark:bg-neutral-900 flex flex-col flex-shrink-0 border-l border-gray-100 dark:border-neutral-700">
+                  {/* Header sticky com botões Editar / Salvar / Cancelar */}
+                  <div className="flex-shrink-0 flex items-center justify-between px-5 py-3 border-b border-gray-100 dark:border-neutral-700 bg-white dark:bg-neutral-900">
+                    <span className="text-xs font-bold text-slate-400 dark:text-neutral-500 uppercase tracking-widest">Dados do Paciente</span>
+                    {!modoEdicaoModal ? (
+                      <button
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white rounded-lg text-xs font-semibold cursor-pointer transition-all hover:bg-primary-dark hover:-translate-y-0.5 border-0 shadow-sm"
+                        onClick={iniciarEdicaoModal}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        Editar
+                      </button>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button
+                          className="px-3 py-1.5 bg-slate-100 dark:bg-neutral-700 text-slate-600 dark:text-neutral-300 rounded-lg text-xs font-semibold cursor-pointer transition-all hover:bg-slate-200 border-0"
+                          onClick={cancelarEdicaoModal}
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          className="px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-semibold cursor-pointer transition-all hover:bg-emerald-600 border-0"
+                          onClick={salvarAlteracoesModal}
+                        >
+                          ✓ Salvar
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 overflow-y-auto scrollbar-custom px-5 py-4">
+                    {/* Erro visível dentro do modal */}
+                    {erroModal && (
+                      <div className="mb-4 px-3 py-2.5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg flex items-start gap-2 text-sm text-red-700 dark:text-red-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        <span>{erroModal}</span>
+                      </div>
+                    )}
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">NOME COMPLETO</label>
                       {modoEdicaoModal ? (
                         <input
                           type="text"
@@ -4610,8 +4644,8 @@ const AdmissionView = () => {
                       )}
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 dark:border-neutral-700 last:border-b-0">
-                      <strong className="text-gray-700 dark:text-neutral-300">DATA DE NASCIMENTO</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">DATA DE NASCIMENTO</label>
                       {modoEdicaoModal ? (
                         <input
                           type="date"
@@ -4629,13 +4663,13 @@ const AdmissionView = () => {
                       )}
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 dark:border-neutral-700 last:border-b-0">
-                      <strong className="text-gray-700 dark:text-neutral-300">IDADE</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">IDADE</label>
                       <span className="text-gray-900 dark:text-neutral-200">{patientData.age || 'Não informado'}</span>
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 dark:border-neutral-700 last:border-b-0">
-                      <strong className="text-gray-700 dark:text-neutral-300">CPF</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">CPF</label>
                       {modoEdicaoModal ? (
                         <input
                           type="text"
@@ -4651,47 +4685,23 @@ const AdmissionView = () => {
                           {patientData.cpf && (
                             <button
                               onClick={validarCPFManualmente}
-                              style={{
-                                marginTop: '10px',
-                                width: '100%',
-                                padding: '10px 16px',
-                                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '8px',
-                                cursor: 'pointer',
-                                fontWeight: '600',
-                                fontSize: '14px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: '8px',
-                                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
-                                transition: 'all 0.3s ease'
-                              }}
-                              onMouseOver={(e) => {
-                                e.currentTarget.style.transform = 'translateY(-2px)';
-                                e.currentTarget.style.boxShadow = '0 6px 16px rgba(16, 185, 129, 0.4)';
-                              }}
-                              onMouseOut={(e) => {
-                                e.currentTarget.style.transform = 'translateY(0)';
-                                e.currentTarget.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.3)';
-                              }}
+                              disabled={validandoCPF}
+                              className="mt-2.5 w-full py-2.5 px-4 flex items-center justify-center gap-2 bg-gradient-to-br from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white text-sm font-semibold rounded-lg shadow-md shadow-emerald-500/30 hover:shadow-lg hover:shadow-emerald-500/40 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer border-0 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0"
                             >
-                              <span style={{ fontSize: '18px' }}>✓</span>
-                              Validar CPF na Receita Federal
+                              <span className="text-lg leading-none">{validandoCPF ? '⏳' : '✓'}</span>
+                              {validandoCPF ? 'Validando CPF...' : 'Validar CPF na Receita Federal'}
                             </button>
                           )}
                         </div>
                       )}
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 dark:border-neutral-700 last:border-b-0">
-                      <strong className="text-gray-700 dark:text-neutral-300">RG</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">RG</label>
                       {modoEdicaoModal ? (
                         <input
                           type="text"
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 dark:border-neutral-600 rounded-md text-sm font-medium text-gray-900 dark:text-neutral-100 transition-all bg-white dark:bg-neutral-800 focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                           value={dadosEditaveis?.rg || ''}
                           onChange={(e) => setDadosEditaveis(prev => ({ ...prev, rg: e.target.value }))}
                         />
@@ -4700,75 +4710,76 @@ const AdmissionView = () => {
                       )}
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 dark:border-neutral-700 last:border-b-0">
-                      <strong className="text-gray-700 dark:text-neutral-300">TELEFONE</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">TELEFONE</label>
                       {modoEdicaoModal ? (
                         <input
                           type="text"
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 dark:border-neutral-600 rounded-md text-sm font-medium text-gray-900 dark:text-neutral-100 transition-all bg-white dark:bg-neutral-800 focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                           value={dadosEditaveis?.telefone || ''}
                           onChange={(e) => setDadosEditaveis(prev => ({ ...prev, telefone: e.target.value }))}
                         />
                       ) : (
-                        <span>{patientData.phone || 'Não informado'}</span>
+                        <span className="text-gray-900 dark:text-neutral-200">{patientData.phone || 'Não informado'}</span>
                       )}
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
-                      <strong>E-MAIL</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">E-MAIL</label>
                       {modoEdicaoModal ? (
                         <input
                           type="email"
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 dark:border-neutral-600 rounded-md text-sm font-medium text-gray-900 dark:text-neutral-100 transition-all bg-white dark:bg-neutral-800 focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                           value={dadosEditaveis?.email || ''}
                           onChange={(e) => setDadosEditaveis(prev => ({ ...prev, email: e.target.value }))}
                         />
                       ) : (
-                        <span>{patientData.email || 'Não informado'}</span>
+                        <span className="text-gray-900 dark:text-neutral-200">{patientData.email || 'Não informado'}</span>
                       )}
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
-                      <strong>Nº CARTEIRINHA</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">Nº CARTEIRINHA</label>
                       {modoEdicaoModal ? (
                         <input
                           type="text"
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 dark:border-neutral-600 rounded-md text-sm font-medium text-gray-900 dark:text-neutral-100 transition-all bg-white dark:bg-neutral-800 focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                           value={dadosEditaveis?.carteirinha || ''}
                           onChange={(e) => setDadosEditaveis(prev => ({ ...prev, carteirinha: e.target.value }))}
                         />
                       ) : (
-                        <span>{patientData.insuranceCardNumber || 'Não informado'}</span>
+                        <span className="text-gray-900 dark:text-neutral-200">{patientData.insuranceCardNumber || 'Não informado'}</span>
                       )}
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
-                      <strong>ENDEREÇO</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">ENDEREÇO</label>
                       {modoEdicaoModal ? (
                         <textarea
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 dark:border-neutral-600 rounded-md text-sm font-medium text-gray-900 dark:text-neutral-100 transition-all bg-white dark:bg-neutral-800 focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                           rows="3"
                           value={dadosEditaveis?.endereco || ''}
                           onChange={(e) => setDadosEditaveis(prev => ({ ...prev, endereco: e.target.value }))}
                         />
                       ) : (
-                        <span>{patientData.address || 'Não informado'}</span>
+                        <span className="text-gray-900 dark:text-neutral-200">{patientData.address || 'Não informado'}</span>
                       )}
                     </div>
 
-                    <h3 className="text-base font-bold text-gray-900 dark:text-neutral-100 my-0 mb-6 pb-3 border-b-[3px] border-primary uppercase tracking-wide" style={{ marginTop: '32px' }}>DADOS DA REQUISIÇÃO</h3>
+                    <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-4"></div>
+                    <p className="text-[10px] font-bold text-slate-400 dark:text-neutral-500 uppercase tracking-widest mb-4">Dados da Requisição</p>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
-                      <strong>Nº REQUISIÇÃO</strong>
-                      <span>{patientData.recordNumber || 'Não informado'}</span>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">Nº REQUISIÇÃO</label>
+                      <span className="text-gray-900 dark:text-neutral-200">{patientData.recordNumber || 'Não informado'}</span>
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
-                      <strong>DATA DA COLETA</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">DATA DA COLETA</label>
                       {modoEdicaoModal ? (
                         <input
                           type="date"
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 dark:border-neutral-600 rounded-md text-sm font-medium text-gray-900 dark:text-neutral-100 transition-all bg-white dark:bg-neutral-800 focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                           value={converterDataParaISO(dadosRequisicaoEditaveis?.dataColeta || '')}
                           onChange={(e) => {
                             const data = e.target.value;
@@ -4778,123 +4789,168 @@ const AdmissionView = () => {
                           }}
                         />
                       ) : (
-                        <span>{patientData.collectionDate || 'Não informado'}</span>
+                        <span className="text-gray-900 dark:text-neutral-200">{patientData.collectionDate || 'Não informado'}</span>
                       )}
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
-                      <strong>CONVÊNIO</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">CONVÊNIO</label>
                       {modoEdicaoModal ? (
                         <ConvenioSelect
                           value={dadosRequisicaoEditaveis?.convenio || ''}
-                          onChange={(selectedConvenio) => setDadosRequisicaoEditaveis(prev => ({ ...prev, convenio: selectedConvenio?.nome || '' }))}
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                          onChange={(selectedConvenio) => {
+                            setDadosRequisicaoEditaveis(prev => ({
+                              ...prev,
+                              convenio: selectedConvenio?.nome || '',
+                              idConvenio: selectedConvenio?.id ? selectedConvenio.id.toString() : ''
+                            }));
+                            if (selectedConvenio?.id) {
+                              setFormData(prev => ({
+                                ...prev,
+                                idConvenio: selectedConvenio.id.toString(),
+                                convenio: selectedConvenio?.nome || prev.convenio
+                              }));
+                            }
+                          }}
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 dark:border-neutral-600 rounded-md text-sm font-medium text-gray-900 dark:text-neutral-100 transition-all bg-white dark:bg-neutral-800 focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                         />
                       ) : (
-                        <span>{patientData.insurance || 'Não informado'}</span>
+                        <span className="text-gray-900 dark:text-neutral-200">{patientData.insurance || 'Não informado'}</span>
                       )}
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
-                      <strong>ORIGEM</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">ORIGEM</label>
                       {modoEdicaoModal ? (
                         <LocalOrigemSelect
                           value={dadosRequisicaoEditaveis?.origem || ''}
-                          onChange={(selectedOrigem) => setDadosRequisicaoEditaveis(prev => ({ ...prev, origem: selectedOrigem?.nome || '' }))}
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                          onChange={(selectedOrigem) => {
+                            setDadosRequisicaoEditaveis(prev => ({
+                              ...prev,
+                              origem: selectedOrigem?.nome || '',
+                              idLocalOrigem: selectedOrigem?.id ? selectedOrigem.id.toString() : ''
+                            }));
+                            if (selectedOrigem?.id) {
+                              setFormData(prev => ({
+                                ...prev,
+                                idLocalOrigem: selectedOrigem.id.toString(),
+                                localOrigem: selectedOrigem?.nome || prev.localOrigem
+                              }));
+                            }
+                          }}
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 dark:border-neutral-600 rounded-md text-sm font-medium text-gray-900 dark:text-neutral-100 transition-all bg-white dark:bg-neutral-800 focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                         />
                       ) : (
-                        <span>{patientData.origin || 'Não informado'}</span>
+                        <span className="text-gray-900 dark:text-neutral-200">{patientData.origin || 'Não informado'}</span>
                       )}
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
-                      <strong>FONTE PAGADORA</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">FONTE PAGADORA</label>
                       {modoEdicaoModal ? (
                         <FontePagadoraSelect
                           value={dadosRequisicaoEditaveis?.fontePagadora || ''}
                           onChange={(selectedFonte) => {
-                            setDadosRequisicaoEditaveis(prev => ({ ...prev, fontePagadora: selectedFonte?.nome || '' }));
+                            setDadosRequisicaoEditaveis(prev => ({
+                              ...prev,
+                              fontePagadora: selectedFonte?.nome || '',
+                              idFontePagadora: selectedFonte?.id ? selectedFonte.id.toString() : ''
+                            }));
                             if (selectedFonte?.id) {
-                              setFormData(prev => ({ ...prev, idFontePagadora: selectedFonte.id.toString() }));
+                              setFormData(prev => ({
+                                ...prev,
+                                idFontePagadora: selectedFonte.id.toString(),
+                                fontePagadora: selectedFonte?.nome || prev.fontePagadora
+                              }));
                             }
                           }}
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 dark:border-neutral-600 rounded-md text-sm font-medium text-gray-900 dark:text-neutral-100 transition-all bg-white dark:bg-neutral-800 focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                         />
                       ) : (
-                        <span>{patientData.payingSource || 'Particular'}</span>
+                        <span className="text-gray-900 dark:text-neutral-200">{patientData.payingSource || 'Particular'}</span>
                       )}
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
-                      <strong>MÉDICO SOLICITANTE</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">MÉDICO SOLICITANTE</label>
                       {modoEdicaoModal ? (
-                        <input
-                          type="text"
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                        <MedicoSelect
                           value={dadosRequisicaoEditaveis?.medico || ''}
-                          onChange={(e) => setDadosRequisicaoEditaveis(prev => ({ ...prev, medico: e.target.value }))}
+                          onChange={(selectedMedico, nomeDigitado) => {
+                            const nomeFinal = (nomeDigitado ?? selectedMedico?.nome ?? '').trim();
+                            const crmFormatado = selectedMedico?.crm && selectedMedico?.uf
+                              ? `CRM: ${selectedMedico.crm}/${selectedMedico.uf}`
+                              : (dadosRequisicaoEditaveis?.crm || '');
+
+                            setDadosRequisicaoEditaveis(prev => ({
+                              ...prev,
+                              medico: nomeFinal,
+                              idMedico: selectedMedico?.id ? selectedMedico.id.toString() : '',
+                              crm: selectedMedico ? crmFormatado : prev?.crm
+                            }));
+
+                            if (selectedMedico?.id) {
+                              setFormData(prev => ({
+                                ...prev,
+                                idMedico: selectedMedico.id.toString()
+                              }));
+                            }
+                          }}
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 dark:border-neutral-600 rounded-md text-sm font-medium text-gray-900 dark:text-neutral-100 transition-all bg-white dark:bg-neutral-800 focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                         />
                       ) : (
-                        <span>{patientData.doctorName || 'Não informado'}</span>
+                        <span className="text-gray-900 dark:text-neutral-200">{patientData.doctorName || 'Não informado'}</span>
                       )}
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
-                      <strong>CRM</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">CRM</label>
                       {modoEdicaoModal ? (
                         <input
                           type="text"
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 dark:border-neutral-600 rounded-md text-sm font-medium text-gray-900 dark:text-neutral-100 transition-all bg-white dark:bg-neutral-800 focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                           value={dadosRequisicaoEditaveis?.crm || ''}
-                          onChange={(e) => setDadosRequisicaoEditaveis(prev => ({ ...prev, crm: e.target.value }))}
+                          readOnly
                         />
                       ) : (
-                        <span>{patientData.doctorCRM || 'Não informado'}</span>
+                        <span className="text-gray-900 dark:text-neutral-200">{patientData.doctorCRM || 'Não informado'}</span>
                       )}
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
-                      <strong>Nº GUIA</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">Nº GUIA</label>
                       {modoEdicaoModal ? (
                         <input
                           type="text"
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 dark:border-neutral-600 rounded-md text-sm font-medium text-gray-900 dark:text-neutral-100 transition-all bg-white dark:bg-neutral-800 focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                           value={dadosRequisicaoEditaveis?.numGuia || ''}
                           onChange={(e) => setDadosRequisicaoEditaveis(prev => ({ ...prev, numGuia: e.target.value }))}
                         />
                       ) : (
-                        <span>{requisicaoData?.requisicao?.numGuia || 'Não informado'}</span>
+                        <span className="text-gray-900 dark:text-neutral-200">{requisicaoData?.requisicao?.numGuia || 'Não informado'}</span>
                       )}
                     </div>
 
-                    <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
-                      <strong>DADOS CLÍNICOS</strong>
+                    <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">DADOS CLÍNICOS</label>
                       {modoEdicaoModal ? (
                         <textarea
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 rounded-md text-sm font-medium text-gray-900 transition-all bg-white focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                          className="w-full p-2.5 px-3 border-2 border-gray-300 dark:border-neutral-600 rounded-md text-sm font-medium text-gray-900 dark:text-neutral-100 transition-all bg-white dark:bg-neutral-800 focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
                           rows="4"
                           value={dadosRequisicaoEditaveis?.dadosClinicos || ''}
                           onChange={(e) => setDadosRequisicaoEditaveis(prev => ({ ...prev, dadosClinicos: e.target.value }))}
                         />
                       ) : (
-                        <span style={{ whiteSpace: 'pre-wrap' }}>{requisicaoData?.requisicao?.dadosClinicos || 'Não informado'}</span>
+                        <span className="text-gray-900 dark:text-neutral-200 whitespace-pre-wrap">{requisicaoData?.requisicao?.dadosClinicos || 'Não informado'}</span>
                       )}
                     </div>
 
                     {requisicaoData?.exames && requisicaoData.exames.length > 0 && (
-                      <div className="mb-5 pb-4 border-b border-gray-200 last:border-b-0">
-                        <strong>EXAMES SOLICITADOS</strong>
-                        <div style={{ marginTop: '8px' }}>
+                      <div className="mb-3.5">
+                        <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">EXAMES SOLICITADOS</label>
+                        <div className="mt-2 flex flex-col gap-1.5">
                           {requisicaoData.exames.map((exame, index) => (
-                            <div key={index} style={{ 
-                              padding: '8px 12px', 
-                              background: 'white',
-                              borderRadius: '6px',
-                              marginBottom: '6px',
-                              fontSize: '13px',
-                              border: '1px solid #e0e0e0'
-                            }}>
+                            <div key={index} className="px-3 py-2 bg-slate-50 dark:bg-neutral-700 border border-slate-200 dark:border-neutral-600 rounded-lg text-sm text-gray-800 dark:text-neutral-200">
                               {exame.nome || exame.descricao || 'Exame não especificado'}
                             </div>
                           ))}
