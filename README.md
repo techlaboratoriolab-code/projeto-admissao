@@ -1,4 +1,4 @@
-# 🏥 Sistema de Automação de Admissão Hospitalar
+# 🏥 Sistema de Automação de Admissão 
 
 Sistema completo para automação do processo de admissão hospitalar com React + Flask + Supabase.
 
@@ -629,10 +629,8 @@ Este projeto é proprietário. Todos os direitos reservados.
 
 ## 💬 Suporte
 
-- 📧 Email: suporte@exemplo.com
-- 🐛 Issues: [GitHub Issues](https://github.com/seu-repo/issues)
-- 💬 Discussões: [GitHub Discussions](https://github.com/seu-repo/discussions)
+- 📧 Email: tech.laboratorio.lab      
 
 ---
 
-**Desenvolvido com ❤️ para otimizar processos hospitalares**
+**Desenvolvido com ❤️ para otimizar processos do lab**
