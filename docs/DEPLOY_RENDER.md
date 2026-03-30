@@ -19,33 +19,78 @@ Este projeto está preparado para deploy centralizado no Render usando o arquivo
 
 ## 3) Configurar variáveis de ambiente (backend)
 
-No serviço **automacao-admissao-backend**, configure as mesmas variáveis usadas localmente no `backend/.env`, por exemplo:
+No serviço **automacao-admissao-backend**, configure estas variáveis.
+
+### Obrigatórias para operação principal
 
 - `SUPABASE_URL`
 - `SUPABASE_KEY`
-- `SUPABASE_SERVICE_KEY`
 - `DB_HOST`
 - `DB_USER`
 - `DB_PASSWORD`
 - `DB_NAME`
-- `APLIS_BASE_URL`
 - `APLIS_USUARIO`
 - `APLIS_SENHA`
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `AWS_REGION`
-- `AWS_BUCKET_NAME`
-- `GOOGLE_PROJECT_ID`
-- `GOOGLE_LOCATION`
-- `GOOGLE_APPLICATION_CREDENTIALS` (se aplicável)
+- `JWT_SECRET`
 
-## 4) Confirmar URL da API no frontend
+### Obrigatórias conforme recursos habilitados
 
-No serviço **automacao-admissao-frontend**, confira:
+- Consulta CPF: `CPF_API_TOKEN`
+- Upload/arquivos S3: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME`
+- OCR Vertex AI: `GOOGLE_PROJECT_ID`, `GOOGLE_APPLICATION_CREDENTIALS`
+
+### Opcionais (com default no código)
+
+- `APLIS_BASE_URL` (default: `https://lab.aplis.inf.br/api/integracao.php`)
+- `AWS_REGION` (default: `sa-east-1`)
+- `GOOGLE_LOCATION` (default: `us-central1`)
+
+### Bloco copy/paste (nomes das chaves)
+
+Use este bloco para conferência rápida no painel do Render:
+
+```env
+SUPABASE_URL=
+SUPABASE_KEY=
+DB_HOST=
+DB_USER=
+DB_PASSWORD=
+DB_NAME=
+APLIS_BASE_URL=https://lab.aplis.inf.br/api/integracao.php
+APLIS_USUARIO=
+APLIS_SENHA=
+JWT_SECRET=
+CPF_API_TOKEN=
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_REGION=sa-east-1
+S3_BUCKET_NAME=
+GOOGLE_PROJECT_ID=
+GOOGLE_LOCATION=us-central1
+GOOGLE_APPLICATION_CREDENTIALS=
+```
+
+> Observação: `GOOGLE_APPLICATION_CREDENTIALS` deve apontar para um caminho de arquivo no container (ex.: `/etc/secrets/google-credentials.json`).
+
+## 4) Configurar variáveis de ambiente (frontend)
+
+No serviço **automacao-admissao-frontend**, configure:
 
 - `REACT_APP_API_URL=https://automacao-admissao-backend.onrender.com`
+- `REACT_APP_SUPABASE_URL`
+- `REACT_APP_SUPABASE_ANON_KEY`
+- `REACT_APP_SUPABASE_SERVICE_KEY`
 
 Se o Render gerar outro subdomínio para o backend, atualize esse valor.
+
+Bloco rápido:
+
+```env
+REACT_APP_API_URL=https://automacao-admissao-backend.onrender.com
+REACT_APP_SUPABASE_URL=
+REACT_APP_SUPABASE_ANON_KEY=
+REACT_APP_SUPABASE_SERVICE_KEY=
+```
 
 ## 5) CORS
 

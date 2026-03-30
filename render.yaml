@@ -13,6 +13,42 @@ services:
         value: 3.11.9
       - key: FLASK_ENV
         value: production
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: DB_HOST
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: APLIS_BASE_URL
+        value: https://lab.aplis.inf.br/api/integracao.php
+      - key: APLIS_USUARIO
+        sync: false
+      - key: APLIS_SENHA
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: CPF_API_TOKEN
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: sa-east-1
+      - key: S3_BUCKET_NAME
+        sync: false
+      - key: GOOGLE_PROJECT_ID
+        sync: false
+      - key: GOOGLE_LOCATION
+        value: us-central1
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        sync: false
 
   - type: web
     name: automacao-admissao-frontend
@@ -30,3 +66,9 @@ services:
     envVars:
       - key: REACT_APP_API_URL
         value: https://automacao-admissao-backend.onrender.com
+      - key: REACT_APP_SUPABASE_URL
+        sync: false
+      - key: REACT_APP_SUPABASE_ANON_KEY
+        sync: false
+      - key: REACT_APP_SUPABASE_SERVICE_KEY
+        sync: false
