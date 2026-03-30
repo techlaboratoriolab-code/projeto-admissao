@@ -108,6 +108,7 @@ automacao-admissao/
 │   ├── INSTALACAO.md           # Guia de instalação
 │   ├── API.md                  # Documentação da API
 │   ├── DEPLOY.md               # Guia de deploy
+│   ├── DEPLOY_RENDER.md        # Deploy centralizado no Render
 │   ├── ARCHITECTURE.md         # Arquitetura do sistema
 │   ├── CONTRIBUTING.md         # Como contribuir
 │   ├── SCRIPTS.md              # Guia de scripts

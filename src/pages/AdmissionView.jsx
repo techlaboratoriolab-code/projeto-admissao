@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { ConvenioSelect, FontePagadoraSelect, LocalOrigemSelect, MedicoSelect } from '../components/DropdownsAdmissao';
 import { useFilaCompartilhada } from '../hooks/useFilaCompartilhada';
 import { supabase as supabaseClient } from '../lib/supabase';
+import { adminListUsers } from '../lib/supabaseAdminApi';
 
 const AdmissionView = () => {
   const { usuario } = useAuth();
@@ -49,10 +50,21 @@ const AdmissionView = () => {
 
   // 🆕 Estados para histórico de requisições do Supabase
   const [mostrarHistorico, setMostrarHistorico] = useState(false);
-  const [requisicoesHistorico, setRequisicoesHistorico] = useState([]);
+  const [requisicoesHistoricoIncompletas, setRequisicoesHistoricoIncompletas] = useState([]);
+  const [requisicoesHistoricoLote, setRequisicoesHistoricoLote] = useState([]);
+  const [modoHistorico, setModoHistorico] = useState('incompletas');
   const [loadingHistorico, setLoadingHistorico] = useState(false);
   const [buscaHistorico, setBuscaHistorico] = useState('');
+  const [lotesRecentes, setLotesRecentes] = useState([]);
+  const [loteSelecionado, setLoteSelecionado] = useState('');
+  const [loteManual, setLoteManual] = useState('');
+  const [filtroStatusLote, setFiltroStatusLote] = useState('aguarda');
+  const [loadingLotes, setLoadingLotes] = useState(false);
   const [abaPrincipal, setAbaPrincipal] = useState('admissao'); // 'admissao' ou 'visualizar'
+
+  const requisicoesHistoricoExibicao = modoHistorico === 'lote'
+    ? requisicoesHistoricoLote
+    : requisicoesHistoricoIncompletas;
 
   // 🆕 Estados para edição de dados do paciente no modal
   const [modoEdicaoModal, setModoEdicaoModal] = useState(false);
@@ -119,7 +131,107 @@ const AdmissionView = () => {
   const [filaIndice, setFilaIndice] = useState(0); // local: índice sendo processado pelo OCR
   const [filaRevisaoIndice, setFilaRevisaoIndice] = useState(-1); // local: índice selecionado para revisão
   const [filaLog, setFilaLog] = useState([]);
+  const [alertasPopup, setAlertasPopup] = useState([]);
+  const [filaErrosConfirmacao, setFilaErrosConfirmacao] = useState([]);
+  const [nomesUsuariosPorId, setNomesUsuariosPorId] = useState({});
   const autoStopRef = useRef(false);
+
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  const identificarGrupoAlerta = (texto) => {
+    const valor = String(texto || '').toLowerCase();
+    if (valor.includes('cpf')) return 'cpf';
+    if (valor.includes('ocr')) return 'ocr';
+    if (valor.includes('requisi')) return 'requisicao';
+    if (valor.includes('exame')) return 'exames';
+    if (valor.includes('salv')) return 'salvamento';
+    return 'geral';
+  };
+
+  useEffect(() => {
+    if (!message?.text) return;
+
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const tipo = ['success', 'error', 'warning', 'info'].includes(message.type) ? message.type : 'info';
+    const grupo = identificarGrupoAlerta(message.text);
+
+    if (tipo === 'error') {
+      setFilaErrosConfirmacao((prev) => {
+        const jaExiste = prev.some((erro) => erro.text === message.text);
+        if (jaExiste) return prev;
+        return [...prev, { id, text: message.text }];
+      });
+      return;
+    }
+
+    setAlertasPopup((prev) => {
+      const semGrupoAtual = prev.filter((item) => item.group !== grupo);
+      const proximo = [...semGrupoAtual, { id, type: tipo, text: message.text, group: grupo }];
+      return proximo.slice(-4);
+    });
+
+    const timer = setTimeout(() => {
+      setAlertasPopup((prev) => prev.filter((item) => item.id !== id));
+    }, tipo === 'error' ? 9000 : 6500);
+
+    return undefined;
+  }, [message]);
+
+  const resolverNomeUsuarioPorId = (valorSalvoPor) => {
+    const bruto = String(valorSalvoPor || '').trim();
+    if (!bruto) return '';
+
+    if (!UUID_REGEX.test(bruto)) {
+      return bruto;
+    }
+
+    const nomeAtual = (usuario?.nome_completo || usuario?.username || usuario?.aplis_usuario || '').trim();
+    if (bruto === usuario?.id && nomeAtual) return nomeAtual;
+
+    return (nomesUsuariosPorId[bruto] || '').trim();
+  };
+
+  useEffect(() => {
+    let ativo = true;
+
+    const carregarNomesUsuarios = async () => {
+      const idsPendentes = Array.from(new Set(
+        filaRequisicoes
+          .map(item => String(item.salvo_por || item.salvoPor || '').trim())
+          .filter(valor => UUID_REGEX.test(valor) && !nomesUsuariosPorId[valor])
+      ));
+
+      if (idsPendentes.length === 0) return;
+
+      try {
+        const users = await adminListUsers();
+        if (!ativo) return;
+
+        const novoMapa = {};
+        users.forEach((u) => {
+          const nome = u?.user_metadata?.nome_completo
+            || u?.user_metadata?.name
+            || u?.user_metadata?.nome
+            || u?.user_metadata?.username
+            || (u?.email ? String(u.email).split('@')[0] : '')
+            || '';
+
+          if (u?.id && nome) {
+            novoMapa[u.id] = nome;
+          }
+        });
+
+        setNomesUsuariosPorId(prev => ({ ...prev, ...novoMapa }));
+      } catch (error) {
+        console.warn('[FILA] Não foi possível resolver nomes dos usuários para salvo_por:', error);
+      }
+    };
+
+    carregarNomesUsuarios();
+    return () => {
+      ativo = false;
+    };
+  }, [filaRequisicoes, nomesUsuariosPorId]);
 
   // Função para converter data DD/MM/YYYY para YYYY-MM-DD
   const converterDataParaISO = (data) => {
@@ -1912,9 +2024,9 @@ const AdmissionView = () => {
       console.log('[SALVAR]   patientData.insuranceCardNumber:', patientData?.insuranceCardNumber);
       
       // Se formData.matConvenio está vazio mas patientData tem, usar do patientData
-      let matConvenioFinal = formData.matConvenio || '';
-      if ((!matConvenioFinal || matConvenioFinal.trim() === '') && patientData?.insuranceCardNumber) {
-        matConvenioFinal = patientData.insuranceCardNumber;
+      let matConvenioFinal = valorTextoValido(formData.matConvenio) || '';
+      if (!matConvenioFinal && patientData?.insuranceCardNumber) {
+        matConvenioFinal = valorTextoValido(patientData.insuranceCardNumber) || '';
         console.log('[SALVAR] ✅ Número da carteirinha sincronizado do patientData:', matConvenioFinal);
       }
 
@@ -2323,9 +2435,9 @@ const AdmissionView = () => {
         throw new Error('Nenhum exame encontrado no banco de dados');
       }
 
-      let matConvenioFinal = formData.matConvenio || '';
-      if ((!matConvenioFinal || matConvenioFinal.trim() === '') && patientData?.insuranceCardNumber) {
-        matConvenioFinal = patientData.insuranceCardNumber;
+      let matConvenioFinal = valorTextoValido(formData.matConvenio) || '';
+      if (!matConvenioFinal && patientData?.insuranceCardNumber) {
+        matConvenioFinal = valorTextoValido(patientData.insuranceCardNumber) || '';
       }
 
       const dados = {
@@ -2495,7 +2607,7 @@ const AdmissionView = () => {
       }));
 
       await iniciarSessao(sessaoId, itensParaInserir, usuario);
-      setMessage({ type: 'info', text: `${requisicoes.length} requisições encontradas. Processando OCR de todas...` });
+      setMessage({ type: 'info', text: `${requisicoes.length} requisições carregadas. Processando OCR do lote...` });
 
       // Processar OCR de TODAS sequencialmente (só este cliente roda)
       await processarTodasRequisicoes(sessaoId);
@@ -2795,8 +2907,13 @@ const AdmissionView = () => {
       }
     }
 
+    const salvoPorItem = resolverNomeUsuarioPorId(item.salvo_por || item.salvoPor);
+    const statusVisualizacao = item.status === 'salvo'
+      ? (salvoPorItem ? `Salvo no apLIS por ${salvoPorItem}` : 'Salvo no apLIS')
+      : 'Pulado';
+
     const msgLabel = jaFinalizado
-      ? `Visualizando (${item.status === 'salvo' ? 'Salvo no apLIS' : 'Pulado'}): ${codRequisicao} — ${patientSnapshot?.name || item.paciente_nome || 'Paciente'}`
+      ? `Visualizando (${statusVisualizacao}): ${codRequisicao} — ${patientSnapshot?.name || item.paciente_nome || 'Paciente'}`
       : `Revisando: ${codRequisicao} — ${patientSnapshot?.name || item.paciente_nome || 'Paciente'}`;
     setMessage({ type: jaFinalizado ? 'success' : 'info', text: msgLabel });
     } catch (error) {
@@ -2855,7 +2972,7 @@ const AdmissionView = () => {
       const saveResult = await handleSubmitAutomatico(codRequisicaoFinal);
 
       // Marcar como salvo no Supabase
-      if (item.id) await aprovarItemSupabase(item.id, usuario?.id);
+      if (item.id) await aprovarItemSupabase(item.id, usuario);
 
       setFilaLog(prev => [...prev, {
         codRequisicao: codRequisicaoFinal,
@@ -3460,17 +3577,88 @@ const AdmissionView = () => {
 
   // 🆕 Funções para histórico de requisições (Supabase)
   const buscarRequisicoesHistorico = async (filtro = '') => {
+    setModoHistorico('incompletas');
     setLoadingHistorico(true);
     try {
+      const deduplicarRequisicoes = (lista) => {
+        const mapa = new Map();
+        (lista || []).forEach((req) => {
+          const chave = String(req?.cod_requisicao || req?.codRequisicao || req?.codigo || '');
+          if (chave && !mapa.has(chave)) {
+            mapa.set(chave, req);
+          }
+        });
+        return Array.from(mapa.values());
+      };
+
       let url = `${API_BASE_URL}/api/historico/listar?limite=50`;
 
       // Se tiver filtro, buscar por código ou CPF
       if (filtro && filtro.trim()) {
         const filtroLimpo = filtro.trim();
-        // Verificar se é CPF (só números) ou código
+
+        // Busca em lote: aceita separadores por vírgula, espaço, ponto e vírgula ou quebra de linha
+        const termos = [...new Set(
+          filtroLimpo
+            .split(/[\s,;]+/)
+            .map((termo) => termo.trim())
+            .filter(Boolean)
+        )];
+
+        if (termos.length > 1) {
+          const somenteCpf = termos.every((termo) => /^\d{11}$/.test(termo));
+
+          const resultados = await Promise.all(
+            termos.map(async (termo) => {
+              try {
+                const endpoint = somenteCpf
+                  ? `${API_BASE_URL}/api/historico/buscar-cpf/${termo}`
+                  : `${API_BASE_URL}/api/historico/${termo}`;
+                const response = await apiFetch(endpoint);
+                const data = await response.json();
+
+                if (!response.ok || data?.sucesso !== 1) {
+                  return [];
+                }
+
+                if (somenteCpf) {
+                  return Array.isArray(data?.requisicoes) ? data.requisicoes : [];
+                }
+
+                return data?.dados ? [data.dados] : [];
+              } catch (error) {
+                console.warn('[HISTORICO] Erro na busca em lote para termo:', termo, error);
+                return [];
+              }
+            })
+          );
+
+          const requisicoesLote = deduplicarRequisicoes(resultados.flat());
+          setRequisicoesHistoricoIncompletas(requisicoesLote);
+
+          if (requisicoesLote.length > 0) {
+            setMessage({
+              type: 'success',
+              text: `✓ ${requisicoesLote.length} requisição(ões) encontrada(s) na busca em lote`
+            });
+          } else {
+            setMessage({
+              type: 'warning',
+              text: 'Nenhuma requisição encontrada na busca em lote'
+            });
+          }
+
+          return;
+        }
+
+        // Verificar se é CPF, código de requisição ou lote
         if (/^\d{11}$/.test(filtroLimpo)) {
           // É CPF
           url = `${API_BASE_URL}/api/historico/buscar-cpf/${filtroLimpo}`;
+        } else if (/^\d+$/.test(filtroLimpo) && !codigoRequisicaoValido(filtroLimpo)) {
+          // É número puro sem formato de requisição (ex.: 36037) => tratar como lote
+          await buscarRequisicoesPorLoteHistorico(filtroLimpo);
+          return;
         } else {
           // É código de requisição
           url = `${API_BASE_URL}/api/historico/${filtroLimpo}`;
@@ -3495,17 +3683,17 @@ const AdmissionView = () => {
           requisicoes = data;
         }
         
-        setRequisicoesHistorico(requisicoes);
+        setRequisicoesHistoricoIncompletas(deduplicarRequisicoes(requisicoes));
         setMessage({
           type: 'success',
-          text: `✓ ${requisicoes.length} requisição(ões) encontrada(s)`
+          text: `✓ ${deduplicarRequisicoes(requisicoes).length} requisição(ões) encontrada(s)`
         });
       } else {
         setMessage({
           type: 'warning',
           text: data.erro || 'Nenhuma requisição encontrada'
         });
-        setRequisicoesHistorico([]);
+        setRequisicoesHistoricoIncompletas([]);
       }
     } catch (error) {
       console.error('Erro ao buscar histórico:', error);
@@ -3513,11 +3701,85 @@ const AdmissionView = () => {
         type: 'error',
         text: 'Erro ao buscar histórico de requisições'
       });
-      setRequisicoesHistorico([]);
+      setRequisicoesHistoricoIncompletas([]);
     } finally {
       setLoadingHistorico(false);
     }
   };
+
+  const buscarRequisicoesPorLoteHistorico = async (loteInformado = '') => {
+    setModoHistorico('lote');
+    const loteLimpo = String(loteInformado || '').replace(/\D/g, '');
+
+    if (!loteLimpo) {
+      setMessage({
+        type: 'warning',
+        text: 'Informe um número de lote válido para buscar'
+      });
+      return;
+    }
+
+    setLoadingHistorico(true);
+
+    try {
+      const anoAtual = new Date().getFullYear();
+      const url = `${API_BASE_URL}/api/historico/buscar-lote/${loteLimpo}?limite=200&ano=${anoAtual}&status=${encodeURIComponent(filtroStatusLote)}`;
+      const response = await apiFetch(url);
+      const data = await response.json();
+
+      if (response.ok && data?.sucesso === 1) {
+        const requisicoes = Array.isArray(data?.requisicoes) ? data.requisicoes : [];
+        setRequisicoesHistoricoLote(requisicoes);
+        setMessage({
+          type: requisicoes.length > 0 ? 'success' : 'warning',
+          text: requisicoes.length > 0
+            ? `✓ ${requisicoes.length} requisição(ões) encontrada(s) no lote ${loteLimpo}`
+            : `Nenhuma requisição encontrada no lote ${loteLimpo}`
+        });
+      } else {
+        setRequisicoesHistoricoLote([]);
+        setMessage({
+          type: 'warning',
+          text: data?.erro || `Falha ao buscar lote ${loteLimpo}`
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao buscar histórico por lote:', error);
+      setRequisicoesHistoricoLote([]);
+      setMessage({
+        type: 'error',
+        text: 'Erro ao buscar histórico por lote'
+      });
+    } finally {
+      setLoadingHistorico(false);
+    }
+  };
+
+  const carregarLotesRecentes = async () => {
+    setLoadingLotes(true);
+    try {
+      const anoAtual = new Date().getFullYear();
+      const response = await apiFetch(`${API_BASE_URL}/api/historico/lotes-recentes?limite=30&ano=${anoAtual}&status=${encodeURIComponent(filtroStatusLote)}`);
+      const data = await response.json();
+
+      if (response.ok && data?.sucesso === 1) {
+        const lotes = Array.isArray(data?.lotes) ? data.lotes : [];
+        setLotesRecentes(lotes);
+
+        if (!loteSelecionado && lotes.length > 0) {
+          setLoteSelecionado(String(lotes[0].lote));
+        }
+      }
+    } catch (error) {
+      console.warn('[HISTORICO] Não foi possível carregar lotes recentes:', error);
+    } finally {
+      setLoadingLotes(false);
+    }
+  };
+
+  useEffect(() => {
+    carregarLotesRecentes();
+  }, [filtroStatusLote]);
 
   const carregarRequisicaoDoHistorico = async (requisicao) => {
     try {
@@ -3720,6 +3982,7 @@ const AdmissionView = () => {
                 const codReq = item.cod_requisicao || item.codRequisicao;
                 const nome = item.patient_data_snapshot?.name || item.patientDataSnapshot?.name || item.paciente_nome || item.paciente || '—';
                 const cpfItem = item.patient_data_snapshot?.cpf || item.patientDataSnapshot?.cpf || item.cpf || '';
+                const salvoPorLabel = resolverNomeUsuarioPorId(item.salvo_por || item.salvoPor);
                 const isLockedByOther = item.status === 'em_revisao' && item.revisado_por !== usuario?.id;
                 const canClick = item.status === 'salvo' || item.status === 'pulado' ||
                   ((item.status === 'processado' || (item.status === 'em_revisao' && item.revisado_por === usuario?.id)) && (filaStatus === 'revisao' || filaStatus === 'processando'));
@@ -3729,7 +3992,7 @@ const AdmissionView = () => {
                   processado:  { pill: 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400',        label: 'Aguardando revisão' },
                   em_revisao:  { pill: 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400',    label: isLockedByOther ? `Revisando: ${item.revisado_por_nome || '...'}` : 'Em revisão (você)' },
                   erro:        { pill: 'bg-red-100 dark:bg-red-900/30 text-red-500 dark:text-red-400',                label: 'Erro' },
-                  salvo:       { pill: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400', label: 'Salvo no apLIS' },
+                  salvo:       { pill: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400', label: salvoPorLabel ? `Salvo no apLIS por ${salvoPorLabel}` : 'Salvo no apLIS' },
                   pulado:      { pill: 'bg-slate-100 dark:bg-neutral-700 text-slate-500 dark:text-neutral-400',        label: 'Pulado' },
                 };
                 const sc = statusConfig[item.status] || statusConfig.pendente;
@@ -3832,7 +4095,10 @@ const AdmissionView = () => {
             type="button"
             onClick={() => {
               setMostrarHistorico(!mostrarHistorico);
-              if (!mostrarHistorico) buscarRequisicoesHistorico();
+              if (!mostrarHistorico) {
+                setModoHistorico('incompletas');
+                buscarRequisicoesHistorico();
+              }
             }}
             className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border text-sm font-semibold transition-all duration-200 ${
               mostrarHistorico
@@ -3842,13 +4108,14 @@ const AdmissionView = () => {
           >
             <span className="flex items-center gap-2.5">
               <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-              Requisições Incompletas
-              {!mostrarHistorico && requisicoesHistorico.length > 0 && (
-                <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold bg-red-500 text-white rounded-full">{requisicoesHistorico.length}</span>
+              Requisições Histórico/Requisições por Lote
+              {!mostrarHistorico && requisicoesHistoricoIncompletas.length > 0 && (
+                <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold bg-red-500 text-white rounded-full">{requisicoesHistoricoIncompletas.length}</span>
               )}
             </span>
             <svg xmlns="http://www.w3.org/2000/svg" className={`w-4 h-4 transition-transform duration-200 ${mostrarHistorico ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
+
         </div>
 
         {/* Painel de histórico */}
@@ -3862,55 +4129,157 @@ const AdmissionView = () => {
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-indigo-500 dark:text-indigo-400 uppercase tracking-widest leading-none mb-0.5">Histórico</p>
-                  <h3 className="text-sm font-bold text-slate-800 dark:text-neutral-100 leading-none">Requisições Incompletas</h3>
+                  <h3 className="text-sm font-bold text-slate-800 dark:text-neutral-100 leading-none">
+                    {modoHistorico === 'lote' ? 'Requisições por Lote' : 'Requisições Histórico'}
+                  </h3>
                 </div>
               </div>
-              {requisicoesHistorico.length > 0 && (
+              {requisicoesHistoricoExibicao.length > 0 && (
                 <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                  {requisicoesHistorico.length} {requisicoesHistorico.length === 1 ? 'registro' : 'registros'}
+                  {requisicoesHistoricoExibicao.length} {requisicoesHistoricoExibicao.length === 1 ? 'registro' : 'registros'}
                 </span>
               )}
             </div>
 
             <div className="p-4">
-              {/* Barra de busca */}
-              <div className="relative flex gap-2 mb-4">
-                <div className="relative flex-1">
-                  <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-slate-400 dark:text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  </div>
-                  <input
-                    type="text"
-                    value={buscaHistorico}
-                    onChange={(e) => setBuscaHistorico(e.target.value)}
-                    placeholder="Código da requisição ou CPF (11 dígitos)..."
-                    className="w-full pl-10 pr-4 py-2.5 text-sm border border-slate-200 dark:border-neutral-700 rounded-lg bg-white dark:bg-neutral-800 text-slate-800 dark:text-neutral-100 placeholder:text-slate-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 dark:focus:border-indigo-400 transition-all"
-                    onKeyDown={(e) => e.key === 'Enter' && buscarRequisicoesHistorico(buscaHistorico)}
-                  />
-                </div>
+              <div className="mb-4 flex items-center gap-2 p-1 rounded-xl bg-slate-100 dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 w-fit">
                 <button
                   type="button"
-                  onClick={() => buscarRequisicoesHistorico(buscaHistorico)}
-                  disabled={loadingHistorico}
-                  className="px-4 py-2.5 text-sm font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-sm"
+                  onClick={() => setModoHistorico('incompletas')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${modoHistorico === 'incompletas' ? 'bg-white dark:bg-neutral-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700' : 'text-slate-600 dark:text-neutral-300 hover:text-indigo-600 dark:hover:text-indigo-400'}`}
                 >
-                  {loadingHistorico ? (
-                    <div className="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full" />
-                  ) : (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  )}
-                  Buscar
+                  Histórico
                 </button>
-                {buscaHistorico && (
+                <button
+                  type="button"
+                  onClick={() => setModoHistorico('lote')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${modoHistorico === 'lote' ? 'bg-white dark:bg-neutral-900 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700' : 'text-slate-600 dark:text-neutral-300 hover:text-emerald-600 dark:hover:text-emerald-400'}`}
+                >
+                  Lote de Triagem
+                </button>
+              </div>
+
+              {modoHistorico === 'incompletas' ? (
+                <div className="relative flex gap-2 mb-4">
+                  <div className="relative flex-1">
+                    <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-slate-400 dark:text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    </div>
+                    <input
+                      type="text"
+                      value={buscaHistorico}
+                      onChange={(e) => setBuscaHistorico(e.target.value)}
+                      placeholder="Buscar histórico por código ou CPF"
+                      className="w-full pl-10 pr-4 py-2.5 text-sm border border-slate-200 dark:border-neutral-700 rounded-lg bg-white dark:bg-neutral-800 text-slate-800 dark:text-neutral-100 placeholder:text-slate-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 dark:focus:border-indigo-400 transition-all"
+                      onKeyDown={(e) => e.key === 'Enter' && buscarRequisicoesHistorico(buscaHistorico)}
+                    />
+                  </div>
                   <button
                     type="button"
-                    onClick={() => { setBuscaHistorico(''); buscarRequisicoesHistorico(''); }}
+                    onClick={() => buscarRequisicoesHistorico(buscaHistorico)}
+                    disabled={loadingHistorico}
+                    className="px-4 py-2.5 text-sm font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Buscar histórico
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBuscaHistorico('');
+                      buscarRequisicoesHistorico('');
+                    }}
                     className="px-3 py-2.5 text-sm font-medium rounded-lg border border-slate-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-slate-500 dark:text-neutral-400 hover:bg-slate-50 dark:hover:bg-neutral-700 transition-colors"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    Limpar
                   </button>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="mb-4 flex flex-col gap-2 p-3 rounded-xl border border-slate-200 dark:border-neutral-700 bg-slate-50 dark:bg-neutral-800/50">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={filtroStatusLote}
+                      onChange={(e) => setFiltroStatusLote(e.target.value)}
+                      className="min-w-[170px] max-w-full px-3 py-2 text-sm border border-slate-200 dark:border-neutral-700 rounded-lg bg-white dark:bg-neutral-900 text-slate-700 dark:text-neutral-200"
+                    >
+                      <option value="aguarda">Status: Aguarda Admissão</option>
+                      <option value="todos">Status: Todos</option>
+                    </select>
+
+                    <select
+                      value={loteSelecionado}
+                      onChange={(e) => setLoteSelecionado(e.target.value)}
+                      className="min-w-[220px] max-w-full px-3 py-2 text-sm border border-slate-200 dark:border-neutral-700 rounded-lg bg-white dark:bg-neutral-900 text-slate-700 dark:text-neutral-200"
+                      disabled={loadingLotes || lotesRecentes.length === 0}
+                    >
+                      {lotesRecentes.length === 0 ? (
+                        <option value="">{loadingLotes ? 'Carregando lotes...' : 'Sem lotes disponíveis'}</option>
+                      ) : (
+                        lotesRecentes.map((item) => (
+                          <option key={item.lote} value={String(item.lote)}>
+                            Lote {item.lote} • {item.quantidade} req • {item.data_mais_recente}
+                          </option>
+                        ))
+                      )}
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!loteSelecionado) return;
+                        setBuscaHistorico(String(loteSelecionado));
+                        buscarRequisicoesPorLoteHistorico(loteSelecionado);
+                      }}
+                      disabled={loadingHistorico || loadingLotes || !loteSelecionado}
+                      className="px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Buscar lote selecionado
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={loteManual}
+                      onChange={(e) => setLoteManual(e.target.value.replace(/\D/g, ''))}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter' || !loteManual) return;
+                        setBuscaHistorico(String(loteManual));
+                        setLoteSelecionado(String(loteManual));
+                        buscarRequisicoesPorLoteHistorico(loteManual);
+                      }}
+                      placeholder="Digite o número do lote de triagem"
+                      className="min-w-[260px] max-w-full px-3 py-2 text-sm border border-slate-200 dark:border-neutral-700 rounded-lg bg-white dark:bg-neutral-900 text-slate-700 dark:text-neutral-200 placeholder:text-slate-400 dark:placeholder:text-neutral-500"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!loteManual) return;
+                        setBuscaHistorico(String(loteManual));
+                        setLoteSelecionado(String(loteManual));
+                        buscarRequisicoesPorLoteHistorico(loteManual);
+                      }}
+                      disabled={loadingHistorico || !loteManual}
+                      className="px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Buscar lote digitado
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBuscaHistorico('');
+                        setLoteManual('');
+                        setRequisicoesHistoricoLote([]);
+                      }}
+                      className="px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-slate-500 dark:text-neutral-400 hover:bg-slate-50 dark:hover:bg-neutral-800 transition-colors"
+                    >
+                      Limpar lote
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Lista de requisições */}
               {loadingHistorico ? (
@@ -3918,17 +4287,19 @@ const AdmissionView = () => {
                   <div className="animate-spin h-8 w-8 border-3 border-indigo-500 border-t-transparent rounded-full mb-3" style={{ borderWidth: '3px' }} />
                   <p className="text-sm font-medium">Buscando requisições...</p>
                 </div>
-              ) : requisicoesHistorico.length === 0 ? (
+              ) : requisicoesHistoricoExibicao.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-slate-400 dark:text-neutral-500">
                   <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-neutral-800 flex items-center justify-center mb-3">
                     <svg xmlns="http://www.w3.org/2000/svg" className="w-7 h-7 text-slate-300 dark:text-neutral-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                   </div>
                   <p className="text-sm font-semibold text-slate-500 dark:text-neutral-400 mb-1">Nenhuma requisição encontrada</p>
-                  <p className="text-xs text-slate-400 dark:text-neutral-500">Processe requisições para visualizá-las aqui</p>
+                  <p className="text-xs text-slate-400 dark:text-neutral-500">
+                    {modoHistorico === 'lote' ? 'Nenhum registro encontrado para o lote informado' : 'Processe requisições para visualizá-las aqui'}
+                  </p>
                 </div>
               ) : (
                 <div className="flex flex-col gap-2.5 max-h-[440px] overflow-y-auto pr-1 scrollbar-custom">
-                  {requisicoesHistorico.map((req, idx) => {
+                  {requisicoesHistoricoExibicao.map((req, idx) => {
                     const dadosPaciente = req.dados_paciente || {};
                     const camposObrigatorios = [
                       { campo: 'nome',   label: 'Nome',       valor: dadosPaciente.nome || dadosPaciente.name || req.nome_paciente },
@@ -4490,6 +4861,80 @@ const AdmissionView = () => {
         <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[10000] bg-emerald-500 text-white px-6 py-3 rounded-xl shadow-xl flex items-center gap-2.5 font-semibold text-sm animate-slideUp pointer-events-none">
           <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
           Dados salvos com sucesso!
+        </div>
+      )}
+
+      {/* Popups de alertas e avisos */}
+      {alertasPopup.length > 0 && (
+        <div className="fixed top-5 right-5 z-[11000] flex flex-col gap-3 w-[min(92vw,430px)] pointer-events-none">
+          {alertasPopup.map((alerta) => {
+            const estilosPorTipo = {
+              success: 'bg-emerald-600/95 border-emerald-400 text-white',
+              error: 'bg-red-600/95 border-red-400 text-white',
+              warning: 'bg-amber-500/95 border-amber-300 text-black',
+              info: 'bg-blue-600/95 border-blue-400 text-white',
+            };
+
+            const iconePorTipo = {
+              success: '✓',
+              error: '✖',
+              warning: '⚠',
+              info: 'ℹ',
+            };
+
+            return (
+              <div
+                key={alerta.id}
+                className={`pointer-events-auto rounded-xl border px-4 py-3 shadow-2xl backdrop-blur-sm animate-slideUp ${estilosPorTipo[alerta.type] || estilosPorTipo.info}`}
+                role="alert"
+                aria-live="assertive"
+              >
+                <div className="flex items-start gap-3">
+                  <span className="text-base leading-none font-bold mt-0.5">{iconePorTipo[alerta.type] || 'ℹ'}</span>
+                  <p className="text-sm font-semibold whitespace-pre-line leading-5 flex-1">{alerta.text}</p>
+                  <button
+                    type="button"
+                    onClick={() => setAlertasPopup((prev) => prev.filter((item) => item.id !== alerta.id))}
+                    className="ml-1 text-current/80 hover:text-current font-bold leading-none"
+                    title="Fechar aviso"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Pop-up obrigatório para erros */}
+      {filaErrosConfirmacao.length > 0 && (
+        <div className="fixed inset-0 z-[12000] bg-black/55 backdrop-blur-[1px] flex items-center justify-center px-4">
+          <div className="w-full max-w-lg rounded-2xl border border-red-400/60 bg-white dark:bg-neutral-900 shadow-2xl overflow-hidden animate-slideUp">
+            <div className="px-5 py-4 bg-red-600 text-white flex items-center gap-3">
+              <span className="text-lg font-black">⚠</span>
+              <h3 className="text-base font-bold">Erro detectado — confirmação obrigatória</h3>
+            </div>
+            <div className="px-5 py-4">
+              <p className="text-sm text-slate-800 dark:text-neutral-100 whitespace-pre-line leading-6">
+                {filaErrosConfirmacao[0]?.text}
+              </p>
+              {filaErrosConfirmacao.length > 1 && (
+                <p className="mt-3 text-xs font-semibold text-red-600 dark:text-red-400">
+                  Existem mais {filaErrosConfirmacao.length - 1} erro(s) aguardando confirmação.
+                </p>
+              )}
+            </div>
+            <div className="px-5 py-4 border-t border-slate-200 dark:border-neutral-700 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setFilaErrosConfirmacao((prev) => prev.slice(1))}
+                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition-colors"
+              >
+                Confirmar visualização
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

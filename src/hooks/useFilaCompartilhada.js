@@ -294,12 +294,23 @@ export function useFilaCompartilhada() {
     }
   }, []);
 
-  const aprovarItem = useCallback(async (itemId, userId) => {
+  const aprovarItem = useCallback(async (itemId, userOrId) => {
+    const userId = typeof userOrId === 'string'
+      ? userOrId
+      : (userOrId?.id || usuario?.id);
+
+    const userNome = typeof userOrId === 'object' && userOrId !== null
+      ? (userOrId.nome_completo || userOrId.username || userOrId.aplis_usuario || '')
+      : '';
+
+    const nomeFallback = usuario?.nome_completo || usuario?.username || usuario?.aplis_usuario || '';
+    const salvoPor = userNome || nomeFallback || userId || 'usuário';
+
     await supabase
       .from('fila_admissao')
       .update({
         status: 'salvo',
-        salvo_por: userId || usuario?.id,
+        salvo_por: salvoPor,
         revisado_por: null,
         revisado_por_nome: null,
         lock_timestamp: null

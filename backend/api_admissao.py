@@ -6,8 +6,6 @@ Conecta interface React com apLIS
 
 """
 
-
-
 from flask import Flask, request, jsonify, send_file
 
 from flask_cors import CORS
@@ -47,18 +45,13 @@ import pymysql
 
 from dateutil.relativedelta import relativedelta
 
-
-
 # Importar prompts de OCR (arquivo separado para organização)
 
 from prompts_ocr import gerar_prompt_ocr
 
-
-
 # Carregar variáveis de ambiente do arquivo .env na pasta backend
 
-load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
-
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 
 # ============================================
@@ -84,19 +77,17 @@ except ImportError as e:
     supabase_manager = None
 
 
-
 # Configurar encoding UTF-8 para o console do Windows (evita erros com emojis)
 
-if sys.platform == 'win32':
+if sys.platform == "win32":
 
-    if hasattr(sys.stdout, 'reconfigure'):
+    if hasattr(sys.stdout, "reconfigure"):
 
-        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stdout.reconfigure(encoding="utf-8")
 
-    if hasattr(sys.stderr, 'reconfigure'):
+    if hasattr(sys.stderr, "reconfigure"):
 
-        sys.stderr.reconfigure(encoding='utf-8')
-
+        sys.stderr.reconfigure(encoding="utf-8")
 
 
 # ========================================
@@ -107,56 +98,42 @@ if sys.platform == 'win32':
 
 # Criar diretório de logs se não existir
 
-LOG_DIR = os.path.join(os.path.dirname(__file__), 'logs')
+LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
 
 os.makedirs(LOG_DIR, exist_ok=True)
-
 
 
 # Configurar logging
 
 logging.basicConfig(
-
     level=logging.DEBUG,
-
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-
-    datefmt='%Y-%m-%d %H:%M:%S'
-
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
-
 
 
 # Logger principal
 
-logger = logging.getLogger('api_admissao')
+logger = logging.getLogger("api_admissao")
 
 logger.setLevel(logging.DEBUG)
-
 
 
 # Handler para arquivo (rotação automática)
 
 file_handler = RotatingFileHandler(
-
-    os.path.join(LOG_DIR, 'api_admissao.log'),
-
-    maxBytes=10*1024*1024,  # 10MB
-
-    backupCount=5
-
+    os.path.join(LOG_DIR, "api_admissao.log"),
+    maxBytes=10 * 1024 * 1024,  # 10MB
+    backupCount=5,
 )
 
 file_handler.setLevel(logging.DEBUG)
 
-file_handler.setFormatter(logging.Formatter(
-
-    '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-
-    datefmt='%Y-%m-%d %H:%M:%S'
-
-))
-
+file_handler.setFormatter(
+    logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    )
+)
 
 
 # Handler para console (colorido)
@@ -165,14 +142,9 @@ console_handler = logging.StreamHandler(sys.stdout)
 
 console_handler.setLevel(logging.INFO)
 
-console_handler.setFormatter(logging.Formatter(
-
-    '%(asctime)s [%(levelname)s] %(message)s',
-
-    datefmt='%H:%M:%S'
-
-))
-
+console_handler.setFormatter(
+    logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+)
 
 
 logger.addHandler(file_handler)
@@ -180,20 +152,22 @@ logger.addHandler(file_handler)
 logger.addHandler(console_handler)
 
 
-
 # Configurar Vertex AI
 
-GOOGLE_PROJECT_ID = os.getenv('GOOGLE_PROJECT_ID', 'spry-catcher-449921-h8')
+GOOGLE_PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID", "spry-catcher-449921-h8")
 
-GOOGLE_LOCATION = os.getenv('GOOGLE_LOCATION', 'us-central1')
+GOOGLE_LOCATION = os.getenv("GOOGLE_LOCATION", "us-central1")
 
-GOOGLE_CREDENTIALS_PATH = os.getenv('GOOGLE_APPLICATION_CREDENTIALS',
-
-                                      r'C:\Users\Windows 11\Downloads\spry-catcher-449921-h8-bbc989e73ec4 (1).json')
+GOOGLE_CREDENTIALS_PATH = os.getenv(
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    r"C:\Users\Windows 11\Downloads\spry-catcher-449921-h8-bbc989e73ec4 (1).json",
+)
 
 # Fallback: se o caminho configurado não existe, tentar o caminho padrão do Downloads
 
-_FALLBACK_CREDENTIALS = r'C:\Users\Windows 11\Downloads\spry-catcher-449921-h8-bbc989e73ec4 (1).json'
+_FALLBACK_CREDENTIALS = (
+    r"C:\Users\Windows 11\Downloads\spry-catcher-449921-h8-bbc989e73ec4 (1).json"
+)
 
 if GOOGLE_CREDENTIALS_PATH and not os.path.exists(GOOGLE_CREDENTIALS_PATH):
 
@@ -205,20 +179,21 @@ if GOOGLE_CREDENTIALS_PATH and not os.path.exists(GOOGLE_CREDENTIALS_PATH):
 
         GOOGLE_CREDENTIALS_PATH = _FALLBACK_CREDENTIALS
 
-        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = _FALLBACK_CREDENTIALS
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _FALLBACK_CREDENTIALS
 
     else:
 
-        print(f"[ERRO] Arquivo de credenciais Google não encontrado: {GOOGLE_CREDENTIALS_PATH}")
+        print(
+            f"[ERRO] Arquivo de credenciais Google não encontrado: {GOOGLE_CREDENTIALS_PATH}"
+        )
 
         print(f"[ERRO] OCR via Vertex AI não estará disponível!")
 
 elif GOOGLE_CREDENTIALS_PATH and os.path.exists(GOOGLE_CREDENTIALS_PATH):
 
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = GOOGLE_CREDENTIALS_PATH
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_CREDENTIALS_PATH
 
     print(f"[OK] Credenciais Google encontradas: {GOOGLE_CREDENTIALS_PATH}")
-
 
 
 # Inicializar Vertex AI
@@ -226,13 +201,11 @@ elif GOOGLE_CREDENTIALS_PATH and os.path.exists(GOOGLE_CREDENTIALS_PATH):
 vertexai.init(project=GOOGLE_PROJECT_ID, location=GOOGLE_LOCATION)
 
 
-
 # Configurações da API de CPF (Receita Federal)
 
 CPF_API_BASE_URL = "https://ws.hubdodesenvolvedor.com.br/v2/cpf/"
 
-CPF_API_TOKEN = os.getenv('CPF_API_TOKEN', '')
-
+CPF_API_TOKEN = os.getenv("CPF_API_TOKEN", "")
 
 
 # ========================================
@@ -241,21 +214,15 @@ CPF_API_TOKEN = os.getenv('CPF_API_TOKEN', '')
 
 # ========================================
 DB_CONFIG = {
-
-    'host': os.getenv('DB_HOST', 'localhost'),
-
-    'user': os.getenv('DB_USER', 'root'),
-
-    'password': os.getenv('DB_PASSWORD', ''),
-
-    'database': os.getenv('DB_NAME', 'newdb'),
-
-    'charset': 'utf8mb4'
-
+    "host": os.getenv("DB_HOST", "localhost"),
+    "user": os.getenv("DB_USER", "root"),
+    "password": os.getenv("DB_PASSWORD", ""),
+    "database": os.getenv("DB_NAME", "newdb"),
+    "charset": "utf8mb4",
 }
 
 
-COD_REQUISICAO_REGEX = re.compile(r'^(0085|0200)\d{9}$')
+COD_REQUISICAO_REGEX = re.compile(r"^(0085|0200)\d{9}$")
 
 
 def codigo_requisicao_valido(codigo):
@@ -269,9 +236,7 @@ def codigo_requisicao_valido(codigo):
     return COD_REQUISICAO_REGEX.fullmatch(codigo_str) is not None
 
 
-
 def buscar_ids_banco(cod_requisicao):
-
     """
 
     Busca IdConvenio, IdFontePagadora e IdLocalOrigem direto do banco de dados MySQL
@@ -296,8 +261,6 @@ def buscar_ids_banco(cod_requisicao):
 
         cursor = connection.cursor(pymysql.cursors.DictCursor)
 
-
-
         query = """
 
             SELECT IdConvenio, IdFontePagadora, IdLocalOrigem
@@ -310,83 +273,85 @@ def buscar_ids_banco(cod_requisicao):
 
         """
 
-
-
         cursor.execute(query, (cod_requisicao,))
 
         resultado = cursor.fetchone()
-
-
 
         cursor.close()
 
         connection.close()
 
-
-
         if resultado:
 
             logger.info(f"[DB] âœ… Requisição {cod_requisicao} encontrada no banco!")
 
-            logger.info(f"[DB]   - IdConvenio: {resultado.get('IdConvenio')} {'âœ…' if resultado.get('IdConvenio') else 'âš ️ (None/vazio)'}")
+            logger.info(
+                f"[DB]   - IdConvenio: {resultado.get('IdConvenio')} {'âœ…' if resultado.get('IdConvenio') else 'âš ️ (None/vazio)'}"
+            )
 
-            logger.info(f"[DB]   - IdFontePagadora: {resultado.get('IdFontePagadora')} {'âœ…' if resultado.get('IdFontePagadora') else 'âš ️ (None/vazio)'}")
+            logger.info(
+                f"[DB]   - IdFontePagadora: {resultado.get('IdFontePagadora')} {'âœ…' if resultado.get('IdFontePagadora') else 'âš ️ (None/vazio)'}"
+            )
 
-            logger.info(f"[DB]   - IdLocalOrigem: {resultado.get('IdLocalOrigem')} {'âœ…' if resultado.get('IdLocalOrigem') else 'âš ️ (None/vazio)'}")
-
-            
+            logger.info(
+                f"[DB]   - IdLocalOrigem: {resultado.get('IdLocalOrigem')} {'âœ…' if resultado.get('IdLocalOrigem') else 'âš ️ (None/vazio)'}"
+            )
 
             # Avisos específicos para IDs que são None
 
-            if not resultado.get('IdConvenio'):
+            if not resultado.get("IdConvenio"):
 
-                logger.warning(f"[DB] âš ️ IdConvenio está None! Convênio não foi salvo ao criar a requisição")
+                logger.warning(
+                    f"[DB] âš ️ IdConvenio está None! Convênio não foi salvo ao criar a requisição"
+                )
 
-            if not resultado.get('IdFontePagadora'):
+            if not resultado.get("IdFontePagadora"):
 
-                logger.warning(f"[DB] âš ️ IdFontePagadora está None! Fonte pagadora não foi salva ao criar a requisição")
+                logger.warning(
+                    f"[DB] âš ️ IdFontePagadora está None! Fonte pagadora não foi salva ao criar a requisição"
+                )
 
-            if not resultado.get('IdLocalOrigem'):
+            if not resultado.get("IdLocalOrigem"):
 
-                logger.warning(f"[DB] âš ️ IdLocalOrigem está None! Local de origem não foi salvo ao criar a requisição")
-
-            
+                logger.warning(
+                    f"[DB] âš ️ IdLocalOrigem está None! Local de origem não foi salvo ao criar a requisição"
+                )
 
             return resultado
 
         else:
 
-            logger.warning(f"[DB] âŒ Requisição {cod_requisicao} NÃƒO encontrada no banco")
+            logger.warning(
+                f"[DB] âŒ Requisição {cod_requisicao} NÃƒO encontrada no banco"
+            )
 
-            logger.warning(f"[DB] ðŸ’¡ Verifique se o código da requisição está correto")
+            logger.warning(
+                f"[DB] ðŸ’¡ Verifique se o código da requisição está correto"
+            )
 
-            return {'IdConvenio': None, 'IdFontePagadora': None, 'IdLocalOrigem': None}
-
-
+            return {"IdConvenio": None, "IdFontePagadora": None, "IdLocalOrigem": None}
 
     except Exception as e:
 
         logger.error(f"[DB] Erro ao buscar IDs do banco para {cod_requisicao}: {e}")
 
-        return {'IdConvenio': None, 'IdFontePagadora': None, 'IdLocalOrigem': None}
-
+        return {"IdConvenio": None, "IdFontePagadora": None, "IdLocalOrigem": None}
 
 
 def buscar_dados_paciente_via_api(cod_requisicao):
-
     """
 
     Busca dados do paciente através do requisicaoResultado da API
 
     E faz lookup reverso para encontrar os IDs de Convênio, Fonte Pagadora e Local de Origem
 
-    
+
 
     Args:
 
         cod_requisicao: Código da requisição
 
-        
+
 
     Returns:
 
@@ -396,15 +361,15 @@ def buscar_dados_paciente_via_api(cod_requisicao):
 
     try:
 
-        logger.info(f"[API] Buscando dados do paciente via requisicaoResultado: {cod_requisicao}")
-
-        
+        logger.info(
+            f"[API] Buscando dados do paciente via requisicaoResultado: {cod_requisicao}"
+        )
 
         dat_resultado = {"codRequisicao": cod_requisicao}
 
-        resposta_resultado = fazer_requisicao_aplis("requisicaoResultado", dat_resultado)
-
-
+        resposta_resultado = fazer_requisicao_aplis(
+            "requisicaoResultado", dat_resultado
+        )
 
         if resposta_resultado.get("dat", {}).get("sucesso") == 1:
 
@@ -412,13 +377,9 @@ def buscar_dados_paciente_via_api(cod_requisicao):
 
             paciente_api = dados_resultado.get("paciente", {})
 
-            
-
             if paciente_api:
 
                 logger.info(f"[API] âœ… Dados do paciente obtidos via API")
-
-                
 
                 # LOOKUP REVERSO: Buscar IDs baseado nos nomes retornados pela API
 
@@ -427,8 +388,6 @@ def buscar_dados_paciente_via_api(cod_requisicao):
                 id_local_origem = None
 
                 id_fonte_pagadora = None
-
-                
 
                 # 1. Buscar ID do Convênio pelo nome
 
@@ -442,23 +401,27 @@ def buscar_dados_paciente_via_api(cod_requisicao):
 
                     if id_convenio:
 
-                        logger.info(f"[API] OK ID do convenio encontrado: {id_convenio}")
+                        logger.info(
+                            f"[API] OK ID do convenio encontrado: {id_convenio}"
+                        )
 
                     else:
 
-                        logger.warning(f"[API] AVISO ID do convenio NAO encontrado para '{nome_convenio}'")
+                        logger.warning(
+                            f"[API] AVISO ID do convenio NAO encontrado para '{nome_convenio}'"
+                        )
 
                 else:
 
                     logger.warning(f"[API] AVISO API nao retornou nome do convenio")
 
-                
-
                 # 2. Buscar ID do Local de Origem pelo nome
 
                 local_origem = dados_resultado.get("localOrigem", {})
 
-                nome_local = local_origem.get("nome") if isinstance(local_origem, dict) else None
+                nome_local = (
+                    local_origem.get("nome") if isinstance(local_origem, dict) else None
+                )
 
                 if nome_local:
 
@@ -468,86 +431,81 @@ def buscar_dados_paciente_via_api(cod_requisicao):
 
                     if id_local_origem:
 
-                        logger.info(f"[API] OK ID do local de origem encontrado: {id_local_origem}")
+                        logger.info(
+                            f"[API] OK ID do local de origem encontrado: {id_local_origem}"
+                        )
 
                     else:
 
-                        logger.warning(f"[API] AVISO ID do local de origem NAO encontrado para '{nome_local}'")
+                        logger.warning(
+                            f"[API] AVISO ID do local de origem NAO encontrado para '{nome_local}'"
+                        )
 
                 else:
 
-                    logger.warning(f"[API] AVISO API nao retornou nome do local de origem")
-
-                
+                    logger.warning(
+                        f"[API] AVISO API nao retornou nome do local de origem"
+                    )
 
                 # 3. Buscar ID da Fonte Pagadora pelo nome (quando disponível)
                 fonte_pagadora = dados_resultado.get("fontePagadora", {})
-                nome_fonte = fonte_pagadora.get("nome") if isinstance(fonte_pagadora, dict) else None
+                nome_fonte = (
+                    fonte_pagadora.get("nome")
+                    if isinstance(fonte_pagadora, dict)
+                    else None
+                )
                 if nome_fonte:
                     logger.info(f"[API] Nome da fonte pagadora da API: '{nome_fonte}'")
                     instituicao_fonte = buscar_instituicao_por_nome(nome_fonte)
-                    if instituicao_fonte and instituicao_fonte.get('id'):
-                        id_fonte_pagadora = int(instituicao_fonte['id'])
-                        logger.info(f"[API] OK ID da fonte pagadora encontrado no cache: {id_fonte_pagadora}")
+                    if instituicao_fonte and instituicao_fonte.get("id"):
+                        id_fonte_pagadora = int(instituicao_fonte["id"])
+                        logger.info(
+                            f"[API] OK ID da fonte pagadora encontrado no cache: {id_fonte_pagadora}"
+                        )
                     else:
-                        id_fonte_db = _buscar_id_fonte_pagadora_por_nome_banco(nome_fonte)
+                        id_fonte_db = _buscar_id_fonte_pagadora_por_nome_banco(
+                            nome_fonte
+                        )
                         if id_fonte_db:
                             id_fonte_pagadora = int(id_fonte_db)
-                            logger.info(f"[API] OK ID da fonte pagadora encontrado no banco: {id_fonte_pagadora}")
+                            logger.info(
+                                f"[API] OK ID da fonte pagadora encontrado no banco: {id_fonte_pagadora}"
+                            )
                         else:
-                            logger.warning(f"[API] AVISO ID da fonte pagadora NAO encontrado para '{nome_fonte}'")
+                            logger.warning(
+                                f"[API] AVISO ID da fonte pagadora NAO encontrado para '{nome_fonte}'"
+                            )
                 else:
-                    logger.info(f"[API] INFO Fonte pagadora nao disponivel na API requisicaoResultado")
-
-                
+                    logger.info(
+                        f"[API] INFO Fonte pagadora nao disponivel na API requisicaoResultado"
+                    )
 
                 # Mapear dados da API para estrutura unificada
 
                 dados_mapeados = {
-
                     "origem": "API",
-
                     "NomPaciente": paciente_api.get("nome"),
-
                     "CPF": paciente_api.get("cpf"),
-
-                    "DtaNascimento": paciente_api.get("dtaNascimento") or paciente_api.get("dtaNasc"),
-
+                    "DtaNascimento": paciente_api.get("dtaNascimento")
+                    or paciente_api.get("dtaNasc"),
                     "Sexo": paciente_api.get("sexo"),
-
                     "RGNumero": paciente_api.get("rg"),
-
                     "RGOrgao": paciente_api.get("rgOrgao"),
-
                     "RGUF": paciente_api.get("rgUF") or paciente_api.get("uf"),
-
                     "NomMae": paciente_api.get("nomeMae"),
-
                     "EstadoCivil": paciente_api.get("estadoCivil"),
-
                     "Passaporte": paciente_api.get("passaporte"),
-
                     "MatConvenio": paciente_api.get("matricula"),
-
                     "ValidadeMatricula": paciente_api.get("validadeMatricula"),
-
                     "Email": paciente_api.get("email"),
-
-                    "TelCelular": paciente_api.get("telefone") or paciente_api.get("telCelular"),
-
+                    "TelCelular": paciente_api.get("telefone")
+                    or paciente_api.get("telCelular"),
                     "TelFixo": paciente_api.get("telFixo"),
-
                     # IDs obtidos via lookup reverso
-
                     "IdConvenio": id_convenio,
-
                     "IdLocalOrigem": id_local_origem,
-
                     "IdFontePagadora": id_fonte_pagadora,
-
                 }
-
-                
 
                 # Endereço pode vir como objeto
 
@@ -555,51 +513,40 @@ def buscar_dados_paciente_via_api(cod_requisicao):
 
                 if isinstance(endereco_api, dict):
 
-                    dados_mapeados.update({
-
-                        "Cep": endereco_api.get("cep"),
-
-                        "Logradouro": endereco_api.get("logradouro"),
-
-                        "NumEndereco": endereco_api.get("numero") or endereco_api.get("numEndereco"),
-
-                        "Complemento": endereco_api.get("complemento"),
-
-                        "Bairro": endereco_api.get("bairro"),
-
-                        "Cidade": endereco_api.get("cidade"),
-
-                        "UF": endereco_api.get("uf"),
-
-                    })
+                    dados_mapeados.update(
+                        {
+                            "Cep": endereco_api.get("cep"),
+                            "Logradouro": endereco_api.get("logradouro"),
+                            "NumEndereco": endereco_api.get("numero")
+                            or endereco_api.get("numEndereco"),
+                            "Complemento": endereco_api.get("complemento"),
+                            "Bairro": endereco_api.get("bairro"),
+                            "Cidade": endereco_api.get("cidade"),
+                            "UF": endereco_api.get("uf"),
+                        }
+                    )
 
                 else:
 
-                    dados_mapeados.update({
-
-                        "Cep": paciente_api.get("cep"),
-
-                        "Logradouro": paciente_api.get("logradouro"),
-
-                        "NumEndereco": paciente_api.get("numEndereco"),
-
-                        "Complemento": paciente_api.get("complemento"),
-
-                        "Bairro": paciente_api.get("bairro"),
-
-                        "Cidade": paciente_api.get("cidade"),
-
-                        "UF": paciente_api.get("uf"),
-
-                    })
-
-                
+                    dados_mapeados.update(
+                        {
+                            "Cep": paciente_api.get("cep"),
+                            "Logradouro": paciente_api.get("logradouro"),
+                            "NumEndereco": paciente_api.get("numEndereco"),
+                            "Complemento": paciente_api.get("complemento"),
+                            "Bairro": paciente_api.get("bairro"),
+                            "Cidade": paciente_api.get("cidade"),
+                            "UF": paciente_api.get("uf"),
+                        }
+                    )
 
                 return dados_mapeados
 
             else:
 
-                logger.warning(f"[API] âš ️ Paciente não encontrado no resultado da API")
+                logger.warning(
+                    f"[API] âš ️ Paciente não encontrado no resultado da API"
+                )
 
                 return None
 
@@ -609,8 +556,6 @@ def buscar_dados_paciente_via_api(cod_requisicao):
 
             return None
 
-
-
     except Exception as e:
 
         logger.error(f"[API] âŒ Erro ao buscar dados via API: {e}")
@@ -618,11 +563,7 @@ def buscar_dados_paciente_via_api(cod_requisicao):
         return None
 
 
-
-
-
 def buscar_dados_completos_paciente(cod_paciente):
-
     """
 
     Busca TODOS os dados do paciente direto do banco de dados (FALLBACK)
@@ -646,8 +587,6 @@ def buscar_dados_completos_paciente(cod_paciente):
         connection = pymysql.connect(**DB_CONFIG)
 
         cursor = connection.cursor(pymysql.cursors.DictCursor)
-
-
 
         query = """
 
@@ -707,23 +646,19 @@ def buscar_dados_completos_paciente(cod_paciente):
 
         """
 
-
-
         cursor.execute(query, (cod_paciente,))
 
         resultado = cursor.fetchone()
-
-
 
         cursor.close()
 
         connection.close()
 
-
-
         if resultado:
 
-            logger.info(f"[DB] Dados completos do paciente {cod_paciente} encontrados no banco")
+            logger.info(
+                f"[DB] Dados completos do paciente {cod_paciente} encontrados no banco"
+            )
 
             resultado["origem"] = "BANCO_SQL"
 
@@ -735,8 +670,6 @@ def buscar_dados_completos_paciente(cod_paciente):
 
             return None
 
-
-
     except Exception as e:
 
         logger.error(f"[DB] Erro ao buscar dados do paciente {cod_paciente}: {e}")
@@ -744,9 +677,7 @@ def buscar_dados_completos_paciente(cod_paciente):
         return None
 
 
-
 def buscar_requisicao_correspondente(cod_requisicao):
-
     """
 
     Busca requisição correspondente seguindo a regra:
@@ -777,21 +708,21 @@ def buscar_requisicao_correspondente(cod_requisicao):
 
         # Verificar tipo de requisição
 
-        if cod_requisicao.startswith('0085'):
+        if cod_requisicao.startswith("0085"):
 
-            tipo_atual = '0085'
+            tipo_atual = "0085"
 
-            tipo_correspondente = '0200'
+            tipo_correspondente = "0200"
 
-            prefixo_busca = '0200%'
+            prefixo_busca = "0200%"
 
-        elif cod_requisicao.startswith('0200'):
+        elif cod_requisicao.startswith("0200"):
 
-            tipo_atual = '0200'
+            tipo_atual = "0200"
 
-            tipo_correspondente = '0085'
+            tipo_correspondente = "0085"
 
-            prefixo_busca = '0085%'
+            prefixo_busca = "0085%"
 
         else:
 
@@ -799,23 +730,21 @@ def buscar_requisicao_correspondente(cod_requisicao):
 
             return None
 
-
-
-        logger.info(f"[DB_SYNC] â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•")
+        logger.info(
+            f"[DB_SYNC] â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•"
+        )
 
         logger.info(f"[DB_SYNC] Requisição {tipo_atual}: {cod_requisicao}")
 
         logger.info(f"[DB_SYNC] Buscando correspondente {tipo_correspondente}...")
 
-        logger.info(f"[DB_SYNC] â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•")
-
-
+        logger.info(
+            f"[DB_SYNC] â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•"
+        )
 
         connection = pymysql.connect(**DB_CONFIG)
 
         cursor = connection.cursor(pymysql.cursors.DictCursor)
-
-
 
         # ESTRATÃ‰GIA: Buscar requisição correspondente do MESMO PACIENTE e MESMA DATA
 
@@ -913,21 +842,15 @@ def buscar_requisicao_correspondente(cod_requisicao):
 
         """
 
-
-
         logger.info(f"[DB_SYNC] Query executada com prefixo_busca: {prefixo_busca}")
 
         cursor.execute(query, (prefixo_busca, cod_requisicao))
 
         resultado = cursor.fetchone()
 
-
-
         cursor.close()
 
         connection.close()
-
-
 
         if resultado:
 
@@ -935,25 +858,35 @@ def buscar_requisicao_correspondente(cod_requisicao):
 
             logger.info(f"[DB_SYNC]    Código: {resultado['CodRequisicao']}")
 
-            logger.info(f"[DB_SYNC]    Paciente: {resultado.get('NomPaciente')} | CPF: {resultado.get('CPF')}")
+            logger.info(
+                f"[DB_SYNC]    Paciente: {resultado.get('NomPaciente')} | CPF: {resultado.get('CPF')}"
+            )
 
-            logger.info(f"[DB_SYNC]    NumGuiaConvenio: {resultado.get('NumGuiaConvenio')}")
+            logger.info(
+                f"[DB_SYNC]    NumGuiaConvenio: {resultado.get('NumGuiaConvenio')}"
+            )
 
-            logger.info(f"[DB_SYNC]    Distância numérica: {resultado.get('distancia')} (quanto menor, mais próximas as requisições)")
+            logger.info(
+                f"[DB_SYNC]    Distância numérica: {resultado.get('distancia')} (quanto menor, mais próximas as requisições)"
+            )
 
-            logger.info(f"[DB_SYNC] â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•")
+            logger.info(
+                f"[DB_SYNC] â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•"
+            )
 
             return resultado
 
         else:
 
-            logger.warning(f"[DB_SYNC] âš ️ Nenhuma requisição correspondente encontrada")
+            logger.warning(
+                f"[DB_SYNC] âš ️ Nenhuma requisição correspondente encontrada"
+            )
 
-            logger.info(f"[DB_SYNC] â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•")
+            logger.info(
+                f"[DB_SYNC] â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•"
+            )
 
             return None
-
-
 
     except Exception as e:
 
@@ -962,9 +895,7 @@ def buscar_requisicao_correspondente(cod_requisicao):
         return None
 
 
-
 def buscar_requisicao_correspondente_aplis(cod_requisicao):
-
     """
 
     Busca requisição correspondente DIRETO DO APLIS (sem depender do banco local)
@@ -1003,41 +934,41 @@ def buscar_requisicao_correspondente_aplis(cod_requisicao):
 
         # Verificar tipo de requisição
 
-        if cod_requisicao.startswith('0085'):
+        if cod_requisicao.startswith("0085"):
 
-            tipo_atual = '0085'
+            tipo_atual = "0085"
 
-            tipo_correspondente = '0200'
+            tipo_correspondente = "0200"
 
             # Trocar prefixo: 0085075447003 â†’ 0200075447003
 
-            cod_correspondente = '0200' + cod_requisicao[4:]
+            cod_correspondente = "0200" + cod_requisicao[4:]
 
-        elif cod_requisicao.startswith('0200'):
+        elif cod_requisicao.startswith("0200"):
 
-            tipo_atual = '0200'
+            tipo_atual = "0200"
 
-            tipo_correspondente = '0085'
+            tipo_correspondente = "0085"
 
             # Trocar prefixo: 0200051653008 â†’ 0085051653008
 
-            cod_correspondente = '0085' + cod_requisicao[4:]
+            cod_correspondente = "0085" + cod_requisicao[4:]
 
         else:
 
             # Não é uma requisição que precisa de sincronização
 
-            logger.info(f"[APLIS_SYNC] Requisição {cod_requisicao} não é tipo 0085 nem 0200")
+            logger.info(
+                f"[APLIS_SYNC] Requisição {cod_requisicao} não é tipo 0085 nem 0200"
+            )
 
             return None
 
-
-
         logger.info(f"[APLIS_SYNC] Requisição {tipo_atual}: {cod_requisicao}")
 
-        logger.info(f"[APLIS_SYNC] Buscando correspondente {tipo_correspondente}: {cod_correspondente}")
-
-
+        logger.info(
+            f"[APLIS_SYNC] Buscando correspondente {tipo_correspondente}: {cod_correspondente}"
+        )
 
         # Buscar no apLIS usando requisicaoListar com filtro por código
 
@@ -1049,29 +980,16 @@ def buscar_requisicao_correspondente_aplis(cod_requisicao):
 
         periodo_ini = (hoje - timedelta(days=365)).strftime("%Y-%m-%d")
 
-
-
         dat = {
-
             "ordenar": "IdRequisicao",
-
             "idEvento": "50",
-
             "periodoIni": periodo_ini,
-
             "periodoFim": periodo_fim,
-
             "pagina": 1,
-
-            "tamanho": 100  # Buscar mais para filtrar depois
-
+            "tamanho": 100,  # Buscar mais para filtrar depois
         }
 
-
-
         resposta = fazer_requisicao_aplis("requisicaoListar", dat)
-
-
 
         if resposta.get("dat", {}).get("sucesso") != 1:
 
@@ -1079,13 +997,9 @@ def buscar_requisicao_correspondente_aplis(cod_requisicao):
 
             return None
 
-
-
         lista = resposta.get("dat", {}).get("lista", [])
 
         logger.info(f"[APLIS_SYNC] Encontradas {len(lista)} requisições no período")
-
-
 
         # Procurar a requisição correspondente na lista
 
@@ -1093,45 +1007,36 @@ def buscar_requisicao_correspondente_aplis(cod_requisicao):
 
             if req.get("CodRequisicao") == cod_correspondente:
 
-                logger.info(f"[APLIS_SYNC] âœ… Requisição correspondente encontrada: {cod_correspondente}")
+                logger.info(
+                    f"[APLIS_SYNC] âœ… Requisição correspondente encontrada: {cod_correspondente}"
+                )
 
-                logger.info(f"[APLIS_SYNC]    Paciente: {req.get('NomPaciente')} | CPF: {req.get('CPF')}")
-
-
+                logger.info(
+                    f"[APLIS_SYNC]    Paciente: {req.get('NomPaciente')} | CPF: {req.get('CPF')}"
+                )
 
                 # Retornar dados no mesmo formato da função do banco
 
                 return {
-
                     "CodRequisicao": req.get("CodRequisicao"),
-
                     "CodPaciente": req.get("CodPaciente"),
-
                     "NomePaciente": req.get("NomPaciente"),
-
                     "CPF": req.get("CPF"),
-
-                    "DtaNasc": req.get("DtaNascimento"),  # Pode vir em formatos diferentes
-
+                    "DtaNasc": req.get(
+                        "DtaNascimento"
+                    ),  # Pode vir em formatos diferentes
                     "Sexo": req.get("Sexo"),
-
                     # Outros campos do apLIS (podem não existir)
-
                     "IdConvenio": req.get("IdConvenio"),
-
                     "IdFontePagadora": req.get("IdFontePagadora"),
-
-                    "IdLocalOrigem": req.get("IdLocalOrigem")
-
+                    "IdLocalOrigem": req.get("IdLocalOrigem"),
                 }
 
-
-
-        logger.warning(f"[APLIS_SYNC] âš ️ Requisição correspondente {cod_correspondente} não encontrada no período")
+        logger.warning(
+            f"[APLIS_SYNC] âš ️ Requisição correspondente {cod_correspondente} não encontrada no período"
+        )
 
         return None
-
-
 
     except Exception as e:
 
@@ -1144,7 +1049,6 @@ def buscar_requisicao_correspondente_aplis(cod_requisicao):
         return None
 
 
-
 # ========================================
 
 # FUNÃ‡ÃƒO PARA CALCULAR DATA DE NASCIMENTO A PARTIR DA IDADE
@@ -1152,9 +1056,7 @@ def buscar_requisicao_correspondente_aplis(cod_requisicao):
 # ========================================
 
 
-
 def calcular_data_nascimento_por_idade(idade_formatada):
-
     """
 
     Calcula a data de nascimento a partir da idade formatada.
@@ -1189,13 +1091,9 @@ def calcular_data_nascimento_por_idade(idade_formatada):
 
         from dateutil.relativedelta import relativedelta
 
-
-
         if not idade_formatada or not isinstance(idade_formatada, str):
 
             return None
-
-
 
         # Extrair anos, meses e dias usando regex
 
@@ -1205,17 +1103,13 @@ def calcular_data_nascimento_por_idade(idade_formatada):
 
         dias = 0
 
-
-
         # Padrão: "48 anos 10 meses 10 dias" ou "48 anos" ou "48 anos 10 meses"
 
-        match_anos = re.search(r'(\d+)\s*anos?', idade_formatada, re.IGNORECASE)
+        match_anos = re.search(r"(\d+)\s*anos?", idade_formatada, re.IGNORECASE)
 
-        match_meses = re.search(r'(\d+)\s*meses?', idade_formatada, re.IGNORECASE)
+        match_meses = re.search(r"(\d+)\s*meses?", idade_formatada, re.IGNORECASE)
 
-        match_dias = re.search(r'(\d+)\s*dias?', idade_formatada, re.IGNORECASE)
-
-
+        match_dias = re.search(r"(\d+)\s*dias?", idade_formatada, re.IGNORECASE)
 
         if match_anos:
 
@@ -1229,15 +1123,11 @@ def calcular_data_nascimento_por_idade(idade_formatada):
 
             dias = int(match_dias.group(1))
 
-
-
         # Se não encontrou nenhum valor, retornar None
 
         if anos == 0 and meses == 0 and dias == 0:
 
             return None
-
-
 
         # Calcular data de nascimento
 
@@ -1245,24 +1135,21 @@ def calcular_data_nascimento_por_idade(idade_formatada):
 
         data_nascimento = hoje - relativedelta(years=anos, months=meses, days=dias)
 
-
-
-        logger.info(f"[CALC_IDADE] '{idade_formatada}' â†’ Data Nascimento: {data_nascimento.strftime('%Y-%m-%d')}")
+        logger.info(
+            f"[CALC_IDADE] '{idade_formatada}' â†’ Data Nascimento: {data_nascimento.strftime('%Y-%m-%d')}"
+        )
 
         logger.info(f"[CALC_IDADE] Detalhes: {anos} anos, {meses} meses, {dias} dias")
 
-
-
-        return data_nascimento.strftime('%Y-%m-%d')
-
-
+        return data_nascimento.strftime("%Y-%m-%d")
 
     except Exception as e:
 
-        logger.error(f"[CALC_IDADE] Erro ao calcular data de nascimento de '{idade_formatada}': {e}")
+        logger.error(
+            f"[CALC_IDADE] Erro ao calcular data de nascimento de '{idade_formatada}': {e}"
+        )
 
         return None
-
 
 
 # ========================================
@@ -1271,8 +1158,8 @@ def calcular_data_nascimento_por_idade(idade_formatada):
 
 # ========================================
 
-class VertexAIRateLimiter:
 
+class VertexAIRateLimiter:
     """
 
     Controla rate limiting para evitar erro 429 do Vertex AI
@@ -1291,23 +1178,16 @@ class VertexAIRateLimiter:
 
         self.last_request_time = 0
 
-
-
     def wait_if_needed(self):
-
         """Aguarda se necessário para respeitar rate limit"""
 
         current_time = time.time()
-
-
 
         # Remover requisições antigas (mais de 60 segundos)
 
         while self.request_times and current_time - self.request_times[0] > 60:
 
             self.request_times.popleft()
-
-
 
         # Se atingiu o limite de requisições por minuto, aguardar
 
@@ -1319,13 +1199,13 @@ class VertexAIRateLimiter:
 
             if wait_time > 0:
 
-                logger.warning(f"[RATE LIMIT] Atingido limite de {self.max_rpm} RPM. Aguardando {wait_time:.1f}s...")
+                logger.warning(
+                    f"[RATE LIMIT] Atingido limite de {self.max_rpm} RPM. Aguardando {wait_time:.1f}s..."
+                )
 
                 time.sleep(wait_time)
 
                 current_time = time.time()
-
-
 
         # Garantir delay mínimo entre requisições
 
@@ -1335,13 +1215,13 @@ class VertexAIRateLimiter:
 
             wait_time = self.min_delay - time_since_last
 
-            logger.info(f"[RATE LIMIT] Aguardando {wait_time:.1f}s (delay mínimo entre requests)")
+            logger.info(
+                f"[RATE LIMIT] Aguardando {wait_time:.1f}s (delay mínimo entre requests)"
+            )
 
             time.sleep(wait_time)
 
             current_time = time.time()
-
-
 
         # Registrar esta requisição
 
@@ -1349,80 +1229,91 @@ class VertexAIRateLimiter:
 
         self.last_request_time = current_time
 
-        logger.debug(f"[RATE LIMIT] Requisições no último minuto: {len(self.request_times)}/{self.max_rpm}")
-
+        logger.debug(
+            f"[RATE LIMIT] Requisições no último minuto: {len(self.request_times)}/{self.max_rpm}"
+        )
 
 
 # Instância global do rate limiter
 
 # Configuração balanceada para evitar 429
 
-vertex_rate_limiter = VertexAIRateLimiter(max_requests_per_minute=5, min_delay_seconds=10)
+vertex_rate_limiter = VertexAIRateLimiter(
+    max_requests_per_minute=5, min_delay_seconds=10
+)
 
 # ============================================================
 # CONTADOR GLOBAL DE TOKENS VERTEX AI
 # ============================================================
 _token_stats = {
-    'ocr':      {'input': 0, 'output': 0, 'chamadas': 0},
-    'correcao': {'input': 0, 'output': 0, 'chamadas': 0},
-    'iniciado_em': None,
+    "ocr": {"input": 0, "output": 0, "chamadas": 0},
+    "correcao": {"input": 0, "output": 0, "chamadas": 0},
+    "iniciado_em": None,
 }
+
 
 def _registrar_tokens(tipo, response):
     """Extrai e acumula tokens de uma resposta do Vertex AI."""
     try:
-        meta = getattr(response, 'usage_metadata', None)
+        meta = getattr(response, "usage_metadata", None)
         if not meta:
             return
-        inp  = getattr(meta, 'prompt_token_count',     0) or 0
-        out  = getattr(meta, 'candidates_token_count', 0) or 0
-        tot  = getattr(meta, 'total_token_count',      0) or (inp + out)
+        inp = getattr(meta, "prompt_token_count", 0) or 0
+        out = getattr(meta, "candidates_token_count", 0) or 0
+        tot = getattr(meta, "total_token_count", 0) or (inp + out)
 
-        if _token_stats['iniciado_em'] is None:
-            _token_stats['iniciado_em'] = datetime.now().isoformat()
+        if _token_stats["iniciado_em"] is None:
+            _token_stats["iniciado_em"] = datetime.now().isoformat()
 
-        _token_stats[tipo]['input']    += inp
-        _token_stats[tipo]['output']   += out
-        _token_stats[tipo]['chamadas'] += 1
+        _token_stats[tipo]["input"] += inp
+        _token_stats[tipo]["output"] += out
+        _token_stats[tipo]["chamadas"] += 1
 
-        total_input  = sum(_token_stats[k]['input']  for k in ('ocr', 'correcao'))
-        total_output = sum(_token_stats[k]['output'] for k in ('ocr', 'correcao'))
+        total_input = sum(_token_stats[k]["input"] for k in ("ocr", "correcao"))
+        total_output = sum(_token_stats[k]["output"] for k in ("ocr", "correcao"))
 
         logger.info(
             "[TOKENS] %s | entrada=%d saida=%d (chamada) | acumulado: entrada=%d saida=%d total=%d",
-            tipo.upper(), inp, out, total_input, total_output, total_input + total_output
+            tipo.upper(),
+            inp,
+            out,
+            total_input,
+            total_output,
+            total_input + total_output,
         )
     except Exception as e:
         logger.warning("[TOKENS] Erro ao registrar tokens: %s", e)
 
 
 # Pasta build do React (um nivel acima do backend/)
-REACT_BUILD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'build')
+REACT_BUILD_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "build"
+)
 
-app = Flask(__name__, static_folder=REACT_BUILD_DIR, static_url_path='')
+app = Flask(__name__, static_folder=REACT_BUILD_DIR, static_url_path="")
 
 # Configurar CORS para aceitar requisições de qualquer origem (necessário para ngrok)
 
-CORS(app, resources={
-
-    r"/*": {  # Aplicar a TODAS as rotas
-
-        "origins": "*",  # Permite qualquer origem (ngrok, localhost, etc)
-
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-
-        "allow_headers": ["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With", "ngrok-skip-browser-warning"],
-
-        "expose_headers": ["Content-Type", "Authorization"],
-
-        "supports_credentials": False,  # Não usar credentials com origins: "*"
-
-        "max_age": 3600  # Cache preflight por 1 hora
-
-    }
-
-})
-
+CORS(
+    app,
+    resources={
+        r"/*": {  # Aplicar a TODAS as rotas
+            "origins": "*",  # Permite qualquer origem (ngrok, localhost, etc)
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": [
+                "Content-Type",
+                "Authorization",
+                "Accept",
+                "Origin",
+                "X-Requested-With",
+                "ngrok-skip-browser-warning",
+            ],
+            "expose_headers": ["Content-Type", "Authorization"],
+            "supports_credentials": False,  # Não usar credentials com origins: "*"
+            "max_age": 3600,  # Cache preflight por 1 hora
+        }
+    },
+)
 
 
 # ========================================
@@ -1443,8 +1334,9 @@ try:
 
 except ImportError as e:
 
-    logger.warning(f"[AVISO] Não foi possível registrar blueprint de autenticação legado: {e}")
-
+    logger.warning(
+        f"[AVISO] Não foi possível registrar blueprint de autenticação legado: {e}"
+    )
 
 
 # Blueprint de autenticação Supabase (nova - compartilhada com outro sistema)
@@ -1459,8 +1351,9 @@ try:
 
 except ImportError as e:
 
-    logger.warning(f"[AVISO] Não foi possível registrar blueprint de autenticação Supabase: {e}")
-
+    logger.warning(
+        f"[AVISO] Não foi possível registrar blueprint de autenticação Supabase: {e}"
+    )
 
 
 # ========================================
@@ -1469,29 +1362,30 @@ except ImportError as e:
 
 # ========================================
 
+
 @app.before_request
-
 def log_request_info():
-
     """Log de todas as requisições recebidas + handle OPTIONS"""
 
     # Handle OPTIONS (CORS preflight) primeiro
 
-    if request.method == 'OPTIONS':
+    if request.method == "OPTIONS":
 
         response = app.make_default_options_response()
 
-        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers["Access-Control-Allow-Origin"] = "*"
 
-        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        response.headers["Access-Control-Allow-Methods"] = (
+            "GET, POST, PUT, DELETE, OPTIONS"
+        )
 
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept, Origin, X-Requested-With, ngrok-skip-browser-warning'
+        response.headers["Access-Control-Allow-Headers"] = (
+            "Content-Type, Authorization, Accept, Origin, X-Requested-With, ngrok-skip-browser-warning"
+        )
 
-        response.headers['Access-Control-Max-Age'] = '3600'
+        response.headers["Access-Control-Max-Age"] = "3600"
 
         return response
-
-    
 
     # Log da requisição
 
@@ -1515,11 +1409,9 @@ def log_request_info():
 
     logger.info(f"   Referer: {request.headers.get('Referer', 'N/A')}")
 
-
-
     # Log do corpo da requisição (apenas para POST/PUT)
 
-    if request.method in ['POST', 'PUT']:
+    if request.method in ["POST", "PUT"]:
 
         try:
 
@@ -1527,43 +1419,42 @@ def log_request_info():
 
                 # Usa ensure_ascii=True para escapar emojis e caracteres Unicode
 
-                logger.debug(f"   Body (JSON): {json.dumps(request.get_json(), indent=2, ensure_ascii=True)[:500]}")
+                logger.debug(
+                    f"   Body (JSON): {json.dumps(request.get_json(), indent=2, ensure_ascii=True)[:500]}"
+                )
 
             elif request.data:
 
                 # Decodifica com replace para evitar erros de encoding
 
-                logger.debug(f"   Body (raw): {request.data.decode('utf-8', errors='replace')[:500]}")
+                logger.debug(
+                    f"   Body (raw): {request.data.decode('utf-8', errors='replace')[:500]}"
+                )
 
         except Exception as e:
 
             logger.warning(f"   Erro ao logar body: {e}")
 
-
-
     logger.info("=" * 80)
 
 
-
 @app.after_request
-
 def log_response_info(response):
-
     """Log de todas as respostas enviadas + garante headers CORS"""
 
     # Garantir headers CORS explícitos em TODAS as respostas
 
-    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers["Access-Control-Allow-Origin"] = "*"
 
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
 
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept, Origin, X-Requested-With, ngrok-skip-browser-warning'
+    response.headers["Access-Control-Allow-Headers"] = (
+        "Content-Type, Authorization, Accept, Origin, X-Requested-With, ngrok-skip-browser-warning"
+    )
 
-    response.headers['Access-Control-Expose-Headers'] = 'Content-Type, Authorization'
+    response.headers["Access-Control-Expose-Headers"] = "Content-Type, Authorization"
 
-    response.headers['Access-Control-Max-Age'] = '3600'
-
-    
+    response.headers["Access-Control-Max-Age"] = "3600"
 
     logger.info("-" * 80)
 
@@ -1575,28 +1466,25 @@ def log_response_info(response):
 
     logger.info(f"   Content-Length: {response.content_length}")
 
-
-
     # Log de headers CORS importantes
 
     logger.debug(f"   CORS Headers:")
 
-    logger.debug(f"      Access-Control-Allow-Origin: {response.headers.get('Access-Control-Allow-Origin', 'N/A')}")
+    logger.debug(
+        f"      Access-Control-Allow-Origin: {response.headers.get('Access-Control-Allow-Origin', 'N/A')}"
+    )
 
-    logger.debug(f"      Access-Control-Allow-Methods: {response.headers.get('Access-Control-Allow-Methods', 'N/A')}")
-
-
+    logger.debug(
+        f"      Access-Control-Allow-Methods: {response.headers.get('Access-Control-Allow-Methods', 'N/A')}"
+    )
 
     logger.info("-" * 80)
 
     return response
 
 
-
 @app.errorhandler(Exception)
-
 def handle_exception(e):
-
     """Log de erros não tratados e retorna JSON com CORS"""
 
     logger.error("=" * 80)
@@ -1613,38 +1501,35 @@ def handle_exception(e):
 
     logger.error("=" * 80)
 
-    
-
     # Retornar resposta JSON com CORS (o @app.after_request vai adicionar os headers)
 
-    return jsonify({
+    return (
+        jsonify(
+            {
+                "sucesso": 0,
+                "erro": f"Erro interno do servidor: {type(e).__name__}",
+                "mensagem": str(e),
+            }
+        ),
+        500,
+    )
 
-        "sucesso": 0,
-
-        "erro": f"Erro interno do servidor: {type(e).__name__}",
-
-        "mensagem": str(e)
-
-    }), 500
-
-
-
-    return jsonify({
-
-        "erro": f"{type(e).__name__}: {str(e)}",
-
-        "detalhes": "Erro interno do servidor - verifique os logs"
-
-    }), 500
-
+    return (
+        jsonify(
+            {
+                "erro": f"{type(e).__name__}: {str(e)}",
+                "detalhes": "Erro interno do servidor - verifique os logs",
+            }
+        ),
+        500,
+    )
 
 
 # Diretório temporário para imagens
 
-TEMP_IMAGES_DIR = os.path.join(tempfile.gettempdir(), 'admissao_images')
+TEMP_IMAGES_DIR = os.path.join(tempfile.gettempdir(), "admissao_images")
 
 os.makedirs(TEMP_IMAGES_DIR, exist_ok=True)
-
 
 
 # ========================================
@@ -1664,16 +1549,17 @@ INSTITUICOES_CACHE = {}  # {IdInstituicao: {id, nome}}
 LOCAIS_ORIGEM_CACHE = {}  # {IdInstituicao: {id, nome}}
 
 
-
 def carregar_medicos_csv():
-
     """Carrega médicos do CSV para cache em memória"""
 
     global MEDICOS_CACHE
 
-    csv_path = os.path.join(os.path.dirname(__file__), '..', 'dados', 'medicos_extraidos_20260120_155027.csv')
-
-
+    csv_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "dados",
+        "medicos_extraidos_20260120_155027.csv",
+    )
 
     if not os.path.exists(csv_path):
 
@@ -1681,11 +1567,9 @@ def carregar_medicos_csv():
 
         return
 
-
-
     try:
 
-        with open(csv_path, 'r', encoding='utf-8-sig') as f:
+        with open(csv_path, "r", encoding="utf-8-sig") as f:
 
             reader = csv.DictReader(f)
 
@@ -1696,15 +1580,10 @@ def carregar_medicos_csv():
                 chave = f"{row['CRM']}_{row['CRMUF']}"
 
                 MEDICOS_CACHE[chave] = {
-
-                    'id': row['CodMedico'],
-
-                    'nome': row['NomMedico'],
-
-                    'crm': row['CRM'],
-
-                    'uf': row['CRMUF']
-
+                    "id": row["CodMedico"],
+                    "nome": row["NomMedico"],
+                    "crm": row["CRM"],
+                    "uf": row["CRMUF"],
                 }
 
         logger.info(f"[CSV] OK - {len(MEDICOS_CACHE)} médicos carregados do CSV")
@@ -1714,16 +1593,17 @@ def carregar_medicos_csv():
         logger.error(f"[CSV] Erro ao carregar médicos: {e}")
 
 
-
 def carregar_convenios_csv():
-
     """Carrega convênios do CSV para cache em memória"""
 
     global CONVENIOS_CACHE
 
-    csv_path = os.path.join(os.path.dirname(__file__), '..', 'dados', 'convenios_extraidos_20260120_155027.csv')
-
-
+    csv_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "dados",
+        "convenios_extraidos_20260120_155027.csv",
+    )
 
     if not os.path.exists(csv_path):
 
@@ -1731,24 +1611,19 @@ def carregar_convenios_csv():
 
         return
 
-
-
     try:
 
-        with open(csv_path, 'r', encoding='utf-8-sig') as f:
+        with open(csv_path, "r", encoding="utf-8-sig") as f:
 
             reader = csv.DictReader(f)
 
             for row in reader:
 
-                id_convenio = row['IdConvenio']
+                id_convenio = row["IdConvenio"]
 
                 CONVENIOS_CACHE[id_convenio] = {
-
-                    'id': id_convenio,
-
-                    'nome': row['NomConvenio']
-
+                    "id": id_convenio,
+                    "nome": row["NomConvenio"],
                 }
 
         logger.info(f"[CSV] OK - {len(CONVENIOS_CACHE)} convênios carregados do CSV")
@@ -1758,44 +1633,38 @@ def carregar_convenios_csv():
         logger.error(f"[CSV] Erro ao carregar convênios: {e}")
 
 
-
 def carregar_instituicoes_csv():
-
     """Carrega instituições do CSV para cache em memória"""
 
     global INSTITUICOES_CACHE
 
-    
-
     # Buscar o arquivo CSV mais recente de instituições
 
-    pasta_dados = os.path.join(os.path.dirname(__file__), '..', 'dados')
+    pasta_dados = os.path.join(os.path.dirname(__file__), "..", "dados")
 
     arquivos_instituicoes = []
-
-    
 
     if os.path.exists(pasta_dados):
 
         for arquivo in os.listdir(pasta_dados):
 
-            if arquivo.startswith('instituicoes_extraidas_') and arquivo.endswith('.csv'):
+            if arquivo.startswith("instituicoes_extraidas_") and arquivo.endswith(
+                ".csv"
+            ):
 
                 caminho_completo = os.path.join(pasta_dados, arquivo)
 
                 arquivos_instituicoes.append(caminho_completo)
 
-    
-
     if not arquivos_instituicoes:
 
-        logger.warning(f"[CSV] Nenhum arquivo de instituições encontrado em {pasta_dados}")
+        logger.warning(
+            f"[CSV] Nenhum arquivo de instituições encontrado em {pasta_dados}"
+        )
 
         logger.warning(f"[CSV] Execute: python backend/extrair_instituicoes.py")
 
         return
-
-    
 
     # Usar o arquivo mais recente (ordenar por nome, que tem timestamp)
 
@@ -1803,71 +1672,62 @@ def carregar_instituicoes_csv():
 
     logger.info(f"[CSV] Carregando instituições de: {os.path.basename(csv_path)}")
 
-
-
     try:
 
-        with open(csv_path, 'r', encoding='utf-8-sig') as f:
+        with open(csv_path, "r", encoding="utf-8-sig") as f:
 
             reader = csv.DictReader(f)
 
             for row in reader:
 
-                id_instituicao = row['IdInstituicao']
+                id_instituicao = row["IdInstituicao"]
 
                 INSTITUICOES_CACHE[id_instituicao] = {
-
-                    'id': id_instituicao,
-
-                    'nome': row['NomFantasia']
-
+                    "id": id_instituicao,
+                    "nome": row["NomFantasia"],
                 }
 
-        logger.info(f"[CSV] OK - {len(INSTITUICOES_CACHE)} instituições carregadas do CSV")
+        logger.info(
+            f"[CSV] OK - {len(INSTITUICOES_CACHE)} instituições carregadas do CSV"
+        )
 
     except Exception as e:
 
         logger.error(f"[CSV] Erro ao carregar instituições: {e}")
 
 
-
 def carregar_locais_origem_csv():
-
     """Carrega locais de origem do CSV para cache em memória"""
 
     global LOCAIS_ORIGEM_CACHE
 
-    
-
     # Buscar o arquivo CSV mais recente de locais de origem
 
-    pasta_dados = os.path.join(os.path.dirname(__file__), '..', 'dados')
+    pasta_dados = os.path.join(os.path.dirname(__file__), "..", "dados")
 
     arquivos_locais = []
-
-    
 
     if os.path.exists(pasta_dados):
 
         for arquivo in os.listdir(pasta_dados):
 
-            if arquivo.startswith('locais_origem_extraidos_') and arquivo.endswith('.csv'):
+            if arquivo.startswith("locais_origem_extraidos_") and arquivo.endswith(
+                ".csv"
+            ):
 
                 caminho_completo = os.path.join(pasta_dados, arquivo)
 
                 arquivos_locais.append(caminho_completo)
 
-    
-
     if not arquivos_locais:
 
-        logger.warning(f"[CSV] Nenhum arquivo de locais de origem encontrado em {pasta_dados}")
+        logger.warning(
+            f"[CSV] Nenhum arquivo de locais de origem encontrado em {pasta_dados}"
+        )
 
         logger.warning(f"[CSV] Execute: python backend/extrair_locais_origem.py")
 
         return
-
-    
 
     # Usar o arquivo mais recente (ordenar por nome, que tem timestamp)
 
@@ -1875,36 +1735,31 @@ def carregar_locais_origem_csv():
 
     logger.info(f"[CSV] Carregando locais de origem de: {os.path.basename(csv_path)}")
 
-
-
     try:
 
-        with open(csv_path, 'r', encoding='utf-8-sig') as f:
+        with open(csv_path, "r", encoding="utf-8-sig") as f:
 
             reader = csv.DictReader(f)
 
             for row in reader:
 
-                id_local = row['IdInstituicao']
+                id_local = row["IdInstituicao"]
 
                 LOCAIS_ORIGEM_CACHE[id_local] = {
-
-                    'id': id_local,
-
-                    'nome': row['NomFantasia']
-
+                    "id": id_local,
+                    "nome": row["NomFantasia"],
                 }
 
-        logger.info(f"[CSV] OK - {len(LOCAIS_ORIGEM_CACHE)} locais de origem carregados do CSV")
+        logger.info(
+            f"[CSV] OK - {len(LOCAIS_ORIGEM_CACHE)} locais de origem carregados do CSV"
+        )
 
     except Exception as e:
 
         logger.error(f"[CSV] Erro ao carregar locais de origem: {e}")
 
 
-
 def buscar_medico_por_crm(crm, uf):
-
     """Busca médico no cache por CRM e UF"""
 
     chave = f"{crm}_{uf}"
@@ -1912,30 +1767,24 @@ def buscar_medico_por_crm(crm, uf):
     return MEDICOS_CACHE.get(chave)
 
 
-
 def buscar_convenio_por_id(id_convenio):
-
     """Busca convênio no cache por ID"""
 
     return CONVENIOS_CACHE.get(str(id_convenio))
 
 
-
 def buscar_instituicao_por_id(id_instituicao):
-
     """Busca instituição no cache por ID"""
 
     return INSTITUICOES_CACHE.get(str(id_instituicao))
 
 
-
 def buscar_instituicao_por_nome(nome_busca):
-
     """
 
     Busca instituição no cache por nome (busca parcial, case-insensitive)
 
-    
+
 
     Estratégia de busca:
 
@@ -1945,13 +1794,13 @@ def buscar_instituicao_por_nome(nome_busca):
 
     3. Busca parcial
 
-    
+
 
     Args:
 
         nome_busca (str): Nome ou parte do nome da instituição
 
-        
+
 
     Returns:
 
@@ -1963,29 +1812,25 @@ def buscar_instituicao_por_nome(nome_busca):
 
         return None
 
-        
-
     nome_busca_upper = nome_busca.upper().strip()
 
     logger.info(f"[BuscarInstituicao] ðŸ” Procurando instituição: '{nome_busca}'")
 
     logger.debug(f"[BuscarInstituicao] Total no cache: {len(INSTITUICOES_CACHE)}")
 
-    
-
     # 1. Busca exata primeiro
 
     for id_inst, inst_data in INSTITUICOES_CACHE.items():
 
-        nome_cache = inst_data.get('nome', '').upper()
+        nome_cache = inst_data.get("nome", "").upper()
 
         if nome_cache == nome_busca_upper:
 
-            logger.info(f"[BuscarInstituicao] âœ… Encontrada (exata): ID={id_inst}, Nome={inst_data.get('nome')}")
+            logger.info(
+                f"[BuscarInstituicao] âœ… Encontrada (exata): ID={id_inst}, Nome={inst_data.get('nome')}"
+            )
 
             return inst_data
-
-    
 
     # 2. Busca por palavra-chave (ex: "CASSI - Caixa..." â†’ "CASSI")
 
@@ -1997,15 +1842,21 @@ def buscar_instituicao_por_nome(nome_busca):
 
     for palavra in palavras:
 
-        palavra_limpa = palavra.strip(',-()[]')
+        palavra_limpa = palavra.strip(",-()[]")
 
-        if len(palavra_limpa) >= 3 and palavra_limpa not in ['DE', 'DA', 'DO', 'DOS', 'DAS', 'E', 'EM']:
+        if len(palavra_limpa) >= 3 and palavra_limpa not in [
+            "DE",
+            "DA",
+            "DO",
+            "DOS",
+            "DAS",
+            "E",
+            "EM",
+        ]:
 
             palavra_chave = palavra_limpa
 
             break
-
-    
 
     if palavra_chave:
 
@@ -2013,42 +1864,44 @@ def buscar_instituicao_por_nome(nome_busca):
 
         for id_inst, inst_data in INSTITUICOES_CACHE.items():
 
-            nome_cache = inst_data.get('nome', '').upper()
+            nome_cache = inst_data.get("nome", "").upper()
 
             # Busca a palavra no início do nome
 
             if nome_cache.startswith(palavra_chave):
 
-                logger.info(f"[BuscarInstituicao] âœ… Encontrada (palavra-chave): ID={id_inst}, Nome={inst_data.get('nome')}")
+                logger.info(
+                    f"[BuscarInstituicao] âœ… Encontrada (palavra-chave): ID={id_inst}, Nome={inst_data.get('nome')}"
+                )
 
                 return inst_data
-
-    
 
     # 3. Busca parcial (contém)
 
     for id_inst, inst_data in INSTITUICOES_CACHE.items():
 
-        nome_cache = inst_data.get('nome', '').upper()
+        nome_cache = inst_data.get("nome", "").upper()
 
         if nome_busca_upper in nome_cache or nome_cache in nome_busca_upper:
 
-            logger.info(f"[BuscarInstituicao] âœ… Encontrada (parcial): ID={id_inst}, Nome={inst_data.get('nome')}")
+            logger.info(
+                f"[BuscarInstituicao] âœ… Encontrada (parcial): ID={id_inst}, Nome={inst_data.get('nome')}"
+            )
 
             return inst_data
 
-    
+    logger.warning(
+        f"[BuscarInstituicao] âš ️ Instituição '{nome_busca}' não encontrada no cache"
+    )
 
-    logger.warning(f"[BuscarInstituicao] âš ️ Instituição '{nome_busca}' não encontrada no cache")
-
-    logger.debug(f"[BuscarInstituicao] Amostra do cache: {list(INSTITUICOES_CACHE.values())[:5]}")
+    logger.debug(
+        f"[BuscarInstituicao] Amostra do cache: {list(INSTITUICOES_CACHE.values())[:5]}"
+    )
 
     return None
 
 
-
 def obter_id_convenio_default():
-
     """
 
     Busca um ID de convenio valido para usar como default.
@@ -2127,9 +1980,11 @@ def obter_id_convenio_default():
 
             if row:
 
-                logger.info(f"[Default] OK Convenio default do banco: ID={row['id']}, Nome={row['nome']}")
+                logger.info(
+                    f"[Default] OK Convenio default do banco: ID={row['id']}, Nome={row['nome']}"
+                )
 
-                return int(row['id'])
+                return int(row["id"])
 
             else:
 
@@ -2141,34 +1996,30 @@ def obter_id_convenio_default():
 
         return None
 
-
-
     for id_convenio, convenio_data in CONVENIOS_CACHE.items():
 
-        nome = convenio_data.get('nome', '').upper()
+        nome = convenio_data.get("nome", "").upper()
 
-        if 'PARTICULAR' in nome or 'PRIVADO' in nome or 'SEM CONVENIO' in nome:
+        if "PARTICULAR" in nome or "PRIVADO" in nome or "SEM CONVENIO" in nome:
 
-            logger.info(f"[Default] OK Convenio default: ID={id_convenio}, Nome={convenio_data.get('nome')}")
+            logger.info(
+                f"[Default] OK Convenio default: ID={id_convenio}, Nome={convenio_data.get('nome')}"
+            )
 
             return int(id_convenio)
 
-
-
     primeiro_id = list(CONVENIOS_CACHE.keys())[0]
 
-    primeiro_nome = CONVENIOS_CACHE[primeiro_id].get('nome')
+    primeiro_nome = CONVENIOS_CACHE[primeiro_id].get("nome")
 
-    logger.info(f"[Default] OK Usando primeiro convenio: ID={primeiro_id}, Nome={primeiro_nome}")
+    logger.info(
+        f"[Default] OK Usando primeiro convenio: ID={primeiro_id}, Nome={primeiro_nome}"
+    )
 
     return int(primeiro_id)
 
 
-
-
-
 def obter_id_instituicao_default():
-
     """
 
     Busca um ID de instituicao valido para usar como default.
@@ -2183,7 +2034,9 @@ def obter_id_instituicao_default():
 
     if not INSTITUICOES_CACHE:
 
-        logger.warning("[Default] Cache de instituicoes vazio! Buscando no banco MySQL...")
+        logger.warning(
+            "[Default] Cache de instituicoes vazio! Buscando no banco MySQL..."
+        )
 
         try:
 
@@ -2267,13 +2120,17 @@ def obter_id_instituicao_default():
 
             if row:
 
-                logger.info(f"[Default] OK Instituicao default do banco: ID={row['id']}, Nome={row['nome']}")
+                logger.info(
+                    f"[Default] OK Instituicao default do banco: ID={row['id']}, Nome={row['nome']}"
+                )
 
-                return int(row['id'])
+                return int(row["id"])
 
             else:
 
-                logger.error("[Default] Tabela fatinstituicao esta vazia ou inacessivel")
+                logger.error(
+                    "[Default] Tabela fatinstituicao esta vazia ou inacessivel"
+                )
 
         except Exception as _e:
 
@@ -2281,33 +2138,29 @@ def obter_id_instituicao_default():
 
         return None
 
-
-
     primeiro_id = list(INSTITUICOES_CACHE.keys())[0]
 
-    primeiro_nome = INSTITUICOES_CACHE[primeiro_id].get('nome')
+    primeiro_nome = INSTITUICOES_CACHE[primeiro_id].get("nome")
 
-    logger.info(f"[Default] OK Instituicao default: ID={primeiro_id}, Nome={primeiro_nome}")
+    logger.info(
+        f"[Default] OK Instituicao default: ID={primeiro_id}, Nome={primeiro_nome}"
+    )
 
     return int(primeiro_id)
 
 
-
-
-
 def buscar_instituicao_por_nome(nome_busca):
-
     """
 
     Busca instituição (fonte pagadora) por nome (busca parcial, case-insensitive)
 
-    
+
 
     Args:
 
         nome_busca (str): Nome ou parte do nome da instituição
 
-    
+
 
     Returns:
 
@@ -2319,46 +2172,42 @@ def buscar_instituicao_por_nome(nome_busca):
 
         return None
 
-    
-
     nome_busca_upper = nome_busca.upper().strip()
-
-    
 
     # Busca exata primeiro
 
     for id_inst, dados_inst in INSTITUICOES_CACHE.items():
 
-        if dados_inst.get('nome', '').upper() == nome_busca_upper:
+        if dados_inst.get("nome", "").upper() == nome_busca_upper:
 
-            logger.info(f"[BuscarInstituicao] âœ… Match exato: ID={id_inst}, Nome={dados_inst.get('nome')}")
+            logger.info(
+                f"[BuscarInstituicao] âœ… Match exato: ID={id_inst}, Nome={dados_inst.get('nome')}"
+            )
 
-            return {'id': int(id_inst), 'nome': dados_inst.get('nome')}
-
-    
+            return {"id": int(id_inst), "nome": dados_inst.get("nome")}
 
     # Busca parcial (contém)
 
     for id_inst, dados_inst in INSTITUICOES_CACHE.items():
 
-        nome_inst = dados_inst.get('nome', '').upper()
+        nome_inst = dados_inst.get("nome", "").upper()
 
         if nome_busca_upper in nome_inst:
 
-            logger.info(f"[BuscarInstituicao] âœ… Match parcial: ID={id_inst}, Nome={dados_inst.get('nome')}")
+            logger.info(
+                f"[BuscarInstituicao] âœ… Match parcial: ID={id_inst}, Nome={dados_inst.get('nome')}"
+            )
 
-            return {'id': int(id_inst), 'nome': dados_inst.get('nome')}
+            return {"id": int(id_inst), "nome": dados_inst.get("nome")}
 
-    
-
-    logger.warning(f"[BuscarInstituicao] âš ️ Instituição '{nome_busca}' não encontrada no cache")
+    logger.warning(
+        f"[BuscarInstituicao] âš ️ Instituição '{nome_busca}' não encontrada no cache"
+    )
 
     return None
 
 
-
 def obter_id_medico_default():
-
     """
 
     Busca um ID de médico válido para usar como default
@@ -2377,55 +2226,45 @@ def obter_id_medico_default():
 
         return None
 
-
-
     # Pegar o primeiro disponível
 
     primeiro_medico = list(MEDICOS_CACHE.values())[0]
 
-    primeiro_id = primeiro_medico.get('id')
+    primeiro_id = primeiro_medico.get("id")
 
-    primeiro_nome = primeiro_medico.get('nome')
+    primeiro_nome = primeiro_medico.get("nome")
 
     logger.info(f"[Default] âœ… Médico default: ID={primeiro_id}, Nome={primeiro_nome}")
 
     return int(primeiro_id)
 
 
-
 def _buscar_id_por_nome_convenio(nome_convenio):
-
     """Helper: Busca ID do convênio nos CSVs usando o NOME (lookup reverso)"""
 
     logger.info(f"[LookupReverso] Buscando ID para convenio: '{nome_convenio}'")
 
-    
-
-    if not nome_convenio or nome_convenio.strip() == '':
+    if not nome_convenio or nome_convenio.strip() == "":
 
         logger.warning(f"[LookupReverso] Nome vazio fornecido")
 
         return None
 
-    
-
     nome_normalizado = nome_convenio.strip().upper()
-
-    
 
     # Tentativa 1: Busca exata
 
     for id_conv, dados in CONVENIOS_CACHE.items():
 
-        nome_cache = dados.get('nome', '').strip().upper()
+        nome_cache = dados.get("nome", "").strip().upper()
 
         if nome_cache == nome_normalizado:
 
-            logger.info(f"[LookupReverso] OK Convenio '{nome_convenio}' encontrado (exato)! ID: {id_conv}")
+            logger.info(
+                f"[LookupReverso] OK Convenio '{nome_convenio}' encontrado (exato)! ID: {id_conv}"
+            )
 
             return id_conv
-
-    
 
     # Tentativa 2: Busca parcial (contém)
 
@@ -2433,75 +2272,65 @@ def _buscar_id_por_nome_convenio(nome_convenio):
 
     import re
 
-    nome_limpo = re.sub(r'[^\w\s]', '', nome_normalizado).strip()
+    nome_limpo = re.sub(r"[^\w\s]", "", nome_normalizado).strip()
 
-    nome_limpo = re.sub(r'\s+', ' ', nome_limpo)
-
-    
+    nome_limpo = re.sub(r"\s+", " ", nome_limpo)
 
     logger.info(f"[LookupReverso] Tentando busca parcial com: '{nome_limpo}'")
 
-    
-
     for id_conv, dados in CONVENIOS_CACHE.items():
 
-        nome_cache_original = dados.get('nome', '').strip().upper()
+        nome_cache_original = dados.get("nome", "").strip().upper()
 
-        nome_cache_limpo = re.sub(r'[^\w\s]', '', nome_cache_original).strip()
+        nome_cache_limpo = re.sub(r"[^\w\s]", "", nome_cache_original).strip()
 
-        nome_cache_limpo = re.sub(r'\s+', ' ', nome_cache_limpo)
-
-        
+        nome_cache_limpo = re.sub(r"\s+", " ", nome_cache_limpo)
 
         if nome_limpo == nome_cache_limpo:
 
-            logger.info(f"[LookupReverso] OK Convenio '{nome_convenio}' encontrado (normalizado)! ID: {id_conv}, Nome CSV: '{nome_cache_original}'")
+            logger.info(
+                f"[LookupReverso] OK Convenio '{nome_convenio}' encontrado (normalizado)! ID: {id_conv}, Nome CSV: '{nome_cache_original}'"
+            )
 
             return id_conv
 
-    
+    logger.warning(
+        f"[LookupReverso] ERRO Convenio '{nome_convenio}' NAO encontrado no cache"
+    )
 
-    logger.warning(f"[LookupReverso] ERRO Convenio '{nome_convenio}' NAO encontrado no cache")
-
-    logger.warning(f"[LookupReverso] INFO Total de convenios no cache: {len(CONVENIOS_CACHE)}")
+    logger.warning(
+        f"[LookupReverso] INFO Total de convenios no cache: {len(CONVENIOS_CACHE)}"
+    )
 
     return None
 
 
-
 def _buscar_id_por_nome_instituicao(nome_instituicao):
-
     """Helper: Busca ID da instituição nos CSVs usando o NOME (lookup reverso)"""
 
     logger.info(f"[LookupReverso] Buscando ID para instituicao: '{nome_instituicao}'")
 
-    
-
-    if not nome_instituicao or nome_instituicao.strip() == '':
+    if not nome_instituicao or nome_instituicao.strip() == "":
 
         logger.warning(f"[LookupReverso] Nome vazio fornecido")
 
         return None
 
-    
-
     nome_normalizado = nome_instituicao.strip().upper()
-
-    
 
     # Tentativa 1: Busca exata
 
     for id_inst, dados in INSTITUICOES_CACHE.items():
 
-        nome_cache = dados.get('nome', '').strip().upper()
+        nome_cache = dados.get("nome", "").strip().upper()
 
         if nome_cache == nome_normalizado:
 
-            logger.info(f"[LookupReverso] OK Instituicao '{nome_instituicao}' encontrada (exata)! ID: {id_inst}")
+            logger.info(
+                f"[LookupReverso] OK Instituicao '{nome_instituicao}' encontrada (exata)! ID: {id_inst}"
+            )
 
             return id_inst
-
-    
 
     # Tentativa 2: Busca parcial (contém)
 
@@ -2509,43 +2338,40 @@ def _buscar_id_por_nome_instituicao(nome_instituicao):
 
     import re
 
-    nome_limpo = re.sub(r'[^\w\s]', '', nome_normalizado).strip()
+    nome_limpo = re.sub(r"[^\w\s]", "", nome_normalizado).strip()
 
-    nome_limpo = re.sub(r'\s+', ' ', nome_limpo)
-
-    
+    nome_limpo = re.sub(r"\s+", " ", nome_limpo)
 
     logger.info(f"[LookupReverso] Tentando busca parcial com: '{nome_limpo}'")
 
-    
-
     for id_inst, dados in INSTITUICOES_CACHE.items():
 
-        nome_cache_original = dados.get('nome', '').strip().upper()
+        nome_cache_original = dados.get("nome", "").strip().upper()
 
-        nome_cache_limpo = re.sub(r'[^\w\s]', '', nome_cache_original).strip()
+        nome_cache_limpo = re.sub(r"[^\w\s]", "", nome_cache_original).strip()
 
-        nome_cache_limpo = re.sub(r'\s+', ' ', nome_cache_limpo)
-
-        
+        nome_cache_limpo = re.sub(r"\s+", " ", nome_cache_limpo)
 
         if nome_limpo == nome_cache_limpo:
 
-            logger.info(f"[LookupReverso] OK Instituicao '{nome_instituicao}' encontrada (normalizada)! ID: {id_inst}, Nome CSV: '{nome_cache_original}'")
+            logger.info(
+                f"[LookupReverso] OK Instituicao '{nome_instituicao}' encontrada (normalizada)! ID: {id_inst}, Nome CSV: '{nome_cache_original}'"
+            )
 
             return id_inst
 
-    
+    logger.warning(
+        f"[LookupReverso] ERRO Instituicao '{nome_instituicao}' NAO encontrada no cache"
+    )
 
-    logger.warning(f"[LookupReverso] ERRO Instituicao '{nome_instituicao}' NAO encontrada no cache")
-
-    logger.warning(f"[LookupReverso] INFO Total de instituicoes no cache: {len(INSTITUICOES_CACHE)}")
+    logger.warning(
+        f"[LookupReverso] INFO Total de instituicoes no cache: {len(INSTITUICOES_CACHE)}"
+    )
 
     return None
 
 
 def _buscar_id_local_origem_por_nome_banco(nome_instituicao):
-
     """Fallback: busca IdInstituicao direto no banco para local de origem (Local=1)."""
 
     if not nome_instituicao or not str(nome_instituicao).strip():
@@ -2565,7 +2391,6 @@ def _buscar_id_local_origem_por_nome_banco(nome_instituicao):
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
         cursor.execute(
-
             """
 
             SELECT IdInstituicao AS id, NomFantasia AS nome
@@ -2581,9 +2406,7 @@ def _buscar_id_local_origem_por_nome_banco(nome_instituicao):
             LIMIT 1
 
             """,
-
-            (nome,)
-
+            (nome,),
         )
 
         row = cursor.fetchone()
@@ -2591,7 +2414,6 @@ def _buscar_id_local_origem_por_nome_banco(nome_instituicao):
         if not row:
 
             cursor.execute(
-
                 """
 
                 SELECT IdInstituicao AS id, NomFantasia AS nome
@@ -2609,22 +2431,24 @@ def _buscar_id_local_origem_por_nome_banco(nome_instituicao):
                 LIMIT 1
 
                 """,
-
-                (f"%{nome}%",)
-
+                (f"%{nome}%",),
             )
 
             row = cursor.fetchone()
 
-        if row and row.get('id'):
+        if row and row.get("id"):
 
-            logger.info(f"[LookupReverso] ✅ Local origem encontrado no banco: '{nome_instituicao}' → ID {row['id']} ({row.get('nome')})")
+            logger.info(
+                f"[LookupReverso] ✅ Local origem encontrado no banco: '{nome_instituicao}' → ID {row['id']} ({row.get('nome')})"
+            )
 
-            return int(row['id'])
+            return int(row["id"])
 
     except Exception as e:
 
-        logger.error(f"[LookupReverso] Erro no fallback de local origem por nome no banco: {e}")
+        logger.error(
+            f"[LookupReverso] Erro no fallback de local origem por nome no banco: {e}"
+        )
 
     finally:
 
@@ -2640,7 +2464,6 @@ def _buscar_id_local_origem_por_nome_banco(nome_instituicao):
 
 
 def _buscar_id_convenio_por_nome_banco(nome_convenio):
-
     """Fallback: busca IdConvenio direto no banco por nome de convênio."""
 
     if not nome_convenio or not str(nome_convenio).strip():
@@ -2648,7 +2471,7 @@ def _buscar_id_convenio_por_nome_banco(nome_convenio):
         return None
 
     nome = str(nome_convenio).strip()
-    nome_reduzido = nome.split('-')[0].split('/')[0].split('(')[0].strip()
+    nome_reduzido = nome.split("-")[0].split("/")[0].split("(")[0].strip()
 
     conn = None
 
@@ -2661,7 +2484,6 @@ def _buscar_id_convenio_por_nome_banco(nome_convenio):
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
         cursor.execute(
-
             """
 
             SELECT IdConvenio AS id, NomConvenio AS nome
@@ -2675,9 +2497,7 @@ def _buscar_id_convenio_por_nome_banco(nome_convenio):
             LIMIT 1
 
             """,
-
-            (nome,)
-
+            (nome,),
         )
 
         row = cursor.fetchone()
@@ -2685,7 +2505,6 @@ def _buscar_id_convenio_por_nome_banco(nome_convenio):
         if not row:
 
             cursor.execute(
-
                 """
 
                 SELECT IdConvenio AS id, NomConvenio AS nome
@@ -2701,9 +2520,7 @@ def _buscar_id_convenio_por_nome_banco(nome_convenio):
                 LIMIT 1
 
                 """,
-
-                (f"%{nome}%",)
-
+                (f"%{nome}%",),
             )
 
             row = cursor.fetchone()
@@ -2711,7 +2528,6 @@ def _buscar_id_convenio_por_nome_banco(nome_convenio):
         if not row and nome_reduzido and nome_reduzido.lower() != nome.lower():
 
             cursor.execute(
-
                 """
 
                 SELECT IdConvenio AS id, NomConvenio AS nome
@@ -2729,26 +2545,30 @@ def _buscar_id_convenio_por_nome_banco(nome_convenio):
                 LIMIT 1
 
                 """,
-
-                (f"%{nome_reduzido}%", nome_reduzido)
-
+                (f"%{nome_reduzido}%", nome_reduzido),
             )
 
             row = cursor.fetchone()
 
             if row:
 
-                logger.info(f"[LookupReverso] ℹ️ Convênio resolvido por nome reduzido '{nome_reduzido}' a partir de '{nome_convenio}'")
+                logger.info(
+                    f"[LookupReverso] ℹ️ Convênio resolvido por nome reduzido '{nome_reduzido}' a partir de '{nome_convenio}'"
+                )
 
-        if row and row.get('id'):
+        if row and row.get("id"):
 
-            logger.info(f"[LookupReverso] ✅ Convênio encontrado no banco: '{nome_convenio}' → ID {row['id']} ({row.get('nome')})")
+            logger.info(
+                f"[LookupReverso] ✅ Convênio encontrado no banco: '{nome_convenio}' → ID {row['id']} ({row.get('nome')})"
+            )
 
-            return int(row['id'])
+            return int(row["id"])
 
     except Exception as e:
 
-        logger.error(f"[LookupReverso] Erro no fallback de convênio por nome no banco: {e}")
+        logger.error(
+            f"[LookupReverso] Erro no fallback de convênio por nome no banco: {e}"
+        )
 
     finally:
 
@@ -2764,7 +2584,6 @@ def _buscar_id_convenio_por_nome_banco(nome_convenio):
 
 
 def _buscar_id_fonte_pagadora_por_nome_banco(nome_fonte):
-
     """Fallback: busca IdInstituicao direto no banco por nome de fonte pagadora (FontePagadora=1)."""
 
     if not nome_fonte or not str(nome_fonte).strip():
@@ -2784,7 +2603,6 @@ def _buscar_id_fonte_pagadora_por_nome_banco(nome_fonte):
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
         cursor.execute(
-
             """
 
             SELECT IdInstituicao AS id, NomFantasia AS nome
@@ -2800,9 +2618,7 @@ def _buscar_id_fonte_pagadora_por_nome_banco(nome_fonte):
             LIMIT 1
 
             """,
-
-            (nome,)
-
+            (nome,),
         )
 
         row = cursor.fetchone()
@@ -2810,7 +2626,6 @@ def _buscar_id_fonte_pagadora_por_nome_banco(nome_fonte):
         if not row:
 
             cursor.execute(
-
                 """
 
                 SELECT IdInstituicao AS id, NomFantasia AS nome
@@ -2828,22 +2643,24 @@ def _buscar_id_fonte_pagadora_por_nome_banco(nome_fonte):
                 LIMIT 1
 
                 """,
-
-                (f"%{nome}%",)
-
+                (f"%{nome}%",),
             )
 
             row = cursor.fetchone()
 
-        if row and row.get('id'):
+        if row and row.get("id"):
 
-            logger.info(f"[LookupReverso] ✅ Fonte pagadora encontrada no banco: '{nome_fonte}' → ID {row['id']} ({row.get('nome')})")
+            logger.info(
+                f"[LookupReverso] ✅ Fonte pagadora encontrada no banco: '{nome_fonte}' → ID {row['id']} ({row.get('nome')})"
+            )
 
-            return int(row['id'])
+            return int(row["id"])
 
     except Exception as e:
 
-        logger.error(f"[LookupReverso] Erro no fallback de fonte pagadora por nome no banco: {e}")
+        logger.error(
+            f"[LookupReverso] Erro no fallback de fonte pagadora por nome no banco: {e}"
+        )
 
     finally:
 
@@ -2858,28 +2675,28 @@ def _buscar_id_fonte_pagadora_por_nome_banco(nome_fonte):
     return None
 
 
-
 def _buscar_convenio_nome(id_convenio):
-
     """Helper: Busca nome do convênio nos CSVs usando o ID"""
 
-    logger.info(f"[Helper] ðŸ” _buscar_convenio_nome chamado com ID: {id_convenio} (tipo: {type(id_convenio).__name__})")
-
-    
+    logger.info(
+        f"[Helper] ðŸ” _buscar_convenio_nome chamado com ID: {id_convenio} (tipo: {type(id_convenio).__name__})"
+    )
 
     # Verificar se ID é None, 0, vazio ou string vazia
 
-    if id_convenio is None or id_convenio == '' or id_convenio == 0:
+    if id_convenio is None or id_convenio == "" or id_convenio == 0:
 
         logger.warning(f"[Helper] âš ️ ID inválido (None/vazio/zero): {id_convenio}")
 
-        logger.warning(f"[Helper] ðŸ’¡ POSSÍVEL CAUSA: Banco de dados não tem IdConvenio para esta requisição")
+        logger.warning(
+            f"[Helper] ðŸ’¡ POSSÍVEL CAUSA: Banco de dados não tem IdConvenio para esta requisição"
+        )
 
-        logger.warning(f"[Helper] ðŸ’¡ SOLUÃ‡ÃƒO: Verificar se a requisição foi salva no apLIS com convênio")
+        logger.warning(
+            f"[Helper] ðŸ’¡ SOLUÃ‡ÃƒO: Verificar se a requisição foi salva no apLIS com convênio"
+        )
 
         return None
-
-    
 
     try:
 
@@ -2887,17 +2704,19 @@ def _buscar_convenio_nome(id_convenio):
 
         if len(CONVENIOS_CACHE) == 0:
 
-            logger.error(f"[Helper] âŒ CACHE DE CONVÃŠNIOS VAZIO! CSV não foi carregado corretamente")
+            logger.error(
+                f"[Helper] âŒ CACHE DE CONVÃŠNIOS VAZIO! CSV não foi carregado corretamente"
+            )
 
-            logger.error(f"[Helper] ðŸ’¡ Verifique se o arquivo dados/convenios_extraidos_*.csv existe")
+            logger.error(
+                f"[Helper] ðŸ’¡ Verifique se o arquivo dados/convenios_extraidos_*.csv existe"
+            )
 
             return None
 
-        
-
-        logger.debug(f"[Helper] Primeiras 5 chaves do cache: {list(CONVENIOS_CACHE.keys())[:5]}")
-
-
+        logger.debug(
+            f"[Helper] Primeiras 5 chaves do cache: {list(CONVENIOS_CACHE.keys())[:5]}"
+        )
 
         # Tentar buscar com o ID original
 
@@ -2905,13 +2724,11 @@ def _buscar_convenio_nome(id_convenio):
 
         if convenio:
 
-            nome = convenio.get('nome')
+            nome = convenio.get("nome")
 
             logger.info(f"[Helper] âœ… Convênio ID {id_convenio} ENCONTRADO: {nome}")
 
             return nome
-
-        
 
         # Tentar conversões de tipo (int â†’ str, str â†’ int)
 
@@ -2921,13 +2738,13 @@ def _buscar_convenio_nome(id_convenio):
 
         if convenio_str:
 
-            nome = convenio_str.get('nome')
+            nome = convenio_str.get("nome")
 
-            logger.info(f"[Helper] âœ… Convênio ID {id_convenio} ENCONTRADO (como string): {nome}")
+            logger.info(
+                f"[Helper] âœ… Convênio ID {id_convenio} ENCONTRADO (como string): {nome}"
+            )
 
             return nome
-
-        
 
         # Se for string numérica, tentar como int
 
@@ -2939,9 +2756,11 @@ def _buscar_convenio_nome(id_convenio):
 
             if convenio_int:
 
-                nome = convenio_int.get('nome')
+                nome = convenio_int.get("nome")
 
-                logger.info(f"[Helper] âœ… Convênio ID {id_convenio} ENCONTRADO (convertido para int): {nome}")
+                logger.info(
+                    f"[Helper] âœ… Convênio ID {id_convenio} ENCONTRADO (convertido para int): {nome}"
+                )
 
                 return nome
 
@@ -2949,19 +2768,23 @@ def _buscar_convenio_nome(id_convenio):
 
             pass
 
-
-
         # Se chegou aqui, não encontrou
 
-        logger.warning(f"[Helper] âŒ Convênio ID {id_convenio} NÃƒO encontrado no cache")
+        logger.warning(
+            f"[Helper] âŒ Convênio ID {id_convenio} NÃƒO encontrado no cache"
+        )
 
-        logger.warning(f"[Helper] IDs disponíveis no cache (primeiros 20): {list(CONVENIOS_CACHE.keys())[:20]}")
+        logger.warning(
+            f"[Helper] IDs disponíveis no cache (primeiros 20): {list(CONVENIOS_CACHE.keys())[:20]}"
+        )
 
-        logger.warning(f"[Helper] ðŸ’¡ POSSÍVEL CAUSA: ID do banco não corresponde aos IDs do CSV")
+        logger.warning(
+            f"[Helper] ðŸ’¡ POSSÍVEL CAUSA: ID do banco não corresponde aos IDs do CSV"
+        )
 
-        logger.warning(f"[Helper] ðŸ’¡ SUGESTÃƒO: Execute backend/extrair_convenios.py para atualizar o CSV")
-
-        
+        logger.warning(
+            f"[Helper] ðŸ’¡ SUGESTÃƒO: Execute backend/extrair_convenios.py para atualizar o CSV"
+        )
 
     except Exception as e:
 
@@ -2971,55 +2794,61 @@ def _buscar_convenio_nome(id_convenio):
 
         logger.error(traceback.format_exc())
 
-
-
     logger.info(f"[Helper] ðŸ“¤ Retornando None (não encontrado)")
 
     return None
 
 
-
 def _buscar_instituicao_nome(id_instituicao):
-
     """Helper: Busca nome da instituição nos CSVs usando o ID"""
 
-    logger.info(f"[Helper] ðŸ” _buscar_instituicao_nome chamado com ID: {id_instituicao} (tipo: {type(id_instituicao).__name__})")
-
-    
+    logger.info(
+        f"[Helper] ðŸ” _buscar_instituicao_nome chamado com ID: {id_instituicao} (tipo: {type(id_instituicao).__name__})"
+    )
 
     # Verificar se ID é None, 0, vazio ou string vazia
 
-    if id_instituicao is None or id_instituicao == '' or id_instituicao == 0:
+    if id_instituicao is None or id_instituicao == "" or id_instituicao == 0:
 
         logger.warning(f"[Helper] âš ️ ID inválido (None/vazio/zero): {id_instituicao}")
 
-        logger.warning(f"[Helper] ðŸ’¡ POSSÍVEL CAUSA: Banco de dados não tem IdFontePagadora/IdLocalOrigem para esta requisição")
+        logger.warning(
+            f"[Helper] ðŸ’¡ POSSÍVEL CAUSA: Banco de dados não tem IdFontePagadora/IdLocalOrigem para esta requisição"
+        )
 
-        logger.warning(f"[Helper] ðŸ’¡ SOLUÃ‡ÃƒO: Verificar se a requisição foi salva no apLIS com fonte pagadora/local origem")
+        logger.warning(
+            f"[Helper] ðŸ’¡ SOLUÃ‡ÃƒO: Verificar se a requisição foi salva no apLIS com fonte pagadora/local origem"
+        )
 
         return None
 
-    
-
     try:
 
-        logger.debug(f"[Helper] Total de instituições em cache: {len(INSTITUICOES_CACHE)}")
+        logger.debug(
+            f"[Helper] Total de instituições em cache: {len(INSTITUICOES_CACHE)}"
+        )
 
         if len(INSTITUICOES_CACHE) == 0:
 
-            logger.error(f"[Helper] âŒ CACHE DE INSTITUIÃ‡Ã•ES VAZIO! CSV não foi carregado corretamente")
+            logger.error(
+                f"[Helper] âŒ CACHE DE INSTITUIÃ‡Ã•ES VAZIO! CSV não foi carregado corretamente"
+            )
 
-            logger.error(f"[Helper] ðŸ’¡ Verifique se o arquivo dados/instituicoes_extraidas_*.csv existe")
+            logger.error(
+                f"[Helper] ðŸ’¡ Verifique se o arquivo dados/instituicoes_extraidas_*.csv existe"
+            )
 
-            logger.error(f"[Helper] ðŸ’¡ Execute: python backend/extrair_instituicoes.py")
+            logger.error(
+                f"[Helper] ðŸ’¡ Execute: python backend/extrair_instituicoes.py"
+            )
 
             # Não retornar None ainda - tentar fallback do banco
 
         else:
 
-            logger.debug(f"[Helper] Primeiras 5 chaves do cache: {list(INSTITUICOES_CACHE.keys())[:5]}")
-
-
+            logger.debug(
+                f"[Helper] Primeiras 5 chaves do cache: {list(INSTITUICOES_CACHE.keys())[:5]}"
+            )
 
             # Tentar buscar com o ID original
 
@@ -3027,13 +2856,13 @@ def _buscar_instituicao_nome(id_instituicao):
 
             if instituicao:
 
-                nome = instituicao.get('nome')
+                nome = instituicao.get("nome")
 
-                logger.info(f"[Helper] âœ… Instituição ID {id_instituicao} ENCONTRADA no CSV: {nome}")
+                logger.info(
+                    f"[Helper] âœ… Instituição ID {id_instituicao} ENCONTRADA no CSV: {nome}"
+                )
 
                 return nome
-
-            
 
             # Tentar conversões de tipo (int â†’ str, str â†’ int)
 
@@ -3043,13 +2872,13 @@ def _buscar_instituicao_nome(id_instituicao):
 
             if instituicao_str:
 
-                nome = instituicao_str.get('nome')
+                nome = instituicao_str.get("nome")
 
-                logger.info(f"[Helper] âœ… Instituição ID {id_instituicao} ENCONTRADA no CSV (como string): {nome}")
+                logger.info(
+                    f"[Helper] âœ… Instituição ID {id_instituicao} ENCONTRADA no CSV (como string): {nome}"
+                )
 
                 return nome
-
-            
 
             # Se for string numérica, tentar como int
 
@@ -3061,9 +2890,11 @@ def _buscar_instituicao_nome(id_instituicao):
 
                 if instituicao_int:
 
-                    nome = instituicao_int.get('nome')
+                    nome = instituicao_int.get("nome")
 
-                    logger.info(f"[Helper] âœ… Instituição ID {id_instituicao} ENCONTRADA no CSV (convertido para int): {nome}")
+                    logger.info(
+                        f"[Helper] âœ… Instituição ID {id_instituicao} ENCONTRADA no CSV (convertido para int): {nome}"
+                    )
 
                     return nome
 
@@ -3071,15 +2902,13 @@ def _buscar_instituicao_nome(id_instituicao):
 
                 pass
 
-
-
         # Nao encontrou no CSV - FALLBACK: buscar NomFantasia direto em fatinstituicao
 
-        logger.warning(f"[Helper] Instituicao ID {id_instituicao} NAO encontrada no CSV")
+        logger.warning(
+            f"[Helper] Instituicao ID {id_instituicao} NAO encontrada no CSV"
+        )
 
         logger.info(f"[Helper] FALLBACK: Buscando NomFantasia em fatinstituicao...")
-
-
 
         try:
 
@@ -3087,54 +2916,42 @@ def _buscar_instituicao_nome(id_instituicao):
 
             cursor = connection.cursor(pymysql.cursors.DictCursor)
 
-
-
             cursor.execute(
-
                 "SELECT NomFantasia AS nome FROM newdb.fatinstituicao WHERE IdInstituicao = %s LIMIT 1",
-
-                (id_instituicao,)
-
+                (id_instituicao,),
             )
 
             resultado = cursor.fetchone()
-
-
 
             cursor.close()
 
             connection.close()
 
+            if resultado and resultado.get("nome"):
 
+                nome_banco = resultado.get("nome")
 
-            if resultado and resultado.get('nome'):
-
-                nome_banco = resultado.get('nome')
-
-                logger.info(f"[Helper] Instituicao ID {id_instituicao} encontrada em fatinstituicao: {nome_banco}")
+                logger.info(
+                    f"[Helper] Instituicao ID {id_instituicao} encontrada em fatinstituicao: {nome_banco}"
+                )
 
                 return nome_banco
 
             else:
 
-                logger.error(f"[Helper] Instituicao ID {id_instituicao} NAO encontrada em fatinstituicao")
-
-
+                logger.error(
+                    f"[Helper] Instituicao ID {id_instituicao} NAO encontrada em fatinstituicao"
+                )
 
         except Exception as db_error:
 
             logger.error(f"[Helper] Erro ao buscar em fatinstituicao: {db_error}")
 
-
-
     except Exception as e:
 
         logger.error(f"[Helper] Erro inesperado: {e}")
 
-
-
     return None
-
 
 
 # Carregar CSVs na inicialização
@@ -3150,44 +2967,34 @@ carregar_instituicoes_csv()
 carregar_locais_origem_csv()
 
 
-
 # Configurações apLIS - USAR VARIÁVEIS DE AMBIENTE
 
-APLIS_URL = os.getenv('APLIS_BASE_URL', 'https://lab.aplis.inf.br/api/integracao.php')
+APLIS_URL = os.getenv("APLIS_BASE_URL", "https://lab.aplis.inf.br/api/integracao.php")
 
-APLIS_USERNAME = os.getenv('APLIS_USUARIO', 'api.lab')
+APLIS_USERNAME = os.getenv("APLIS_USUARIO", "api.lab")
 
-APLIS_PASSWORD = os.getenv('APLIS_SENHA', '')  # âš ️ CONFIGURE NO .env
+APLIS_PASSWORD = os.getenv("APLIS_SENHA", "")  # âš ️ CONFIGURE NO .env
 
 APLIS_HEADERS = {"Content-Type": "application/json"}
-
 
 
 # Configurações AWS S3
 
 S3_CONFIG = {
-
-    'aws_access_key_id': os.getenv('AWS_ACCESS_KEY_ID'),
-
-    'aws_secret_access_key': os.getenv('AWS_SECRET_ACCESS_KEY'),
-
-    'region_name': os.getenv('AWS_REGION', 'sa-east-1')
-
+    "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID"),
+    "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY"),
+    "region_name": os.getenv("AWS_REGION", "sa-east-1"),
 }
 
-S3_BUCKET = os.getenv('S3_BUCKET_NAME', 'aplis2')
-
-
-
+S3_BUCKET = os.getenv("S3_BUCKET_NAME", "aplis2")
 
 
 def get_s3_client():
-
     """Cria cliente S3"""
 
     try:
 
-        s3 = boto3.client('s3', **S3_CONFIG)
+        s3 = boto3.client("s3", **S3_CONFIG)
 
         return s3
 
@@ -3198,11 +3005,7 @@ def get_s3_client():
         return None
 
 
-
-
-
 def fazer_requisicao_aplis(cmd, dat, aplis_usuario=None, aplis_senha=None):
-
     """
 
     Função genérica para fazer requisições ao apLIS usando a metodologia requisicaoListar
@@ -3233,19 +3036,7 @@ def fazer_requisicao_aplis(cmd, dat, aplis_usuario=None, aplis_senha=None):
 
     senha = aplis_senha if aplis_senha else APLIS_PASSWORD
 
-
-
-    payload = {
-
-        "ver": 1,
-
-        "cmd": cmd,
-
-        "dat": dat
-
-    }
-
-
+    payload = {"ver": 1, "cmd": cmd, "dat": dat}
 
     data = json.dumps(payload)
 
@@ -3253,37 +3044,25 @@ def fazer_requisicao_aplis(cmd, dat, aplis_usuario=None, aplis_senha=None):
 
     logger.info(f"[apLIS] Usuário apLIS: {usuario}")
 
-    logger.info(f"[apLIS] Payload completo: {json.dumps(payload, indent=2, ensure_ascii=False)}")
-
-
+    logger.info(
+        f"[apLIS] Payload completo: {json.dumps(payload, indent=2, ensure_ascii=False)}"
+    )
 
     try:
 
         response = requests.post(
-
-            APLIS_URL,
-
-            auth=(usuario, senha),
-
-            headers=APLIS_HEADERS,
-
-            data=data
-
+            APLIS_URL, auth=(usuario, senha), headers=APLIS_HEADERS, data=data
         )
 
-
-
         logger.info(f"[apLIS] Status Code: {response.status_code}")
-
-
 
         try:
 
             resposta_json = response.json()
 
-            logger.info(f"[apLIS] Resposta JSON completa: {json.dumps(resposta_json, indent=2, ensure_ascii=False)}")
-
-
+            logger.info(
+                f"[apLIS] Resposta JSON completa: {json.dumps(resposta_json, indent=2, ensure_ascii=False)}"
+            )
 
             if resposta_json.get("dat") and resposta_json["dat"].get("sucesso") == 1:
 
@@ -3297,15 +3076,16 @@ def fazer_requisicao_aplis(cmd, dat, aplis_usuario=None, aplis_senha=None):
 
                 return resposta_json
 
-
-
         except ValueError:
 
             logger.error(f"[apLIS] Resposta não está em JSON: {response.text}")
 
-            return {"erro": "Resposta inválida do apLIS", "texto": response.text, "sucesso": 0, "dat": {}}
-
-
+            return {
+                "erro": "Resposta inválida do apLIS",
+                "texto": response.text,
+                "sucesso": 0,
+                "dat": {},
+            }
 
     except requests.exceptions.RequestException as e:
 
@@ -3320,11 +3100,7 @@ def fazer_requisicao_aplis(cmd, dat, aplis_usuario=None, aplis_senha=None):
         return {"erro": f"Erro inesperado: {str(e)}", "sucesso": 0, "dat": {}}
 
 
-
-
-
 def extrair_credenciais_usuario(request):
-
     """
 
     Extrai credenciais do apLIS do usuário a partir do corpo da requisição.
@@ -3351,17 +3127,11 @@ def extrair_credenciais_usuario(request):
 
             return None, None
 
+        aplis_usuario = dados.get("aplis_usuario")
 
-
-        aplis_usuario = dados.get('aplis_usuario')
-
-        aplis_senha = dados.get('aplis_senha')
-
-
+        aplis_senha = dados.get("aplis_senha")
 
         logger.info(f"[AUTH] Credenciais apLIS extraídas: usuario={aplis_usuario}")
-
-
 
         return aplis_usuario, aplis_senha
 
@@ -3372,11 +3142,7 @@ def extrair_credenciais_usuario(request):
         return None, None
 
 
-
-
-
 def consultar_cpf_receita_federal(cpf, data_nascimento):
-
     """
 
     Consulta CPF na API da Receita Federal (HubDoDesenvolvedor)
@@ -3401,9 +3167,11 @@ def consultar_cpf_receita_federal(cpf, data_nascimento):
 
         # Remove formatação do CPF (pontos e traços)
 
-        cpf_limpo = cpf.replace(".", "").replace("-", "").replace("/", "").strip() if cpf else ""
-
-
+        cpf_limpo = (
+            cpf.replace(".", "").replace("-", "").replace("/", "").strip()
+            if cpf
+            else ""
+        )
 
         if not cpf_limpo or len(cpf_limpo) != 11:
 
@@ -3411,45 +3179,30 @@ def consultar_cpf_receita_federal(cpf, data_nascimento):
 
             return None
 
-
-
         # IMPORTANTE: A API funciona melhor SEM a data de nascimento (enviar vazia)
 
         # Se enviar data, a API pode rejeitar com "Parametro Invalido"
 
         data_param = ""
 
-
-
         # Monta a URL com os parâmetros (data sempre vazia)
 
         url = f"{CPF_API_BASE_URL}?cpf={cpf_limpo}&data={data_param}&token={CPF_API_TOKEN}"
 
-
-
         logger.info(f"[CPF_API] Consultando CPF: {cpf_limpo}")
-
-        
 
         # Headers para evitar bloqueio de bot (User-Agent)
 
         headers = {
-
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-
-            "Accept": "application/json"
-
+            "Accept": "application/json",
         }
-
-
 
         # Faz a requisição com Retry (3 tentativas)
 
         response = None
 
         last_error = None
-
-        
 
         for i in range(3):
 
@@ -3463,7 +3216,9 @@ def consultar_cpf_receita_federal(cpf, data_nascimento):
 
                     break
 
-                logger.warning(f"[CPF_API] Tentativa {i+1} falhou: Status {response.status_code}")
+                logger.warning(
+                    f"[CPF_API] Tentativa {i+1} falhou: Status {response.status_code}"
+                )
 
                 time.sleep(1)
 
@@ -3475,25 +3230,19 @@ def consultar_cpf_receita_federal(cpf, data_nascimento):
 
                 time.sleep(1)
 
-
-
         if response is None:
 
-            logger.error(f"[CPF_API] Falha total na conexão. Ãšltimo erro: {last_error}")
+            logger.error(
+                f"[CPF_API] Falha total na conexão. Ãšltimo erro: {last_error}"
+            )
 
             return None
 
-
-
         logger.debug(f"[CPF_API] Status Code: {response.status_code}")
-
-
 
         # Tenta decodificar o JSON
 
         resultado = response.json()
-
-
 
         # Verifica se a consulta foi bem-sucedida
 
@@ -3501,19 +3250,19 @@ def consultar_cpf_receita_federal(cpf, data_nascimento):
 
             result_data = resultado.get("result", {})
 
-
-
             logger.info(f"[CPF_API] [OK] Consulta bem-sucedida!")
 
             logger.info(f"[CPF_API]   Nome: {result_data.get('nome_da_pf')}")
 
             logger.info(f"[CPF_API]   CPF: {result_data.get('numero_de_cpf')}")
 
-            logger.info(f"[CPF_API]   Data Nascimento: {result_data.get('data_nascimento')}")
+            logger.info(
+                f"[CPF_API]   Data Nascimento: {result_data.get('data_nascimento')}"
+            )
 
-            logger.info(f"[CPF_API]   Situacao: {result_data.get('situacao_cadastral')}")
-
-
+            logger.info(
+                f"[CPF_API]   Situacao: {result_data.get('situacao_cadastral')}"
+            )
 
             # Formatar data de nascimento para DD/MM/YYYY (garantir formato numérico)
 
@@ -3523,47 +3272,40 @@ def consultar_cpf_receita_federal(cpf, data_nascimento):
 
                 # Se vier no formato YYYY-MM-DD, converter para DD/MM/YYYY
 
-                if len(data_nasc_formatada) == 10 and '-' in data_nasc_formatada:
+                if len(data_nasc_formatada) == 10 and "-" in data_nasc_formatada:
 
                     try:
 
-                        partes = data_nasc_formatada.split('-')
+                        partes = data_nasc_formatada.split("-")
 
                         if len(partes) == 3:
 
                             data_nasc_formatada = f"{partes[2]}/{partes[1]}/{partes[0]}"
 
-                            logger.info(f"[CPF_API]   Data formatada: {data_nasc_formatada}")
+                            logger.info(
+                                f"[CPF_API]   Data formatada: {data_nasc_formatada}"
+                            )
 
                     except:
 
                         pass
 
-
-
             return {
-
                 "nome": result_data.get("nome_da_pf"),
-
                 "cpf": result_data.get("numero_de_cpf"),
-
                 "data_nascimento": data_nasc_formatada,
-
                 "situacao_cadastral": result_data.get("situacao_cadastral"),
-
                 "data_inscricao": result_data.get("data_inscricao"),
-
-                "valido": True
-
+                "valido": True,
             }
 
         else:
 
-            logger.warning(f"[CPF_API] Consulta falhou: {resultado.get('msg', resultado.get('message', 'Sem dados disponiveis'))}")
+            logger.warning(
+                f"[CPF_API] Consulta falhou: {resultado.get('msg', resultado.get('message', 'Sem dados disponiveis'))}"
+            )
 
             return None
-
-
 
     except requests.exceptions.Timeout:
 
@@ -3590,11 +3332,7 @@ def consultar_cpf_receita_federal(cpf, data_nascimento):
         return None
 
 
-
-
-
 def validar_e_corrigir_dados_cpf(dados_aplis, dados_sistema_antigo=None):
-
     """
 
     Valida dados do CPF com a Receita Federal e corrige se necessário.
@@ -3623,15 +3361,11 @@ def validar_e_corrigir_dados_cpf(dados_aplis, dados_sistema_antigo=None):
 
         data_nascimento = None
 
-
-
         # Tentar obter data de nascimento do sistema antigo primeiro
 
         if dados_sistema_antigo and dados_sistema_antigo.get("dtaNasc"):
 
             data_nascimento = dados_sistema_antigo.get("dtaNasc")
-
-
 
         # Se não tem CPF, não há o que validar
 
@@ -3640,24 +3374,14 @@ def validar_e_corrigir_dados_cpf(dados_aplis, dados_sistema_antigo=None):
             logger.warning("[ValidarCPF] Sem CPF para validar")
 
             return {
-
                 "dados_corrigidos": False,
-
                 "fonte_dados": "aplis",
-
                 "dados": {
-
                     "nome": dados_aplis.get("NomPaciente"),
-
                     "cpf": cpf,
-
-                    "dtaNasc": data_nascimento
-
-                }
-
+                    "dtaNasc": data_nascimento,
+                },
             }
-
-
 
         # Consultar Receita Federal
 
@@ -3665,33 +3389,22 @@ def validar_e_corrigir_dados_cpf(dados_aplis, dados_sistema_antigo=None):
 
         dados_receita = consultar_cpf_receita_federal(cpf, data_nascimento)
 
-
-
         if not dados_receita:
 
-            logger.warning("[ValidarCPF] Não foi possível validar CPF na Receita Federal")
+            logger.warning(
+                "[ValidarCPF] Não foi possível validar CPF na Receita Federal"
+            )
 
             return {
-
                 "dados_corrigidos": False,
-
                 "fonte_dados": "aplis",
-
                 "aviso": "Não foi possível validar CPF na Receita Federal",
-
                 "dados": {
-
                     "nome": dados_aplis.get("NomPaciente"),
-
                     "cpf": cpf,
-
-                    "dtaNasc": data_nascimento
-
-                }
-
+                    "dtaNasc": data_nascimento,
+                },
             }
-
-
 
         # Comparar dados
 
@@ -3703,25 +3416,21 @@ def validar_e_corrigir_dados_cpf(dados_aplis, dados_sistema_antigo=None):
 
         data_nasc_receita = dados_receita.get("data_nascimento")
 
-
-
         # Verificar se há divergências
 
         divergencias = []
 
         dados_corrigidos = False
 
-
-
         # Comparar nomes (ignora maiúsculas/minúsculas e espaços extras)
 
         if nome_aplis and nome_receita and nome_aplis != nome_receita:
 
-            divergencias.append(f"Nome: apLIS='{dados_aplis.get('NomPaciente')}' â†’ Receita='{dados_receita.get('nome')}'")
+            divergencias.append(
+                f"Nome: apLIS='{dados_aplis.get('NomPaciente')}' â†’ Receita='{dados_receita.get('nome')}'"
+            )
 
             dados_corrigidos = True
-
-
 
         # Comparar CPFs
 
@@ -3729,11 +3438,11 @@ def validar_e_corrigir_dados_cpf(dados_aplis, dados_sistema_antigo=None):
 
         if cpf_aplis_limpo != cpf_receita:
 
-            divergencias.append(f"CPF: apLIS='{cpf}' â†’ Receita='{dados_receita.get('cpf')}'")
+            divergencias.append(
+                f"CPF: apLIS='{cpf}' â†’ Receita='{dados_receita.get('cpf')}'"
+            )
 
             dados_corrigidos = True
-
-
 
         # Comparar data de nascimento
 
@@ -3745,15 +3454,13 @@ def validar_e_corrigir_dados_cpf(dados_aplis, dados_sistema_antigo=None):
 
             data_receita_norm = data_nasc_receita.replace("/", "").replace("-", "")
 
-
-
             if data_aplis_norm != data_receita_norm:
 
-                divergencias.append(f"Data Nasc: Sistema='{data_nascimento}' â†’ Receita='{data_nasc_receita}'")
+                divergencias.append(
+                    f"Data Nasc: Sistema='{data_nascimento}' â†’ Receita='{data_nasc_receita}'"
+                )
 
                 dados_corrigidos = True
-
-
 
         # Log das divergências
 
@@ -3765,120 +3472,87 @@ def validar_e_corrigir_dados_cpf(dados_aplis, dados_sistema_antigo=None):
 
                 logger.warning(f"[ValidarCPF]   - {div}")
 
-            logger.info(f"[ValidarCPF] âœ… Dados serão corrigidos com informações da Receita Federal")
+            logger.info(
+                f"[ValidarCPF] âœ… Dados serão corrigidos com informações da Receita Federal"
+            )
 
         else:
 
             logger.info(f"[ValidarCPF] âœ… Dados conferem com a Receita Federal")
 
-
-
         # Retornar dados PRIORIZANDO Receita Federal
 
         return {
-
             "dados_corrigidos": dados_corrigidos,
-
             "fonte_dados": "receita_federal",
-
             "divergencias": divergencias if divergencias else None,
-
             "situacao_cadastral": dados_receita.get("situacao_cadastral"),
-
             "dados": {
-
                 "nome": dados_receita.get("nome"),  # PRIORIDADE: Receita Federal
-
-                "cpf": dados_receita.get("cpf"),    # PRIORIDADE: Receita Federal
-
-                "dtaNasc": dados_receita.get("data_nascimento")  # PRIORIDADE: Receita Federal
-
+                "cpf": dados_receita.get("cpf"),  # PRIORIDADE: Receita Federal
+                "dtaNasc": dados_receita.get(
+                    "data_nascimento"
+                ),  # PRIORIDADE: Receita Federal
             },
-
             "dados_originais_aplis": {
-
                 "nome": dados_aplis.get("NomPaciente"),
-
                 "cpf": cpf,
-
-                "dtaNasc": data_nascimento
-
+                "dtaNasc": data_nascimento,
             },
-
             # Dados comparativos para exibição
-
             "comparacao": {
-
                 "nome": {
-
                     "sistema": dados_aplis.get("NomPaciente"),
-
                     "receita_federal": dados_receita.get("nome"),
-
-                    "divergente": nome_aplis != nome_receita if nome_aplis and nome_receita else False
-
+                    "divergente": (
+                        nome_aplis != nome_receita
+                        if nome_aplis and nome_receita
+                        else False
+                    ),
                 },
-
                 "cpf": {
-
                     "sistema": cpf,
-
                     "receita_federal": dados_receita.get("cpf"),
-
-                    "divergente": cpf.replace(".", "").replace("-", "") != cpf_receita if cpf else False
-
+                    "divergente": (
+                        cpf.replace(".", "").replace("-", "") != cpf_receita
+                        if cpf
+                        else False
+                    ),
                 },
-
                 "data_nascimento": {
-
                     "sistema": data_nascimento,
-
                     "receita_federal": dados_receita.get("data_nascimento"),
-
-                    "divergente": data_nascimento and dados_receita.get("data_nascimento") and 
-
-                                 data_nascimento.replace("/", "").replace("-", "") != 
-
-                                 dados_receita.get("data_nascimento", "").replace("/", "").replace("-", "")
-
-                }
-
-            }
-
+                    "divergente": data_nascimento
+                    and dados_receita.get("data_nascimento")
+                    and data_nascimento.replace("/", "").replace("-", "")
+                    != dados_receita.get("data_nascimento", "")
+                    .replace("/", "")
+                    .replace("-", ""),
+                },
+            },
         }
-
-
 
     except Exception as e:
 
         logger.error(f"[ValidarCPF] âŒ Erro ao validar CPF: {e}")
 
         return {
-
             "dados_corrigidos": False,
-
             "fonte_dados": "aplis",
-
             "erro": str(e),
-
             "dados": {
-
                 "nome": dados_aplis.get("NomPaciente"),
-
                 "cpf": dados_aplis.get("CPF"),
-
-                "dtaNasc": dados_sistema_antigo.get("dtaNasc") if dados_sistema_antigo else None
-
-            }
-
+                "dtaNasc": (
+                    dados_sistema_antigo.get("dtaNasc")
+                    if dados_sistema_antigo
+                    else None
+                ),
+            },
         }
 
 
-
-
-
 def salvar_admissao_aplis(dados_admissao, aplis_usuario=None, aplis_senha=None):
-
     """
 
     Salva uma admissão/requisição no apLIS usando a nova metodologia genérica
@@ -3895,18 +3569,18 @@ def salvar_admissao_aplis(dados_admissao, aplis_usuario=None, aplis_senha=None):
 
     """
 
-    logger.info(f"[Admissão] Salvando admissão com dados: {len(str(dados_admissao))} bytes")
+    logger.info(
+        f"[Admissão] Salvando admissão com dados: {len(str(dados_admissao))} bytes"
+    )
 
     logger.info(f"[Admissão] Usuário apLIS: {aplis_usuario or 'PADRÃƒO'}")
 
-    return fazer_requisicao_aplis("admissaoSalvar", dados_admissao, aplis_usuario, aplis_senha)
-
-
-
+    return fazer_requisicao_aplis(
+        "admissaoSalvar", dados_admissao, aplis_usuario, aplis_senha
+    )
 
 
 def buscar_dados_paciente_sistema_antigo(cod_paciente=None, cpf=None):
-
     """
 
     Busca dados COMPLETOS do paciente buscando requisições ANTIGAS do mesmo paciente
@@ -3951,9 +3625,9 @@ def buscar_dados_paciente_sistema_antigo(cod_paciente=None, cpf=None):
 
     try:
 
-        logger.info(f"[SistemaComplementar] Buscando dados históricos do paciente: codPaciente={cod_paciente}, cpf={cpf}")
-
-
+        logger.info(
+            f"[SistemaComplementar] Buscando dados históricos do paciente: codPaciente={cod_paciente}, cpf={cpf}"
+        )
 
         # IMPORTANTE: Como requisicaoListar do sistema NOVO não retorna dados completos
 
@@ -3961,61 +3635,43 @@ def buscar_dados_paciente_sistema_antigo(cod_paciente=None, cpf=None):
 
         # em requisições antigas do paciente
 
-
-
         if not cod_paciente:
 
-            logger.warning(f"[SistemaComplementar] Código do paciente não fornecido, impossível buscar dados")
+            logger.warning(
+                f"[SistemaComplementar] Código do paciente não fornecido, impossível buscar dados"
+            )
 
             return None
-
-
 
         # Buscar requisições antigas do paciente (últimos 2 anos)
 
         hoje = datetime.now()
 
-        periodo_fim = (hoje - timedelta(days=1)).strftime("%Y-%m-%d")  # Ontem (dados com atraso)
+        periodo_fim = (hoje - timedelta(days=1)).strftime(
+            "%Y-%m-%d"
+        )  # Ontem (dados com atraso)
 
         periodo_ini = (hoje - timedelta(days=730)).strftime("%Y-%m-%d")  # 2 anos atrás
 
-
-
         dat = {
-
             "tipoData": 1,  # Data de solicitação
-
             "periodoIni": periodo_ini,
-
             "periodoFim": periodo_fim,
-
             "idPaciente": int(cod_paciente),
-
             "ordenar": "DtaSolicitacao",
-
             "pagina": 1,
-
-            "tamanho": 1  # Apenas a mais recente
-
+            "tamanho": 1,  # Apenas a mais recente
         }
 
-
-
         logger.debug(f"[SistemaComplementar] Buscando requisições antigas: {dat}")
-
-
 
         # Fazer requisição usando requisicaoListar (modo usuários internos)
 
         resposta = fazer_requisicao_aplis("requisicaoListar", dat)
 
-
-
         if resposta.get("dat", {}).get("sucesso") == 1:
 
             lista_requisicoes = resposta.get("dat", {}).get("lista", [])
-
-
 
             if lista_requisicoes and len(lista_requisicoes) > 0:
 
@@ -4025,31 +3681,23 @@ def buscar_dados_paciente_sistema_antigo(cod_paciente=None, cpf=None):
 
                 cod_req_antiga = req_antiga.get("CodRequisicao")
 
-
-
-                logger.info(f"[SistemaComplementar] âœ… Encontrada requisição antiga: {cod_req_antiga}")
-
-
+                logger.info(
+                    f"[SistemaComplementar] âœ… Encontrada requisição antiga: {cod_req_antiga}"
+                )
 
                 # Agora buscar dados COMPLETOS usando requisicaoResultado
 
                 # que retorna dados completos do paciente!
 
-                logger.info(f"[SistemaComplementar] Buscando dados completos via requisicaoResultado...")
+                logger.info(
+                    f"[SistemaComplementar] Buscando dados completos via requisicaoResultado..."
+                )
 
+                dat_resultado = {"codRequisicao": cod_req_antiga}
 
-
-                dat_resultado = {
-
-                    "codRequisicao": cod_req_antiga
-
-                }
-
-
-
-                resposta_resultado = fazer_requisicao_aplis("requisicaoResultado", dat_resultado)
-
-
+                resposta_resultado = fazer_requisicao_aplis(
+                    "requisicaoResultado", dat_resultado
+                )
 
                 if resposta_resultado.get("dat", {}).get("sucesso") == 1:
 
@@ -4057,59 +3705,51 @@ def buscar_dados_paciente_sistema_antigo(cod_paciente=None, cpf=None):
 
                     paciente_completo = dados_resultado.get("paciente", {})
 
+                    logger.info(
+                        f"[SistemaComplementar] âœ… Dados completos obtidos via requisicaoResultado!"
+                    )
 
-
-                    logger.info(f"[SistemaComplementar] âœ… Dados completos obtidos via requisicaoResultado!")
-
-                    logger.debug(f"[SistemaComplementar] Dados paciente RAW: {json.dumps(paciente_completo, indent=2, ensure_ascii=False)[:1000]}")
-
-
+                    logger.debug(
+                        f"[SistemaComplementar] Dados paciente RAW: {json.dumps(paciente_completo, indent=2, ensure_ascii=False)[:1000]}"
+                    )
 
                     # Verificar todos os campos disponíveis no paciente_completo
 
-                    logger.info(f"[SistemaComplementar] ðŸ” Campos disponíveis em paciente_completo: {list(paciente_completo.keys())}")
-
-
+                    logger.info(
+                        f"[SistemaComplementar] ðŸ” Campos disponíveis em paciente_completo: {list(paciente_completo.keys())}"
+                    )
 
                     # Extrair dados do paciente
 
                     # Tentar pegar RG, telefone e endereço se existirem
 
                     dados_paciente = {
-
                         "dtaNasc": paciente_completo.get("dtaNasc"),
-
                         "sexo": paciente_completo.get("sexo"),
-
-                        "rg": paciente_completo.get("rg") or paciente_completo.get("RG") or paciente_completo.get("numIdentidade"),
-
-                        "telCelular": paciente_completo.get("telCelular") or paciente_completo.get("telefone") or paciente_completo.get("fone"),
-
+                        "rg": paciente_completo.get("rg")
+                        or paciente_completo.get("RG")
+                        or paciente_completo.get("numIdentidade"),
+                        "telCelular": paciente_completo.get("telCelular")
+                        or paciente_completo.get("telefone")
+                        or paciente_completo.get("fone"),
                         "endereco": {
-
-                            "logradouro": paciente_completo.get("logradouro") or paciente_completo.get("endereco"),
-
-                            "numEndereco": paciente_completo.get("numEndereco") or paciente_completo.get("numero"),
-
+                            "logradouro": paciente_completo.get("logradouro")
+                            or paciente_completo.get("endereco"),
+                            "numEndereco": paciente_completo.get("numEndereco")
+                            or paciente_completo.get("numero"),
                             "bairro": paciente_completo.get("bairro"),
-
-                            "cidade": paciente_completo.get("cidade") or paciente_completo.get("municipio"),
-
-                            "uf": paciente_completo.get("uf") or paciente_completo.get("estado"),
-
-                            "cep": paciente_completo.get("cep")
-
-                        }
-
+                            "cidade": paciente_completo.get("cidade")
+                            or paciente_completo.get("municipio"),
+                            "uf": paciente_completo.get("uf")
+                            or paciente_completo.get("estado"),
+                            "cep": paciente_completo.get("cep"),
+                        },
                     }
 
-
-
-                    logger.info(f"[SistemaComplementar] Campos extraídos: dtaNasc={dados_paciente.get('dtaNasc')}, "
-
-                              f"sexo={dados_paciente.get('sexo')}")
-
-
+                    logger.info(
+                        f"[SistemaComplementar] Campos extraídos: dtaNasc={dados_paciente.get('dtaNasc')}, "
+                        f"sexo={dados_paciente.get('sexo')}"
+                    )
 
                     # Se encontrou pelo menos data de nascimento, retornar
 
@@ -4119,19 +3759,25 @@ def buscar_dados_paciente_sistema_antigo(cod_paciente=None, cpf=None):
 
                     else:
 
-                        logger.warning(f"[SistemaComplementar] Dados incompletos, retornando None")
+                        logger.warning(
+                            f"[SistemaComplementar] Dados incompletos, retornando None"
+                        )
 
                         return None
 
                 else:
 
-                    logger.warning(f"[SistemaComplementar] Erro ao buscar requisicaoResultado: {resposta_resultado}")
+                    logger.warning(
+                        f"[SistemaComplementar] Erro ao buscar requisicaoResultado: {resposta_resultado}"
+                    )
 
                     return None
 
             else:
 
-                logger.info(f"[SistemaComplementar] Nenhuma requisição antiga encontrada para o paciente")
+                logger.info(
+                    f"[SistemaComplementar] Nenhuma requisição antiga encontrada para o paciente"
+                )
 
                 return None
 
@@ -4140,8 +3786,6 @@ def buscar_dados_paciente_sistema_antigo(cod_paciente=None, cpf=None):
             logger.warning(f"[SistemaComplementar] Resposta sem sucesso: {resposta}")
 
             return None
-
-
 
     except Exception as e:
 
@@ -4154,16 +3798,14 @@ def buscar_dados_paciente_sistema_antigo(cod_paciente=None, cpf=None):
         return None
 
 
-
-
-
-def listar_requisicoes_aplis(id_evento, periodo_ini, periodo_fim, ordenar="IdRequisicao", paginaAtual=1):
-
+def listar_requisicoes_aplis(
+    id_evento, periodo_ini, periodo_fim, ordenar="IdRequisicao", paginaAtual=1
+):
     """
 
     Lista requisições do apLIS usando requisicaoListar
 
-    
+
 
     Args:
 
@@ -4177,7 +3819,7 @@ def listar_requisicoes_aplis(id_evento, periodo_ini, periodo_fim, ordenar="IdReq
 
         paginaAtual (int): Número da página a buscar (padrão: 1)
 
-    
+
 
     Returns:
 
@@ -4186,40 +3828,30 @@ def listar_requisicoes_aplis(id_evento, periodo_ini, periodo_fim, ordenar="IdReq
     """
 
     dat = {
-
         "ordenar": ordenar,
-
         "idEvento": str(id_evento),
-
         "periodoIni": periodo_ini,
-
         "periodoFim": periodo_fim,
-
-        "paginaAtual": paginaAtual  # â† Parâmetro de paginação
-
+        "paginaAtual": paginaAtual,  # â† Parâmetro de paginação
     }
 
-    
-
-    logger.info(f"[Listagem] Listando requisições do evento {id_evento} de {periodo_ini} a {periodo_fim} (página {paginaAtual})")
+    logger.info(
+        f"[Listagem] Listando requisições do evento {id_evento} de {periodo_ini} a {periodo_fim} (página {paginaAtual})"
+    )
 
     return fazer_requisicao_aplis("requisicaoListar", dat)
 
 
-
-
-
 def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquecer=True):
-
     """
 
     Lista requisições do apLIS com dados PRIMÁRIOS + complementares enriquecidos
 
-    
+
 
     ⭐ AGORA BUSCA TODAS AS PÁGINAS - Não fica limitado aos primeiros 50 registros!
 
-    
+
 
     Esta função integra as duas metodologias:
 
@@ -4235,7 +3867,7 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
 
        - ID do médico
 
-       
+
 
     2. COMPLEMENTAR (enriquecimento): Adiciona informações complementares
 
@@ -4249,7 +3881,7 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
 
        - Dados clínicos
 
-    
+
 
     Args:
 
@@ -4261,7 +3893,7 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
 
         enriquecer (bool): Se deve buscar dados complementares (padrão: True)
 
-    
+
 
     Returns:
 
@@ -4271,9 +3903,9 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
 
     try:
 
-        logger.info(f"[ListagemDetalhada] Iniciando busca: evento={id_evento}, período={periodo_ini} a {periodo_fim}")
-
-        
+        logger.info(
+            f"[ListagemDetalhada] Iniciando busca: evento={id_evento}, período={periodo_ini} a {periodo_fim}"
+        )
 
         # PASSO 1: Obter TODAS as páginas de requisições
 
@@ -4281,19 +3913,23 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
 
         pagina_atual = 1
 
-        
+        codigos_ja_coletados = set()
+
+        max_paginas = 200
 
         while True:
 
             logger.info(f"[ListagemDetalhada] Buscando página {pagina_atual}...")
 
-            
-
             # Fazer requisição COM parâmetro de página
 
-            resposta = listar_requisicoes_aplis(id_evento, periodo_ini, periodo_fim, "CodRequisicao", paginaAtual=pagina_atual)
-
-            
+            resposta = listar_requisicoes_aplis(
+                id_evento,
+                periodo_ini,
+                periodo_fim,
+                "CodRequisicao",
+                paginaAtual=pagina_atual,
+            )
 
             if resposta.get("dat", {}).get("sucesso") != 1:
 
@@ -4301,7 +3937,9 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
 
                     # Erro na primeira página - problema real
 
-                    logger.warning(f"[ListagemDetalhada] Falha ao obter lista primária: {resposta}")
+                    logger.warning(
+                        f"[ListagemDetalhada] Falha ao obter lista primária: {resposta}"
+                    )
 
                     return resposta
 
@@ -4309,89 +3947,126 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
 
                     # Erro em página posterior - parar a paginação
 
-                    logger.info(f"[ListagemDetalhada] Finalizando paginação (erro na página {pagina_atual})")
+                    logger.info(
+                        f"[ListagemDetalhada] Finalizando paginação (erro na página {pagina_atual})"
+                    )
 
                     break
-
-            
 
             dados_resposta = resposta.get("dat", {})
 
             lista_pagina = dados_resposta.get("lista", [])
 
-            
-
             if not lista_pagina:
 
-                logger.info(f"[ListagemDetalhada] Página {pagina_atual} vazia - finalizando paginação")
+                logger.info(
+                    f"[ListagemDetalhada] Página {pagina_atual} vazia - finalizando paginação"
+                )
 
                 break
 
-            
+            logger.info(
+                f"[ListagemDetalhada] Página {pagina_atual}: {len(lista_pagina)} requisições"
+            )
 
-            logger.info(f"[ListagemDetalhada] Página {pagina_atual}: {len(lista_pagina)} requisições")
+            novos_na_pagina = 0
 
-            lista_requisicoes_total.extend(lista_pagina)
+            for req in lista_pagina:
 
-            
+                codigo = str(req.get("CodRequisicao") or "").strip()
+
+                if codigo and codigo in codigos_ja_coletados:
+
+                    continue
+
+                if codigo:
+
+                    codigos_ja_coletados.add(codigo)
+
+                lista_requisicoes_total.append(req)
+
+                novos_na_pagina += 1
+
+            if novos_na_pagina == 0:
+
+                logger.info(
+                    f"[ListagemDetalhada] Página {pagina_atual} sem códigos novos (paginação não avançou). Finalizando."
+                )
+
+                break
 
             # Verificar se há mais páginas
 
-            qtd_paginas = dados_resposta.get("qtdPaginas", 1)
+            qtd_paginas_raw = dados_resposta.get("qtdPaginas")
 
-            registros_totais = dados_resposta.get("registros", len(lista_requisicoes_total))
+            qtd_paginas = None
 
-            logger.debug(f"[ListagemDetalhada] Total de páginas: {qtd_paginas}, registros: {registros_totais}, página atual: {pagina_atual}")
+            if qtd_paginas_raw is not None:
 
-            
+                try:
 
-            if pagina_atual >= qtd_paginas:
+                    qtd_paginas = int(qtd_paginas_raw)
 
-                logger.info(f"[ListagemDetalhada] Todas as {qtd_paginas} páginas foram obtidas ({registros_totais} registros)")
+                except (TypeError, ValueError):
+
+                    qtd_paginas = None
+
+            registros_totais = dados_resposta.get(
+                "registros", len(lista_requisicoes_total)
+            )
+
+            logger.debug(
+                f"[ListagemDetalhada] Total de páginas: {qtd_paginas if qtd_paginas is not None else 'não informado'}, registros: {registros_totais}, página atual: {pagina_atual}"
+            )
+
+            if (
+                qtd_paginas is not None
+                and qtd_paginas > 0
+                and pagina_atual >= qtd_paginas
+            ):
+
+                logger.info(
+                    f"[ListagemDetalhada] Todas as {qtd_paginas} páginas foram obtidas ({registros_totais} registros)"
+                )
 
                 break
 
-            
+            if pagina_atual >= max_paginas:
+
+                logger.warning(
+                    f"[ListagemDetalhada] Limite de segurança atingido ({max_paginas} páginas). Finalizando paginação."
+                )
+
+                break
 
             pagina_atual += 1
 
-        
-
-        logger.info(f"[ListagemDetalhada] âœ… TOTAL de requisições coletadas: {len(lista_requisicoes_total)}")
-
-        
+        logger.info(
+            f"[ListagemDetalhada] âœ… TOTAL de requisições coletadas: {len(lista_requisicoes_total)}"
+        )
 
         if not enriquecer or len(lista_requisicoes_total) == 0:
 
-            logger.info(f"[ListagemDetalhada] Retornando dados básicos (sem enriquecimento)")
+            logger.info(
+                f"[ListagemDetalhada] Retornando dados básicos (sem enriquecimento)"
+            )
 
             return {
-
                 "dat": {
-
                     "sucesso": 1,
-
                     "lista": lista_requisicoes_total,
-
                     "total": len(lista_requisicoes_total),
-
-                    "modo": "basico"
-
+                    "modo": "basico",
                 }
-
             }
-
-        
 
         # PASSO 2: Enriquecer dados complementares para cada requisição
 
-        logger.info(f"[ListagemDetalhada] Iniciando enriquecimento de dados para {len(lista_requisicoes_total)} requisições")
-
-        
+        logger.info(
+            f"[ListagemDetalhada] Iniciando enriquecimento de dados para {len(lista_requisicoes_total)} requisições"
+        )
 
         requisicoes_enriquecidas = []
-
-        
 
         for idx, req in enumerate(lista_requisicoes_total, 1):
 
@@ -4399,9 +4074,9 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
 
                 cod_requisicao = req.get("CodRequisicao")
 
-                logger.debug(f"[ListagemDetalhada] [{idx}/{len(lista_requisicoes_total)}] Enriquecendo: {cod_requisicao}")
-
-
+                logger.debug(
+                    f"[ListagemDetalhada] [{idx}/{len(lista_requisicoes_total)}] Enriquecendo: {cod_requisicao}"
+                )
 
                 # ðŸ†• TENTAR BUSCAR DADOS COMPLEMENTARES DO requisicaoResultado
 
@@ -4411,29 +4086,29 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
 
                     dat_resultado = {"codRequisicao": cod_requisicao}
 
-                    resposta_resultado = fazer_requisicao_aplis("requisicaoResultado", dat_resultado)
-
-
+                    resposta_resultado = fazer_requisicao_aplis(
+                        "requisicaoResultado", dat_resultado
+                    )
 
                     if resposta_resultado.get("dat", {}).get("sucesso") == 1:
 
                         dados_resultado = resposta_resultado.get("dat", {})
 
-                        logger.debug(f"[ListagemDetalhada] âœ… Dados complementares obtidos para {cod_requisicao}")
+                        logger.debug(
+                            f"[ListagemDetalhada] âœ… Dados complementares obtidos para {cod_requisicao}"
+                        )
 
                 except Exception as e:
 
-                    logger.debug(f"[ListagemDetalhada] requisicaoResultado não disponível para {cod_requisicao}: {str(e)}")
-
-
+                    logger.debug(
+                        f"[ListagemDetalhada] requisicaoResultado não disponível para {cod_requisicao}: {str(e)}"
+                    )
 
                 # Extrair nomes do requisicaoResultado (se disponível)
 
                 nome_convenio = None
 
                 nome_local_origem = None
-
-
 
                 if dados_resultado:
 
@@ -4443,15 +4118,11 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
 
                         nome_convenio = dados_resultado["paciente"]["convenio"]
 
-
-
                     # Local de origem do resultado
 
                     if dados_resultado.get("localOrigem", {}).get("nome"):
 
                         nome_local_origem = dados_resultado["localOrigem"]["nome"]
-
-
 
                 # Fallback para CSV se não veio do resultado
 
@@ -4459,191 +4130,114 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
 
                     nome_convenio = _buscar_convenio_nome(req.get("IdConvenio"))
 
-
-
                 if not nome_local_origem and req.get("IdLocalOrigem"):
 
-                    nome_local_origem = _buscar_instituicao_nome(req.get("IdLocalOrigem"))
-
-                
-
-
+                    nome_local_origem = _buscar_instituicao_nome(
+                        req.get("IdLocalOrigem")
+                    )
 
                 # Dados primários (já vieram do requisicaoListar)
 
                 req_enriquecida = {
-
                     # ===== DADOS PRIMÁRIOS (da busca inicial) =====
-
                     "dados_primarios": {
-
                         "codRequisicao": req.get("CodRequisicao"),
-
                         "idRequisicao": req.get("IdRequisicao"),
-
                         "dtaColeta": req.get("DtaColeta") or req.get("DtaPrevista"),
-
                         "numGuia": req.get("NumGuiaConvenio") or req.get("NumExterno"),
-
-                        "dadosClinicos": req.get("IndicacaoClinica") or req.get("NomExame")
-
+                        "dadosClinicos": req.get("IndicacaoClinica")
+                        or req.get("NomExame"),
                     },
-
                     # ===== DADOS DO PACIENTE (primários) =====
-
                     "paciente": {
-
                         "idPaciente": req.get("CodPaciente"),
-
                         "nome": req.get("NomPaciente"),
-
                         "cpf": req.get("CPF"),  # PRINCIPAL: CPF vem do requisicaoListar
-
                         # Dados complementares (preenchidos por OCR ou manualmente)
-
                         "dtaNasc": None,
-
                         "sexo": None,
-
                         "rg": None,
-
                         "telCelular": None,
-
                         "endereco": {
-
                             "cep": None,
-
                             "logradouro": None,
-
                             "numEndereco": None,
-
                             "complemento": None,
-
                             "bairro": None,
-
                             "cidade": None,
-
-                            "uf": None
-
-                        }
-
+                            "uf": None,
+                        },
                     },
-
                     # ===== DADOS COMPLEMENTARES (enriquecimento) =====
-
                     "dados_complementares": {
-
                         "idConvenio": req.get("IdConvenio"),
-
                         "idLocalOrigem": req.get("IdLocalOrigem"),
-
                         "idFontePagadora": req.get("IdFontePagadora"),
-
-                        "idMedico": req.get("CodMedico")
-
-                    },
-
-                    "medico": {
-
                         "idMedico": req.get("CodMedico"),
-
+                    },
+                    "medico": {
+                        "idMedico": req.get("CodMedico"),
                         "crm": req.get("CRM"),
-
                         "uf": req.get("CRMUF"),
-
-                        "nome": None  # Pode ser preenchido por busca complementar
-
+                        "nome": None,  # Pode ser preenchido por busca complementar
                     },
-
                     "convenio": {
-
                         "id": req.get("IdConvenio"),  # âœ… ID do convênio
-
-                        "nome": nome_convenio
-
+                        "nome": nome_convenio,
                     },
-
                     "fontePagadora": {
-
                         "id": req.get("IdFontePagadora"),  # âœ… ID da fonte pagadora
-
-                        "nome": None  # Não disponível na API apLIS
-
+                        "nome": None,  # Não disponível na API apLIS
                     },
-
                     "localOrigem": {
-
                         "id": req.get("IdLocalOrigem"),  # âœ… ID do local de origem
-
-                        "nome": nome_local_origem
-
+                        "nome": nome_local_origem,
                     },
-
                     # Metadata
-
                     "origem": "requisicaoListar + requisicaoResultado",
-
-                    "enriquecido": True
-
+                    "enriquecido": True,
                 }
-
-                
 
                 requisicoes_enriquecidas.append(req_enriquecida)
 
-                
-
             except Exception as e:
 
-                logger.error(f"[ListagemDetalhada] Erro ao enriquecer requisição {cod_requisicao}: {str(e)}")
+                logger.error(
+                    f"[ListagemDetalhada] Erro ao enriquecer requisição {cod_requisicao}: {str(e)}"
+                )
 
                 # Ainda assim adiciona com dados básicos
 
-                requisicoes_enriquecidas.append({
+                requisicoes_enriquecidas.append(
+                    {
+                        "codRequisicao": req.get("CodRequisicao"),
+                        "paciente": {
+                            "nome": req.get("NomPaciente"),
+                            "cpf": req.get("CPF"),
+                        },
+                        "erro_enriquecimento": str(e),
+                    }
+                )
 
-                    "codRequisicao": req.get("CodRequisicao"),
-
-                    "paciente": {"nome": req.get("NomPaciente"), "cpf": req.get("CPF")},
-
-                    "erro_enriquecimento": str(e)
-
-                })
-
-        
-
-        logger.info(f"[ListagemDetalhada] âœ… Enriquecimento concluído: {len(requisicoes_enriquecidas)} requisições")
-
-        
+        logger.info(
+            f"[ListagemDetalhada] âœ… Enriquecimento concluído: {len(requisicoes_enriquecidas)} requisições"
+        )
 
         # Retornar resposta com dados enriquecidos
 
         return {
-
             "dat": {
-
                 "sucesso": 1,
-
                 "lista": requisicoes_enriquecidas,
-
                 "total": len(requisicoes_enriquecidas),
-
                 "modo": "detalhado_enriquecido",
-
                 "avisos": [
-
                     "Dados do paciente (dtaNasc, sexo, rg, endereço) vêm do OCR ou devem ser preenchidos manualmente",
-
                     "Dados primários garantidos: codRequisicao, CPF, nome do paciente, data da coleta",
-
-                    f"Total de {len(requisicoes_enriquecidas)} requisições foram consultadas (TODAS as páginas)"
-
-                ]
-
+                    f"Total de {len(requisicoes_enriquecidas)} requisições foram consultadas (TODAS as páginas)",
+                ],
             }
-
         }
-
-        
 
     except Exception as e:
 
@@ -4653,33 +4247,16 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
 
         logger.error(f"[ListagemDetalhada] Traceback: {traceback.format_exc()}")
 
-        return {
-
-            "dat": {
-
-                "sucesso": 0,
-
-                "erro": str(e),
-
-                "modo": "detalhado_enriquecido"
-
-            }
-
-        }
+        return {"dat": {"sucesso": 0, "erro": str(e), "modo": "detalhado_enriquecido"}}
 
 
-
-
-
-@app.route('/api/requisicoes/listar', methods=['POST'])
-
+@app.route("/api/requisicoes/listar", methods=["POST"])
 def listar_requisicoes():
-
     """
 
     Lista requisições do apLIS com dados PRIMÁRIOS e COMPLEMENTARES
 
-    
+
 
     Esta função integra duas metodologias:
 
@@ -4687,7 +4264,7 @@ def listar_requisicoes():
 
     2. COMPLEMENTAR: Informações adicionais (médico, convênio, local origem, etc)
 
-    
+
 
     Exemplo de requisição:
 
@@ -4703,7 +4280,7 @@ def listar_requisicoes():
 
     }
 
-    
+
 
     Resposta:
 
@@ -4749,77 +4326,68 @@ def listar_requisicoes():
 
         dados = request.json
 
-        
+        id_evento = dados.get("idEvento")
 
-        id_evento = dados.get('idEvento')
+        periodo_ini = dados.get("periodoIni")
 
-        periodo_ini = dados.get('periodoIni')
+        periodo_fim = dados.get("periodoFim")
 
-        periodo_fim = dados.get('periodoFim')
-
-        enriquecer = dados.get('enriquecer', True)  # Padrão: ativo
-
-        
+        enriquecer = dados.get("enriquecer", True)  # Padrão: ativo
 
         if not all([id_evento, periodo_ini, periodo_fim]):
 
-            return jsonify({
+            return (
+                jsonify(
+                    {
+                        "sucesso": 0,
+                        "erro": "Campos obrigatórios: idEvento, periodoIni, periodoFim",
+                    }
+                ),
+                400,
+            )
 
-                "sucesso": 0,
-
-                "erro": "Campos obrigatórios: idEvento, periodoIni, periodoFim"
-
-            }), 400
-
-        
-
-        logger.info(f"[ListagemEndpoint] Requisição com enriquecimento={'ativo' if enriquecer else 'inativo'}")
-
-        
+        logger.info(
+            f"[ListagemEndpoint] Requisição com enriquecimento={'ativo' if enriquecer else 'inativo'}"
+        )
 
         # Usar função integrada que combina primário + complementar
 
-        resposta = listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquecer)
+        resposta = listar_requisicoes_detalhadas(
+            id_evento, periodo_ini, periodo_fim, enriquecer
+        )
 
-        
-
-        return jsonify({
-
-            "sucesso": 1 if resposta.get("dat", {}).get("sucesso") == 1 else 0,
-
-            "dados": resposta.get("dat", {}),
-
-            "mensagem": "Listagem obtida com sucesso (dados primários + complementares)" if resposta.get("dat", {}).get("sucesso") == 1 else "Erro ao listar"
-
-        }), 200
-
-        
+        return (
+            jsonify(
+                {
+                    "sucesso": 1 if resposta.get("dat", {}).get("sucesso") == 1 else 0,
+                    "dados": resposta.get("dat", {}),
+                    "mensagem": (
+                        "Listagem obtida com sucesso (dados primários + complementares)"
+                        if resposta.get("dat", {}).get("sucesso") == 1
+                        else "Erro ao listar"
+                    ),
+                }
+            ),
+            200,
+        )
 
     except Exception as e:
 
         logger.error(f"[ListagemEndpoint] Erro: {str(e)}")
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": f"Erro ao listar requisições: {str(e)}"
-
-        }), 500
+        return (
+            jsonify({"sucesso": 0, "erro": f"Erro ao listar requisições: {str(e)}"}),
+            500,
+        )
 
 
-
-
-
-@app.route('/api/requisicao/<cod_requisicao>', methods=['GET'])
-
+@app.route("/api/requisicao/<cod_requisicao>", methods=["GET"])
 def buscar_requisicao(cod_requisicao):
-
     """
 
     âœ… INTEGRALIZADO: Busca dados COMPLETOS de uma requisição
 
-    
+
 
     AGORA INTEGRA:
 
@@ -4831,7 +4399,7 @@ def buscar_requisicao(cod_requisicao):
 
     4. DADOS OCR: Vazios até processamento (preenchidos depois)
 
-    
+
 
     Retorna estrutura única com todos os dados necessários para o frontend.
 
@@ -4839,9 +4407,9 @@ def buscar_requisicao(cod_requisicao):
 
     try:
 
-        logger.info(f"[BuscarIntegrado] Iniciando busca para requisição: {cod_requisicao}")
-
-
+        logger.info(
+            f"[BuscarIntegrado] Iniciando busca para requisição: {cod_requisicao}"
+        )
 
         # âœ… NOVA ESTRATÃ‰GIA: Busca DIRETA por código (SEM período específico)
 
@@ -4849,45 +4417,43 @@ def buscar_requisicao(cod_requisicao):
 
         logger.info(f"[BuscarIntegrado] Tentando busca direta por código...")
 
-        
-
         # PASSO 1: Busca direta usando código como filtro (SEM período)
 
-        dat_direto = {
-
-            "idEvento": "50",
-
-            "codRequisicao": cod_requisicao
-
-        }
-
-        
+        dat_direto = {"idEvento": "50", "codRequisicao": cod_requisicao}
 
         resposta_direta = fazer_requisicao_aplis("requisicaoListar", dat_direto)
 
-        
-
         # Log detalhado da resposta para debug
 
-        logger.info(f"[BuscarIntegrado] ==================== RESPOSTA APLIS ====================")
+        logger.info(
+            f"[BuscarIntegrado] ==================== RESPOSTA APLIS ===================="
+        )
 
         logger.info(f"[BuscarIntegrado] [DEBUG] Resposta COMPLETA: {resposta_direta}")
 
-        logger.info(f"[BuscarIntegrado] [DEBUG] Chaves da resposta: {list(resposta_direta.keys())}")
+        logger.info(
+            f"[BuscarIntegrado] [DEBUG] Chaves da resposta: {list(resposta_direta.keys())}"
+        )
 
-        logger.info(f"[BuscarIntegrado] [DEBUG] Resposta dat: {resposta_direta.get('dat', {})}")
+        logger.info(
+            f"[BuscarIntegrado] [DEBUG] Resposta dat: {resposta_direta.get('dat', {})}"
+        )
 
-        logger.info(f"[BuscarIntegrado] [DEBUG] Sucesso: {resposta_direta.get('dat', {}).get('sucesso')}")
+        logger.info(
+            f"[BuscarIntegrado] [DEBUG] Sucesso: {resposta_direta.get('dat', {}).get('sucesso')}"
+        )
 
-        logger.info(f"[BuscarIntegrado] [DEBUG] Tamanho da lista: {len(resposta_direta.get('dat', {}).get('lista', []))}")
+        logger.info(
+            f"[BuscarIntegrado] [DEBUG] Tamanho da lista: {len(resposta_direta.get('dat', {}).get('lista', []))}"
+        )
 
         logger.info(f"[BuscarIntegrado] [DEBUG] Erro: {resposta_direta.get('erro')}")
 
         logger.info(f"[BuscarIntegrado] [DEBUG] Texto: {resposta_direta.get('texto')}")
 
-        logger.info(f"[BuscarIntegrado] ========================================================")
-
-        
+        logger.info(
+            f"[BuscarIntegrado] ========================================================"
+        )
 
         # Verificar se encontrou direto
 
@@ -4897,75 +4463,98 @@ def buscar_requisicao(cod_requisicao):
 
             logger.info(f"[BuscarIntegrado] âœ… API retornou sucesso=1")
 
-            logger.info(f"[BuscarIntegrado] ðŸ“Š Quantidade de requisições retornadas: {len(lista_direta)}")
-
-            
+            logger.info(
+                f"[BuscarIntegrado] ðŸ“Š Quantidade de requisições retornadas: {len(lista_direta)}"
+            )
 
             if lista_direta and len(lista_direta) > 0:
 
                 cod_requisicao_str = str(cod_requisicao).strip()
                 dados_aplis = next(
-                    (item for item in lista_direta if str(item.get('CodRequisicao', '')).strip() == cod_requisicao_str),
-                    None
+                    (
+                        item
+                        for item in lista_direta
+                        if str(item.get("CodRequisicao", "")).strip()
+                        == cod_requisicao_str
+                    ),
+                    None,
                 )
 
                 if not dados_aplis:
-                    logger.warning(f"[BuscarIntegrado] âš ️ Nenhuma correspondência EXATA para: {cod_requisicao_str}")
-                    logger.warning(f"[BuscarIntegrado] âš ️ Ignorando resultados aproximados para evitar carregar requisição errada")
-                    return jsonify({
-                        "sucesso": 0,
-                        "erro": f"Código de requisição inválido: {cod_requisicao_str}"
-                    }), 404
+                    logger.warning(
+                        f"[BuscarIntegrado] âš ️ Nenhuma correspondência EXATA para: {cod_requisicao_str}"
+                    )
+                    logger.warning(
+                        f"[BuscarIntegrado] âš ️ Ignorando resultados aproximados para evitar carregar requisição errada"
+                    )
+                    return (
+                        jsonify(
+                            {
+                                "sucesso": 0,
+                                "erro": f"Código de requisição inválido: {cod_requisicao_str}",
+                            }
+                        ),
+                        404,
+                    )
 
-                logger.info(f"[BuscarIntegrado] âœ… Requisição encontrada por busca direta (correspondência exata)!")
-
-                
+                logger.info(
+                    f"[BuscarIntegrado] âœ… Requisição encontrada por busca direta (correspondência exata)!"
+                )
 
                 # LOG DETALHADO DOS DADOS BRUTOS DO apLIS
 
                 logger.info(f"[BuscarIntegrado] ðŸ“‹ DADOS BRUTOS DO apLIS:")
 
-                logger.info(f"[BuscarIntegrado] ðŸ” TODAS AS CHAVES RETORNADAS: {list(dados_aplis.keys())}")
+                logger.info(
+                    f"[BuscarIntegrado] ðŸ” TODAS AS CHAVES RETORNADAS: {list(dados_aplis.keys())}"
+                )
 
-                logger.info(f"[BuscarIntegrado] ðŸ” DADOS COMPLETOS (JSON): {dados_aplis}")
+                logger.info(
+                    f"[BuscarIntegrado] ðŸ” DADOS COMPLETOS (JSON): {dados_aplis}"
+                )
 
-                logger.info(f"[BuscarIntegrado]   - IdConvenio: {dados_aplis.get('IdConvenio')} (tipo: {type(dados_aplis.get('IdConvenio'))})")
+                logger.info(
+                    f"[BuscarIntegrado]   - IdConvenio: {dados_aplis.get('IdConvenio')} (tipo: {type(dados_aplis.get('IdConvenio'))})"
+                )
 
-                logger.info(f"[BuscarIntegrado]   - IdLocalOrigem: {dados_aplis.get('IdLocalOrigem')} (tipo: {type(dados_aplis.get('IdLocalOrigem'))})")
+                logger.info(
+                    f"[BuscarIntegrado]   - IdLocalOrigem: {dados_aplis.get('IdLocalOrigem')} (tipo: {type(dados_aplis.get('IdLocalOrigem'))})"
+                )
 
-                logger.info(f"[BuscarIntegrado]   - IdFontePagadora: {dados_aplis.get('IdFontePagadora')} (tipo: {type(dados_aplis.get('IdFontePagadora'))})")
+                logger.info(
+                    f"[BuscarIntegrado]   - IdFontePagadora: {dados_aplis.get('IdFontePagadora')} (tipo: {type(dados_aplis.get('IdFontePagadora'))})"
+                )
 
-                logger.info(f"[BuscarIntegrado]   - NomeConvenio: {dados_aplis.get('NomeConvenio')}")
+                logger.info(
+                    f"[BuscarIntegrado]   - NomeConvenio: {dados_aplis.get('NomeConvenio')}"
+                )
 
-                logger.info(f"[BuscarIntegrado]   - NomeFontePagadora: {dados_aplis.get('NomeFontePagadora')}")
+                logger.info(
+                    f"[BuscarIntegrado]   - NomeFontePagadora: {dados_aplis.get('NomeFontePagadora')}"
+                )
 
-                logger.info(f"[BuscarIntegrado]   - NumGuiaConvenio: {dados_aplis.get('NumGuiaConvenio')}")
+                logger.info(
+                    f"[BuscarIntegrado]   - NumGuiaConvenio: {dados_aplis.get('NumGuiaConvenio')}"
+                )
 
-                logger.info(f"[BuscarIntegrado]   - NumExterno: {dados_aplis.get('NumExterno')}")
-
-                
+                logger.info(
+                    f"[BuscarIntegrado]   - NumExterno: {dados_aplis.get('NumExterno')}"
+                )
 
                 # ðŸ†• BUSCAR VARIAÃ‡Ã•ES DO CAMPO (pode ter nome diferente)
 
                 num_guia_variacoes = [
-
-                    dados_aplis.get('NumGuiaConvenio'),
-
-                    dados_aplis.get('NumExterno'),
-
-                    dados_aplis.get('numGuiaConvenio'),
-
-                    dados_aplis.get('numGuia'),
-
-                    dados_aplis.get('GuiaConvenio'),
-
-                    dados_aplis.get('NumGuia')
-
+                    dados_aplis.get("NumGuiaConvenio"),
+                    dados_aplis.get("NumExterno"),
+                    dados_aplis.get("numGuiaConvenio"),
+                    dados_aplis.get("numGuia"),
+                    dados_aplis.get("GuiaConvenio"),
+                    dados_aplis.get("NumGuia"),
                 ]
 
-                logger.info(f"[BuscarIntegrado] ðŸŽ« VARIAÃ‡Ã•ES DE NumGuia encontradas: {[v for v in num_guia_variacoes if v]}")
-
-                
+                logger.info(
+                    f"[BuscarIntegrado] ðŸŽ« VARIAÃ‡Ã•ES DE NumGuia encontradas: {[v for v in num_guia_variacoes if v]}"
+                )
 
                 # PASSO 2: Buscar imagens no S3
 
@@ -4973,109 +4562,102 @@ def buscar_requisicao(cod_requisicao):
 
                 s3_client = get_s3_client()
 
-
-
                 if s3_client:
 
                     try:
 
-                        prefixo_lab = cod_requisicao[:4] if len(cod_requisicao) >= 4 else '0040'
-
-                        caminho_s3_base = f"lab/Arquivos/Foto/{prefixo_lab}/{cod_requisicao}"
-
-
-
-                        logger.info(f"[BuscarIntegrado][S3] Buscando imagens em: {caminho_s3_base}")
-
-
-
-                        response_s3 = s3_client.list_objects_v2(
-
-                            Bucket=S3_BUCKET,
-
-                            Prefix=caminho_s3_base
-
+                        prefixo_lab = (
+                            cod_requisicao[:4] if len(cod_requisicao) >= 4 else "0040"
                         )
 
+                        caminho_s3_base = (
+                            f"lab/Arquivos/Foto/{prefixo_lab}/{cod_requisicao}"
+                        )
 
+                        logger.info(
+                            f"[BuscarIntegrado][S3] Buscando imagens em: {caminho_s3_base}"
+                        )
 
-                        if 'Contents' in response_s3:
+                        response_s3 = s3_client.list_objects_v2(
+                            Bucket=S3_BUCKET, Prefix=caminho_s3_base
+                        )
 
-                            for obj in response_s3['Contents']:
+                        if "Contents" in response_s3:
 
-                                key = obj['Key']
+                            for obj in response_s3["Contents"]:
 
-                                filename = key.split('/')[-1]
+                                key = obj["Key"]
 
+                                filename = key.split("/")[-1]
 
-
-                                if not filename or not filename.startswith(cod_requisicao):
+                                if not filename or not filename.startswith(
+                                    cod_requisicao
+                                ):
 
                                     continue
 
-
-
                                 try:
 
-                                    arquivo_local = os.path.join(TEMP_IMAGES_DIR, filename)
-
-
+                                    arquivo_local = os.path.join(
+                                        TEMP_IMAGES_DIR, filename
+                                    )
 
                                     if not os.path.exists(arquivo_local):
 
-                                        logger.info(f"[BuscarIntegrado][S3] Baixando: {key}")
+                                        logger.info(
+                                            f"[BuscarIntegrado][S3] Baixando: {key}"
+                                        )
 
-                                        s3_client.download_file(S3_BUCKET, key, arquivo_local)
+                                        s3_client.download_file(
+                                            S3_BUCKET, key, arquivo_local
+                                        )
 
                                     else:
 
-                                        logger.debug(f"[BuscarIntegrado][S3] Já em cache: {filename}")
+                                        logger.debug(
+                                            f"[BuscarIntegrado][S3] Já em cache: {filename}"
+                                        )
 
-
-
-                                    base_url = request.host_url.rstrip('/')
+                                    base_url = request.host_url.rstrip("/")
 
                                     url_local = f"{base_url}/api/imagem/{filename}"
 
-
-
-                                    imagens.append({
-
-                                        "nome": filename,
-
-                                        "url": url_local,
-
-                                        "tamanho": obj['Size'],
-
-                                        "dataCadastro": obj['LastModified'].isoformat()
-
-                                    })
-
-
+                                    imagens.append(
+                                        {
+                                            "nome": filename,
+                                            "url": url_local,
+                                            "tamanho": obj["Size"],
+                                            "dataCadastro": obj[
+                                                "LastModified"
+                                            ].isoformat(),
+                                        }
+                                    )
 
                                 except Exception as e:
 
-                                    logger.error(f"[BuscarIntegrado][S3] Erro ao processar {filename}: {e}")
+                                    logger.error(
+                                        f"[BuscarIntegrado][S3] Erro ao processar {filename}: {e}"
+                                    )
 
-
-
-                            logger.info(f"[BuscarIntegrado][S3] âœ… Encontradas {len(imagens)} imagens")
+                            logger.info(
+                                f"[BuscarIntegrado][S3] âœ… Encontradas {len(imagens)} imagens"
+                            )
 
                         else:
 
-                            logger.info(f"[BuscarIntegrado][S3] Nenhuma imagem em {caminho_s3_base}")
-
-
+                            logger.info(
+                                f"[BuscarIntegrado][S3] Nenhuma imagem em {caminho_s3_base}"
+                            )
 
                     except Exception as e:
 
-                        logger.error(f"[BuscarIntegrado][S3] Erro ao buscar imagens: {str(e)}")
+                        logger.error(
+                            f"[BuscarIntegrado][S3] Erro ao buscar imagens: {str(e)}"
+                        )
 
                 else:
 
                     logger.warning("[BuscarIntegrado][S3] Cliente S3 não disponível")
-
-
 
                 # PASSO 3: ðŸ†• BUSCAR DADOS DO requisicaoResultado (SEMPRE tentar, independente do status)
 
@@ -5085,37 +4667,43 @@ def buscar_requisicao(cod_requisicao):
 
                 dados_resultado = None
 
-                status_exame = dados_aplis.get("StatusExame")  # 0=andamento, 1=concluído, 2=cancelado
+                status_exame = dados_aplis.get(
+                    "StatusExame"
+                )  # 0=andamento, 1=concluído, 2=cancelado
 
-
-
-                logger.info(f"[BuscarIntegrado] ðŸ“‹ Tentando buscar dados complementares do requisicaoResultado...")
+                logger.info(
+                    f"[BuscarIntegrado] ðŸ“‹ Tentando buscar dados complementares do requisicaoResultado..."
+                )
 
                 dat_resultado = {"codRequisicao": cod_requisicao}
 
-                resposta_resultado = fazer_requisicao_aplis("requisicaoResultado", dat_resultado)
-
-
+                resposta_resultado = fazer_requisicao_aplis(
+                    "requisicaoResultado", dat_resultado
+                )
 
                 if resposta_resultado.get("dat", {}).get("sucesso") == 1:
 
                     dados_resultado = resposta_resultado.get("dat", {})
 
-                    logger.info(f"[BuscarIntegrado] âœ… Dados complementares obtidos do requisicaoResultado!")
-
-                    
+                    logger.info(
+                        f"[BuscarIntegrado] âœ… Dados complementares obtidos do requisicaoResultado!"
+                    )
 
                     # ðŸ†• LOG COMPLETO DO requisicaoResultado
 
-                    logger.info(f"[BuscarIntegrado] ðŸ” CHAVES DO requisicaoResultado: {list(dados_resultado.keys())}")
+                    logger.info(
+                        f"[BuscarIntegrado] ðŸ” CHAVES DO requisicaoResultado: {list(dados_resultado.keys())}"
+                    )
 
                     if dados_resultado.get("requisicao"):
 
-                        logger.info(f"[BuscarIntegrado] ðŸ” CHAVES DE requisicao: {list(dados_resultado['requisicao'].keys())}")
+                        logger.info(
+                            f"[BuscarIntegrado] ðŸ” CHAVES DE requisicao: {list(dados_resultado['requisicao'].keys())}"
+                        )
 
-                        logger.info(f"[BuscarIntegrado] ðŸ” DADOS COMPLETOS DE requisicao: {dados_resultado['requisicao']}")
-
-
+                        logger.info(
+                            f"[BuscarIntegrado] ðŸ” DADOS COMPLETOS DE requisicao: {dados_resultado['requisicao']}"
+                        )
 
                     # Extrair localOrigem do resultado
 
@@ -5123,9 +4711,9 @@ def buscar_requisicao(cod_requisicao):
 
                         local_origem_resultado = dados_resultado["localOrigem"]
 
-                        logger.info(f"[BuscarIntegrado] ðŸ¥ Local de Origem: {local_origem_resultado.get('nome')}")
-
-
+                        logger.info(
+                            f"[BuscarIntegrado] ðŸ¥ Local de Origem: {local_origem_resultado.get('nome')}"
+                        )
 
                     # Extrair convênio do resultado
 
@@ -5133,39 +4721,31 @@ def buscar_requisicao(cod_requisicao):
 
                         convenio_resultado = dados_resultado["paciente"]["convenio"]
 
-                        logger.info(f"[BuscarIntegrado] ðŸ’³ Convênio: {convenio_resultado}")
-
-                    
+                        logger.info(
+                            f"[BuscarIntegrado] ðŸ’³ Convênio: {convenio_resultado}"
+                        )
 
                     # Extrair NumGuia do resultado (se disponível) - BUSCAR EM VÁRIOS LUGARES
 
                     num_guia_resultado = None
-
-                    
 
                     # Tentar várias localizações possíveis
 
                     if dados_resultado.get("requisicao"):
 
                         num_guia_resultado = (
-
-                            dados_resultado["requisicao"].get("numGuia") or
-
-                            dados_resultado["requisicao"].get("NumGuiaConvenio") or
-
-                            dados_resultado["requisicao"].get("numGuiaConvenio") or
-
-                            dados_resultado["requisicao"].get("GuiaConvenio") or
-
-                            dados_resultado["requisicao"].get("NumExterno")
-
+                            dados_resultado["requisicao"].get("numGuia")
+                            or dados_resultado["requisicao"].get("NumGuiaConvenio")
+                            or dados_resultado["requisicao"].get("numGuiaConvenio")
+                            or dados_resultado["requisicao"].get("GuiaConvenio")
+                            or dados_resultado["requisicao"].get("NumExterno")
                         )
-
-                    
 
                     if num_guia_resultado:
 
-                        logger.info(f"[BuscarIntegrado] ðŸŽ« NumGuia do resultado: {num_guia_resultado}")
+                        logger.info(
+                            f"[BuscarIntegrado] ðŸŽ« NumGuia do resultado: {num_guia_resultado}"
+                        )
 
                         # Atualizar dados_aplis se estiver vazio
 
@@ -5173,29 +4753,39 @@ def buscar_requisicao(cod_requisicao):
 
                             dados_aplis["NumGuiaConvenio"] = num_guia_resultado
 
-                            logger.info(f"[BuscarIntegrado] âœ… NumGuia atualizado de requisicaoResultado")
+                            logger.info(
+                                f"[BuscarIntegrado] âœ… NumGuia atualizado de requisicaoResultado"
+                            )
 
                     else:
 
-                        logger.warning(f"[BuscarIntegrado] âš ️ NumGuia não encontrado em requisicaoResultado")
+                        logger.warning(
+                            f"[BuscarIntegrado] âš ️ NumGuia não encontrado em requisicaoResultado"
+                        )
 
                 else:
 
-                    logger.warning(f"[BuscarIntegrado] âš ️ requisicaoResultado não disponível (StatusExame={status_exame})")
+                    logger.warning(
+                        f"[BuscarIntegrado] âš ️ requisicaoResultado não disponível (StatusExame={status_exame})"
+                    )
 
                     if status_exame == 0:
 
-                        logger.info(f"[BuscarIntegrado] â„¹️ Requisição em andamento - dados complementares virão quando finalizar")
-
-
+                        logger.info(
+                            f"[BuscarIntegrado] â„¹️ Requisição em andamento - dados complementares virão quando finalizar"
+                        )
 
                 # PASSO 3.5: ðŸ†• BUSCAR NumGuiaConvenio DIRETO DO BANCO (fallback se apLIS não retornar)
 
                 num_guia_banco = None
 
-                if not dados_aplis.get("NumGuiaConvenio") and not dados_aplis.get("NumExterno"):
+                if not dados_aplis.get("NumGuiaConvenio") and not dados_aplis.get(
+                    "NumExterno"
+                ):
 
-                    logger.info(f"[BuscarIntegrado] ðŸ” NumGuia vazio no apLIS, buscando no banco...")
+                    logger.info(
+                        f"[BuscarIntegrado] ðŸ” NumGuia vazio no apLIS, buscando no banco..."
+                    )
 
                     try:
 
@@ -5203,35 +4793,35 @@ def buscar_requisicao(cod_requisicao):
 
                         cursor = connection.cursor(pymysql.cursors.DictCursor)
 
-                        
-
                         query = "SELECT NumGuiaConvenio, NumExterno FROM newdb.requisicao WHERE CodRequisicao = %s LIMIT 1"
 
-                        logger.info(f"[BuscarIntegrado] ðŸ” Query SQL: {query} (CodRequisicao={cod_requisicao})")
+                        logger.info(
+                            f"[BuscarIntegrado] ðŸ” Query SQL: {query} (CodRequisicao={cod_requisicao})"
+                        )
 
                         cursor.execute(query, (cod_requisicao,))
 
                         resultado_guia = cursor.fetchone()
 
-                        
-
-                        logger.info(f"[BuscarIntegrado] ðŸ” Resultado SQL: {resultado_guia}")
-
-                        
+                        logger.info(
+                            f"[BuscarIntegrado] ðŸ” Resultado SQL: {resultado_guia}"
+                        )
 
                         cursor.close()
 
                         connection.close()
 
-                        
-
                         if resultado_guia:
 
-                            num_guia_banco = resultado_guia.get("NumGuiaConvenio") or resultado_guia.get("NumExterno")
+                            num_guia_banco = resultado_guia.get(
+                                "NumGuiaConvenio"
+                            ) or resultado_guia.get("NumExterno")
 
                             if num_guia_banco:
 
-                                logger.info(f"[BuscarIntegrado] âœ… NumGuia encontrado no banco: {num_guia_banco}")
+                                logger.info(
+                                    f"[BuscarIntegrado] âœ… NumGuia encontrado no banco: {num_guia_banco}"
+                                )
 
                                 # Atualizar dados_aplis para usar depois
 
@@ -5239,15 +4829,21 @@ def buscar_requisicao(cod_requisicao):
 
                             else:
 
-                                logger.warning(f"[BuscarIntegrado] âš ️ NumGuia também está vazio no banco (NumGuiaConvenio={resultado_guia.get('NumGuiaConvenio')}, NumExterno={resultado_guia.get('NumExterno')})")
+                                logger.warning(
+                                    f"[BuscarIntegrado] âš ️ NumGuia também está vazio no banco (NumGuiaConvenio={resultado_guia.get('NumGuiaConvenio')}, NumExterno={resultado_guia.get('NumExterno')})"
+                                )
 
                         else:
 
-                            logger.warning(f"[BuscarIntegrado] âš ️ Requisição {cod_requisicao} não encontrada no banco")
+                            logger.warning(
+                                f"[BuscarIntegrado] âš ️ Requisição {cod_requisicao} não encontrada no banco"
+                            )
 
                     except Exception as e:
 
-                        logger.error(f"[BuscarIntegrado] âŒ Erro ao buscar NumGuia no banco: {e}")
+                        logger.error(
+                            f"[BuscarIntegrado] âŒ Erro ao buscar NumGuia no banco: {e}"
+                        )
 
                         import traceback
 
@@ -5255,23 +4851,21 @@ def buscar_requisicao(cod_requisicao):
 
                 else:
 
-                    logger.info(f"[BuscarIntegrado] â„¹️ NumGuia já existe no apLIS, não buscando no banco")
-
-
+                    logger.info(
+                        f"[BuscarIntegrado] â„¹️ NumGuia já existe no apLIS, não buscando no banco"
+                    )
 
                 # PASSO 4: ðŸ†• BUSCAR DADOS COMPLETOS DO PACIENTE VIA API
 
-                logger.info(f"[BuscarIntegrado] ðŸ“¡ Buscando dados completos do paciente via API...")
+                logger.info(
+                    f"[BuscarIntegrado] ðŸ“¡ Buscando dados completos do paciente via API..."
+                )
 
                 dados_sistema_antigo = None
 
                 cod_paciente = dados_aplis.get("CodPaciente")
 
-
-
                 logger.info(f"[BuscarIntegrado] CodPaciente da API: {cod_paciente}")
-
-
 
                 # FALLBACK: Se CodPaciente veio vazio (comum em requisicoes 0200/AP),
 
@@ -5279,7 +4873,9 @@ def buscar_requisicao(cod_requisicao):
 
                 if not cod_paciente:
 
-                    logger.info(f"[BuscarIntegrado] CodPaciente vazio, buscando no banco MySQL...")
+                    logger.info(
+                        f"[BuscarIntegrado] CodPaciente vazio, buscando no banco MySQL..."
+                    )
 
                     try:
 
@@ -5287,16 +4883,11 @@ def buscar_requisicao(cod_requisicao):
 
                         _cur = _conn.cursor(pymysql.cursors.DictCursor)
 
-
-
                         # Tentativa 1: busca direta pelo codigo da requisicao
 
                         _cur.execute(
-
                             "SELECT CodPaciente FROM newdb.requisicao WHERE CodRequisicao = %s LIMIT 1",
-
-                            (cod_requisicao,)
-
+                            (cod_requisicao,),
                         )
 
                         _row = _cur.fetchone()
@@ -5307,24 +4898,27 @@ def buscar_requisicao(cod_requisicao):
 
                             dados_aplis["CodPaciente"] = cod_paciente
 
-                            logger.info(f"[BuscarIntegrado] CodPaciente encontrado pelo CodRequisicao: {cod_paciente}")
+                            logger.info(
+                                f"[BuscarIntegrado] CodPaciente encontrado pelo CodRequisicao: {cod_paciente}"
+                            )
 
                         else:
 
                             # Tentativa 2: busca pelo nome do paciente
 
-                            nome_busca = dados_aplis.get("NomPaciente") or dados_aplis.get("NomePaciente")
+                            nome_busca = dados_aplis.get(
+                                "NomPaciente"
+                            ) or dados_aplis.get("NomePaciente")
 
                             if nome_busca:
 
-                                logger.info(f"[BuscarIntegrado] Buscando CodPaciente pelo nome: '{nome_busca}'")
+                                logger.info(
+                                    f"[BuscarIntegrado] Buscando CodPaciente pelo nome: '{nome_busca}'"
+                                )
 
                                 _cur.execute(
-
                                     "SELECT CodPaciente FROM newdb.paciente WHERE UPPER(NomPaciente) = UPPER(%s) LIMIT 1",
-
-                                    (nome_busca,)
-
+                                    (nome_busca,),
                                 )
 
                                 _row = _cur.fetchone()
@@ -5335,17 +4929,21 @@ def buscar_requisicao(cod_requisicao):
 
                                     dados_aplis["CodPaciente"] = cod_paciente
 
-                                    logger.info(f"[BuscarIntegrado] CodPaciente encontrado pelo nome: {cod_paciente}")
+                                    logger.info(
+                                        f"[BuscarIntegrado] CodPaciente encontrado pelo nome: {cod_paciente}"
+                                    )
 
                                 else:
 
-                                    logger.warning(f"[BuscarIntegrado] CodPaciente nao encontrado pelo nome '{nome_busca}'")
+                                    logger.warning(
+                                        f"[BuscarIntegrado] CodPaciente nao encontrado pelo nome '{nome_busca}'"
+                                    )
 
                             else:
 
-                                logger.warning(f"[BuscarIntegrado] Sem nome disponivel para busca fallback")
-
-
+                                logger.warning(
+                                    f"[BuscarIntegrado] Sem nome disponivel para busca fallback"
+                                )
 
                         _cur.close()
 
@@ -5353,15 +4951,13 @@ def buscar_requisicao(cod_requisicao):
 
                     except Exception as e:
 
-                        logger.error(f"[BuscarIntegrado] Erro ao buscar CodPaciente no banco: {e}")
-
-
+                        logger.error(
+                            f"[BuscarIntegrado] Erro ao buscar CodPaciente no banco: {e}"
+                        )
 
                 # PRIORIDADE 1: Buscar via API (requisicaoResultado)
 
                 dados_paciente_api = buscar_dados_paciente_via_api(cod_requisicao)
-
-
 
                 # PRIORIDADE 2: Buscar no banco SQL (se necessario)
 
@@ -5371,15 +4967,11 @@ def buscar_requisicao(cod_requisicao):
 
                     dados_paciente_banco = buscar_dados_completos_paciente(cod_paciente)
 
-                
-
                 # ðŸ”€ MESCLAR dados: API tem prioridade, banco complementa o que falta
 
                 dados_finais = {}
 
                 origem_dados = []
-
-                
 
                 if dados_paciente_api:
 
@@ -5389,8 +4981,6 @@ def buscar_requisicao(cod_requisicao):
 
                     origem_dados.append("API")
 
-                
-
                 if dados_paciente_banco:
 
                     logger.info(f"[BuscarIntegrado] âœ… Dados do banco disponíveis")
@@ -5399,7 +4989,10 @@ def buscar_requisicao(cod_requisicao):
 
                     for campo, valor in dados_paciente_banco.items():
 
-                        if campo != "origem" and (not dados_finais.get(campo) or dados_finais.get(campo) is None):
+                        if campo != "origem" and (
+                            not dados_finais.get(campo)
+                            or dados_finais.get(campo) is None
+                        ):
 
                             dados_finais[campo] = valor
 
@@ -5407,67 +5000,39 @@ def buscar_requisicao(cod_requisicao):
 
                         origem_dados.append("BANCO_SQL")
 
-                
-
                 if dados_finais:
 
-                    logger.info(f"[BuscarIntegrado] âœ… Dados mesclados! Origem: {' + '.join(origem_dados)}")
-
-                    
+                    logger.info(
+                        f"[BuscarIntegrado] âœ… Dados mesclados! Origem: {' + '.join(origem_dados)}"
+                    )
 
                     # Montar estrutura dados_sistema_antigo com dados mesclados
 
                     dados_sistema_antigo = {
-
                         "dtaNasc": dados_finais.get("DtaNascimento"),
-
                         "sexo": dados_finais.get("Sexo"),
-
                         "rg": dados_finais.get("RGNumero"),
-
                         "rgOrgao": dados_finais.get("RGOrgao"),
-
                         "rgUF": dados_finais.get("RGUF"),
-
                         "nomeMae": dados_finais.get("NomMae"),
-
                         "estadoCivil": dados_finais.get("EstadoCivil"),
-
                         "passaporte": dados_finais.get("Passaporte"),
-
                         "matriculaConvenio": dados_finais.get("MatConvenio"),
-
                         "validadeMatricula": dados_finais.get("ValidadeMatricula"),
-
                         "telCelular": dados_finais.get("TelCelular"),
-
                         "telFixo": dados_finais.get("TelFixo"),
-
                         "email": dados_finais.get("Email"),
-
                         "endereco": {
-
                             "cep": dados_finais.get("Cep"),
-
                             "logradouro": dados_finais.get("Logradouro"),
-
                             "numEndereco": dados_finais.get("NumEndereco"),
-
                             "complemento": dados_finais.get("Complemento"),
-
                             "bairro": dados_finais.get("Bairro"),
-
                             "cidade": dados_finais.get("Cidade"),
-
-                            "uf": dados_finais.get("UF")
-
+                            "uf": dados_finais.get("UF"),
                         },
-
-                        "_origem": origem_dados  # Metadado para debug
-
+                        "_origem": origem_dados,  # Metadado para debug
                     }
-
-                    
 
                     # Atualizar dados principais se disponíveis
 
@@ -5481,11 +5046,11 @@ def buscar_requisicao(cod_requisicao):
 
                 else:
 
-                    logger.warning(f"[BuscarIntegrado] âš ️ Dados do paciente não encontrados (nem API nem banco)")
+                    logger.warning(
+                        f"[BuscarIntegrado] âš ️ Dados do paciente não encontrados (nem API nem banco)"
+                    )
 
                     dados_sistema_antigo = None
-
-
 
                 # PASSO 4: ðŸ†• BUSCAR IDs DO BANCO DE DADOS
 
@@ -5495,11 +5060,11 @@ def buscar_requisicao(cod_requisicao):
 
                 # Por isso, SEMPRE buscamos no banco MySQL, que é a fonte de verdade para esses IDs.
 
-                logger.info(f"[BuscarIntegrado] ðŸ—„️ Buscando IDs do banco de dados MySQL (fonte principal)...")
+                logger.info(
+                    f"[BuscarIntegrado] ðŸ—„️ Buscando IDs do banco de dados MySQL (fonte principal)..."
+                )
 
                 ids_banco = buscar_ids_banco(cod_requisicao)
-
-
 
                 # Atualizar dados_aplis com os IDs do banco
 
@@ -5507,43 +5072,49 @@ def buscar_requisicao(cod_requisicao):
 
                     dados_aplis["IdConvenio"] = ids_banco["IdConvenio"]
 
-                    logger.info(f"[BuscarIntegrado] âœ… IdConvenio do BANCO: {ids_banco['IdConvenio']}")
+                    logger.info(
+                        f"[BuscarIntegrado] âœ… IdConvenio do BANCO: {ids_banco['IdConvenio']}"
+                    )
 
                 else:
 
-                    logger.warning(f"[BuscarIntegrado] âš ️ IdConvenio NÃƒO encontrado no banco (requisição sem convênio salvo)")
-
-
+                    logger.warning(
+                        f"[BuscarIntegrado] âš ️ IdConvenio NÃƒO encontrado no banco (requisição sem convênio salvo)"
+                    )
 
                 if ids_banco.get("IdFontePagadora") is not None:
 
                     dados_aplis["IdFontePagadora"] = ids_banco["IdFontePagadora"]
 
-                    logger.info(f"[BuscarIntegrado] âœ… IdFontePagadora do BANCO: {ids_banco['IdFontePagadora']}")
+                    logger.info(
+                        f"[BuscarIntegrado] âœ… IdFontePagadora do BANCO: {ids_banco['IdFontePagadora']}"
+                    )
 
                 else:
 
-                    logger.warning(f"[BuscarIntegrado] âš ️ IdFontePagadora NÃƒO encontrada no banco (requisição sem fonte pagadora salva)")
-
-
+                    logger.warning(
+                        f"[BuscarIntegrado] âš ️ IdFontePagadora NÃƒO encontrada no banco (requisição sem fonte pagadora salva)"
+                    )
 
                 if ids_banco.get("IdLocalOrigem") is not None:
 
                     dados_aplis["IdLocalOrigem"] = ids_banco["IdLocalOrigem"]
 
-                    logger.info(f"[BuscarIntegrado] âœ… IdLocalOrigem do BANCO: {ids_banco['IdLocalOrigem']}")
+                    logger.info(
+                        f"[BuscarIntegrado] âœ… IdLocalOrigem do BANCO: {ids_banco['IdLocalOrigem']}"
+                    )
 
                 else:
 
-                    logger.warning(f"[BuscarIntegrado] âš ️ IdLocalOrigem NÃƒO encontrado no banco (requisição sem local origem salvo)")
-
-
+                    logger.warning(
+                        f"[BuscarIntegrado] âš ️ IdLocalOrigem NÃƒO encontrado no banco (requisição sem local origem salvo)"
+                    )
 
                 # PASSO 5: ðŸ†• ENRIQUECER COM DADOS DOS CSVs
 
-                logger.info(f"[BuscarIntegrado] ðŸ” Enriquecendo com dados dos CSVs...")
-
-
+                logger.info(
+                    f"[BuscarIntegrado] ðŸ” Enriquecendo com dados dos CSVs..."
+                )
 
                 # Buscar nome do médico no CSV
 
@@ -5551,19 +5122,23 @@ def buscar_requisicao(cod_requisicao):
 
                 if dados_aplis.get("CRM") and dados_aplis.get("CRMUF"):
 
-                    medico_csv = buscar_medico_por_crm(dados_aplis.get("CRM"), dados_aplis.get("CRMUF"))
+                    medico_csv = buscar_medico_por_crm(
+                        dados_aplis.get("CRM"), dados_aplis.get("CRMUF")
+                    )
 
                     if medico_csv:
 
-                        nome_medico = medico_csv['nome']
+                        nome_medico = medico_csv["nome"]
 
-                        logger.info(f"[BuscarIntegrado] âœ… Médico encontrado no CSV: {nome_medico}")
+                        logger.info(
+                            f"[BuscarIntegrado] âœ… Médico encontrado no CSV: {nome_medico}"
+                        )
 
                     else:
 
-                        logger.warning(f"[BuscarIntegrado] âš ️ Médico CRM {dados_aplis.get('CRM')}/{dados_aplis.get('CRMUF')} não encontrado no CSV")
-
-
+                        logger.warning(
+                            f"[BuscarIntegrado] âš ️ Médico CRM {dados_aplis.get('CRM')}/{dados_aplis.get('CRMUF')} não encontrado no CSV"
+                        )
 
                 # Buscar nome do convênio
 
@@ -5577,15 +5152,17 @@ def buscar_requisicao(cod_requisicao):
 
                 origem_convenio = None
 
-
-
-                if dados_resultado and dados_resultado.get("paciente", {}).get("convenio"):
+                if dados_resultado and dados_resultado.get("paciente", {}).get(
+                    "convenio"
+                ):
 
                     nome_convenio = dados_resultado["paciente"]["convenio"]
 
                     origem_convenio = "apLIS:requisicaoResultado"
 
-                    logger.info(f"[BuscarIntegrado] âœ… ðŸ’³ CONVÃŠNIO do apLIS (requisicaoResultado): '{nome_convenio}'")
+                    logger.info(
+                        f"[BuscarIntegrado] âœ… ðŸ’³ CONVÃŠNIO do apLIS (requisicaoResultado): '{nome_convenio}'"
+                    )
 
                 else:
 
@@ -5593,23 +5170,29 @@ def buscar_requisicao(cod_requisicao):
 
                         nome_convenio = _buscar_convenio_nome(id_convenio)
 
-                        origem_convenio = f"CSV via IdConvenio={id_convenio} (do banco MySQL)"
+                        origem_convenio = (
+                            f"CSV via IdConvenio={id_convenio} (do banco MySQL)"
+                        )
 
-                        logger.info(f"[BuscarIntegrado] ðŸ” ðŸ’³ CONVÃŠNIO do CSV (IdConvenio {id_convenio} do BANCO): '{nome_convenio}'")
+                        logger.info(
+                            f"[BuscarIntegrado] ðŸ” ðŸ’³ CONVÃŠNIO do CSV (IdConvenio {id_convenio} do BANCO): '{nome_convenio}'"
+                        )
 
                     else:
 
                         nome_convenio = "Não informado"
 
-                        origem_convenio = "FALLBACK - IdConvenio não disponível no banco"
+                        origem_convenio = (
+                            "FALLBACK - IdConvenio não disponível no banco"
+                        )
 
-                        logger.warning(f"[BuscarIntegrado] âš ️ ðŸ’³ CONVÃŠNIO: IdConvenio não disponível - usando fallback")
+                        logger.warning(
+                            f"[BuscarIntegrado] âš ️ ðŸ’³ CONVÃŠNIO: IdConvenio não disponível - usando fallback"
+                        )
 
-                
-
-                logger.info(f"[BuscarIntegrado] ðŸ“Š ORIGEM DO CONVÃŠNIO: {origem_convenio or 'NÃƒO ENCONTRADO'}")
-
-
+                logger.info(
+                    f"[BuscarIntegrado] ðŸ“Š ORIGEM DO CONVÃŠNIO: {origem_convenio or 'NÃƒO ENCONTRADO'}"
+                )
 
                 # Buscar nome da fonte pagadora no CSV de instituições
 
@@ -5621,15 +5204,17 @@ def buscar_requisicao(cod_requisicao):
 
                 origem_fonte = None
 
-                
-
                 if id_fonte_pagadora:
 
                     nome_fonte_pagadora = _buscar_instituicao_nome(id_fonte_pagadora)
 
-                    origem_fonte = f"CSV via IdFontePagadora={id_fonte_pagadora} (do banco MySQL)"
+                    origem_fonte = (
+                        f"CSV via IdFontePagadora={id_fonte_pagadora} (do banco MySQL)"
+                    )
 
-                    logger.info(f"[BuscarIntegrado] ðŸ” ðŸ’° FONTE PAGADORA do CSV (IdFontePagadora {id_fonte_pagadora} do BANCO): '{nome_fonte_pagadora}'")
+                    logger.info(
+                        f"[BuscarIntegrado] ðŸ” ðŸ’° FONTE PAGADORA do CSV (IdFontePagadora {id_fonte_pagadora} do BANCO): '{nome_fonte_pagadora}'"
+                    )
 
                 else:
 
@@ -5637,13 +5222,13 @@ def buscar_requisicao(cod_requisicao):
 
                     origem_fonte = "FALLBACK - IdFontePagadora não disponível no banco"
 
-                    logger.warning(f"[BuscarIntegrado] âš ️ ðŸ’° FONTE PAGADORA: IdFontePagadora não disponível - usando fallback")
+                    logger.warning(
+                        f"[BuscarIntegrado] âš ️ ðŸ’° FONTE PAGADORA: IdFontePagadora não disponível - usando fallback"
+                    )
 
-                
-
-                logger.info(f"[BuscarIntegrado] ðŸ“Š ORIGEM DA FONTE PAGADORA: {origem_fonte or 'NÃƒO ENCONTRADO'}")
-
-
+                logger.info(
+                    f"[BuscarIntegrado] ðŸ“Š ORIGEM DA FONTE PAGADORA: {origem_fonte or 'NÃƒO ENCONTRADO'}"
+                )
 
                 # Buscar nome do local de origem
 
@@ -5655,15 +5240,15 @@ def buscar_requisicao(cod_requisicao):
 
                 origem_local = None
 
-                
-
                 if dados_resultado and dados_resultado.get("localOrigem"):
 
                     nome_local_origem = dados_resultado["localOrigem"].get("nome")
 
                     origem_local = "apLIS:requisicaoResultado"
 
-                    logger.info(f"[BuscarIntegrado] âœ… ðŸ¥ LOCAL DE ORIGEM do apLIS (requisicaoResultado): '{nome_local_origem}'")
+                    logger.info(
+                        f"[BuscarIntegrado] âœ… ðŸ¥ LOCAL DE ORIGEM do apLIS (requisicaoResultado): '{nome_local_origem}'"
+                    )
 
                 else:
 
@@ -5673,49 +5258,55 @@ def buscar_requisicao(cod_requisicao):
 
                         nome_local_origem = _buscar_instituicao_nome(id_local_origem)
 
-                        origem_local = f"CSV via IdLocalOrigem={id_local_origem} (do banco MySQL)"
+                        origem_local = (
+                            f"CSV via IdLocalOrigem={id_local_origem} (do banco MySQL)"
+                        )
 
-                        logger.info(f"[BuscarIntegrado] ðŸ” ðŸ¥ LOCAL DE ORIGEM do CSV (IdLocalOrigem {id_local_origem} do BANCO): '{nome_local_origem}'")
+                        logger.info(
+                            f"[BuscarIntegrado] ðŸ” ðŸ¥ LOCAL DE ORIGEM do CSV (IdLocalOrigem {id_local_origem} do BANCO): '{nome_local_origem}'"
+                        )
 
                     else:
 
                         nome_local_origem = "Não informado"
 
-                        origem_local = "FALLBACK - IdLocalOrigem não disponível no banco"
+                        origem_local = (
+                            "FALLBACK - IdLocalOrigem não disponível no banco"
+                        )
 
-                        logger.warning(f"[BuscarIntegrado] âš ️ ðŸ¥ LOCAL DE ORIGEM: IdLocalOrigem não disponível - usando fallback")
+                        logger.warning(
+                            f"[BuscarIntegrado] âš ️ ðŸ¥ LOCAL DE ORIGEM: IdLocalOrigem não disponível - usando fallback"
+                        )
 
-                
-
-                logger.info(f"[BuscarIntegrado] ðŸ“Š ORIGEM DO LOCAL DE ORIGEM: {origem_local or 'NÃƒO ENCONTRADO'}")
-
-
+                logger.info(
+                    f"[BuscarIntegrado] ðŸ“Š ORIGEM DO LOCAL DE ORIGEM: {origem_local or 'NÃƒO ENCONTRADO'}"
+                )
 
                 # PASSO 4.5: VALIDAR CPF COM RECEITA FEDERAL
 
-                logger.info(f"[BuscarIntegrado] ðŸ” Validando CPF com Receita Federal...")
+                logger.info(
+                    f"[BuscarIntegrado] ðŸ” Validando CPF com Receita Federal..."
+                )
 
-                validacao_cpf = validar_e_corrigir_dados_cpf(dados_aplis, dados_sistema_antigo)
-
-
+                validacao_cpf = validar_e_corrigir_dados_cpf(
+                    dados_aplis, dados_sistema_antigo
+                )
 
                 # Usar dados validados da Receita Federal (se disponível)
 
-                nome_paciente_final = validacao_cpf["dados"]["nome"] or dados_aplis.get("NomPaciente")
+                nome_paciente_final = validacao_cpf["dados"]["nome"] or dados_aplis.get(
+                    "NomPaciente"
+                )
 
                 cpf_final = validacao_cpf["dados"]["cpf"] or dados_aplis.get("CPF")
 
                 data_nasc_final = validacao_cpf["dados"]["dtaNasc"]
-
-
 
                 # Se data de nascimento não veio da Receita, usar do sistema antigo
 
                 if not data_nasc_final and dados_sistema_antigo:
 
                     data_nasc_final = dados_sistema_antigo.get("dtaNasc")
-
-
 
                 # ðŸ†• PASSO 4.5.5: BUSCAR NO SUPABASE (HISTÃ“RICO)
 
@@ -5727,19 +5318,19 @@ def buscar_requisicao(cod_requisicao):
 
                     try:
 
-                        logger.info(f"[BuscarIntegrado] ðŸ” Buscando data de nascimento no histórico Supabase...")
+                        logger.info(
+                            f"[BuscarIntegrado] ðŸ” Buscando data de nascimento no histórico Supabase..."
+                        )
 
-                        resultado_supabase = supabase_manager.buscar_requisicao(cod_requisicao)
+                        resultado_supabase = supabase_manager.buscar_requisicao(
+                            cod_requisicao
+                        )
 
+                        if resultado_supabase.get("sucesso") == 1:
 
+                            dados_supabase = resultado_supabase.get("dados", {})
 
-                        if resultado_supabase.get('sucesso') == 1:
-
-                            dados_supabase = resultado_supabase.get('dados', {})
-
-                            data_nasc_supabase = dados_supabase.get('data_nascimento')
-
-
+                            data_nasc_supabase = dados_supabase.get("data_nascimento")
 
                             if data_nasc_supabase:
 
@@ -5747,55 +5338,65 @@ def buscar_requisicao(cod_requisicao):
 
                                 try:
 
-                                    data_obj = datetime.strptime(data_nasc_supabase, '%Y-%m-%d')
+                                    data_obj = datetime.strptime(
+                                        data_nasc_supabase, "%Y-%m-%d"
+                                    )
 
-                                    data_nasc_final = data_obj.strftime('%d/%m/%Y')
+                                    data_nasc_final = data_obj.strftime("%d/%m/%Y")
 
-                                    logger.info(f"[BuscarIntegrado] âœ… Data de nascimento do Supabase: {data_nasc_final}")
+                                    logger.info(
+                                        f"[BuscarIntegrado] âœ… Data de nascimento do Supabase: {data_nasc_final}"
+                                    )
 
                                 except:
 
                                     data_nasc_final = data_nasc_supabase
 
-                                    logger.info(f"[BuscarIntegrado] âœ… Data de nascimento do Supabase (formato direto): {data_nasc_final}")
+                                    logger.info(
+                                        f"[BuscarIntegrado] âœ… Data de nascimento do Supabase (formato direto): {data_nasc_final}"
+                                    )
 
                         else:
 
-                            logger.debug(f"[BuscarIntegrado] Requisição não encontrada no Supabase")
+                            logger.debug(
+                                f"[BuscarIntegrado] Requisição não encontrada no Supabase"
+                            )
 
                     except Exception as e:
 
-                        logger.warning(f"[BuscarIntegrado] Erro ao buscar no Supabase: {e}")
-
-
+                        logger.warning(
+                            f"[BuscarIntegrado] Erro ao buscar no Supabase: {e}"
+                        )
 
                 # PASSO 4.6: ðŸ†• BUSCAR REQUISIÃ‡ÃƒO CORRESPONDENTE (085 â†” 0200)
 
                 # Se esta requisição começa com 085 ou 0200, buscar dados do paciente da correspondente
 
-                logger.info(f"[BuscarIntegrado] Verificando requisicao correspondente (085 <-> 0200)...")
+                logger.info(
+                    f"[BuscarIntegrado] Verificando requisicao correspondente (085 <-> 0200)..."
+                )
 
-                logger.info(f"[BuscarIntegrado] Codigo da requisicao para sincronizacao: {cod_requisicao}")
-
-
+                logger.info(
+                    f"[BuscarIntegrado] Codigo da requisicao para sincronizacao: {cod_requisicao}"
+                )
 
                 # ESTRATÃ‰GIA: Tentar banco primeiro (mais rápido), depois apLIS (fallback)
 
                 req_correspondente = buscar_requisicao_correspondente(cod_requisicao)
 
-
-
                 if not req_correspondente:
 
-                    logger.info(f"[BuscarIntegrado] âš ️ Não encontrada no banco, tentando buscar do apLIS...")
+                    logger.info(
+                        f"[BuscarIntegrado] âš ️ Não encontrada no banco, tentando buscar do apLIS..."
+                    )
 
-                    req_correspondente = buscar_requisicao_correspondente_aplis(cod_requisicao)
+                    req_correspondente = buscar_requisicao_correspondente_aplis(
+                        cod_requisicao
+                    )
 
-
-
-                logger.info(f"[BuscarIntegrado] Resultado da busca correspondente: {req_correspondente is not None}")
-
-
+                logger.info(
+                    f"[BuscarIntegrado] Resultado da busca correspondente: {req_correspondente is not None}"
+                )
 
                 if req_correspondente:
 
@@ -5803,53 +5404,55 @@ def buscar_requisicao(cod_requisicao):
 
                     # Isso garante que 085 e 0200 tenham EXATAMENTE os mesmos dados de paciente
 
-                    logger.info(f"[BuscarIntegrado] ðŸ”„ Sincronizando dados do paciente com requisição correspondente...")
-
-
+                    logger.info(
+                        f"[BuscarIntegrado] ðŸ”„ Sincronizando dados do paciente com requisição correspondente..."
+                    )
 
                     # Se não tem nome ou CPF, usar da correspondente
 
-                    if not nome_paciente_final and req_correspondente.get("NomePaciente"):
+                    if not nome_paciente_final and req_correspondente.get(
+                        "NomePaciente"
+                    ):
 
                         nome_paciente_final = req_correspondente["NomePaciente"]
 
-                        logger.info(f"[BuscarIntegrado] âœ… Nome do paciente sincronizado: {nome_paciente_final}")
-
-
+                        logger.info(
+                            f"[BuscarIntegrado] âœ… Nome do paciente sincronizado: {nome_paciente_final}"
+                        )
 
                     if not cpf_final and req_correspondente.get("CPF"):
 
                         cpf_final = req_correspondente["CPF"]
 
-                        logger.info(f"[BuscarIntegrado] âœ… CPF sincronizado: {cpf_final}")
-
-
+                        logger.info(
+                            f"[BuscarIntegrado] âœ… CPF sincronizado: {cpf_final}"
+                        )
 
                     if not data_nasc_final and req_correspondente.get("DtaNasc"):
 
                         data_nasc_final = req_correspondente["DtaNasc"]
 
-                        logger.info(f"[BuscarIntegrado] âœ… Data nascimento sincronizada: {data_nasc_final}")
-
-
+                        logger.info(
+                            f"[BuscarIntegrado] âœ… Data nascimento sincronizada: {data_nasc_final}"
+                        )
 
                     # Sincronizar CodPaciente (idPaciente) da requisição correspondente
 
-                    if not dados_aplis.get("CodPaciente") and req_correspondente.get("CodPaciente"):
+                    if not dados_aplis.get("CodPaciente") and req_correspondente.get(
+                        "CodPaciente"
+                    ):
 
                         dados_aplis["CodPaciente"] = req_correspondente["CodPaciente"]
 
-                        logger.info(f"[BuscarIntegrado] âœ… CodPaciente sincronizado da correspondente: {dados_aplis['CodPaciente']}")
-
-
+                        logger.info(
+                            f"[BuscarIntegrado] âœ… CodPaciente sincronizado da correspondente: {dados_aplis['CodPaciente']}"
+                        )
 
                     # Atualizar dados_sistema_antigo com os dados da correspondente
 
                     if not dados_sistema_antigo:
 
                         dados_sistema_antigo = {}
-
-
 
                     # Sincronizar TODOS os campos do paciente
 
@@ -5871,7 +5474,9 @@ def buscar_requisicao(cod_requisicao):
 
                     if req_correspondente.get("TelCelular"):
 
-                        dados_sistema_antigo["telCelular"] = req_correspondente["TelCelular"]
+                        dados_sistema_antigo["telCelular"] = req_correspondente[
+                            "TelCelular"
+                        ]
 
                     if req_correspondente.get("TelFixo"):
 
@@ -5883,68 +5488,71 @@ def buscar_requisicao(cod_requisicao):
 
                     if req_correspondente.get("EstadoCivil"):
 
-                        dados_sistema_antigo["estadoCivil"] = req_correspondente["EstadoCivil"]
+                        dados_sistema_antigo["estadoCivil"] = req_correspondente[
+                            "EstadoCivil"
+                        ]
 
                     if req_correspondente.get("Passaporte"):
 
-                        dados_sistema_antigo["passaporte"] = req_correspondente["Passaporte"]
+                        dados_sistema_antigo["passaporte"] = req_correspondente[
+                            "Passaporte"
+                        ]
 
                     if req_correspondente.get("MatConvenio"):
 
-                        dados_sistema_antigo["matriculaConvenio"] = req_correspondente["MatConvenio"]
+                        dados_sistema_antigo["matriculaConvenio"] = req_correspondente[
+                            "MatConvenio"
+                        ]
 
                     if req_correspondente.get("ValidadeMatricula"):
 
-                        dados_sistema_antigo["validadeMatricula"] = req_correspondente["ValidadeMatricula"]
-
-
+                        dados_sistema_antigo["validadeMatricula"] = req_correspondente[
+                            "ValidadeMatricula"
+                        ]
 
                     # Endereço completo
 
                     dados_sistema_antigo["endereco"] = {
-
                         "cep": req_correspondente.get("CEP"),
-
                         "logradouro": req_correspondente.get("Logradouro"),
-
                         "numEndereco": req_correspondente.get("NumEndereco"),
-
                         "complemento": req_correspondente.get("Complemento"),
-
                         "bairro": req_correspondente.get("Bairro"),
-
                         "cidade": req_correspondente.get("Cidade"),
-
-                        "uf": req_correspondente.get("UF")
-
+                        "uf": req_correspondente.get("UF"),
                     }
 
+                    logger.info(
+                        f"[BuscarIntegrado] âœ… Dados do paciente sincronizados com sucesso!"
+                    )
 
-
-                    logger.info(f"[BuscarIntegrado] âœ… Dados do paciente sincronizados com sucesso!")
-
-                    logger.info(f"[BuscarIntegrado]    Sincronizados: RG, telefones, mae, estado civil, endereco completo, matricula convenio")
+                    logger.info(
+                        f"[BuscarIntegrado]    Sincronizados: RG, telefones, mae, estado civil, endereco completo, matricula convenio"
+                    )
 
                     # ===== BUSCAR IMAGENS DO CODIGO PAR NO S3 =====
                     # Se o paciente tem dois codigos (0085 + 0200), buscar imagens dos dois
                     cod_par = str(req_correspondente.get("CodRequisicao") or "")
                     if cod_par and cod_par != cod_requisicao and s3_client:
                         try:
-                            prefixo_par = cod_par[:4] if len(cod_par) >= 4 else '0040'
-                            caminho_s3_par = f"lab/Arquivos/Foto/{prefixo_par}/{cod_par}"
-                            logger.info(f"[BuscarIntegrado][S3-PAR] Buscando imagens do codigo par em: {caminho_s3_par}")
+                            prefixo_par = cod_par[:4] if len(cod_par) >= 4 else "0040"
+                            caminho_s3_par = (
+                                f"lab/Arquivos/Foto/{prefixo_par}/{cod_par}"
+                            )
+                            logger.info(
+                                f"[BuscarIntegrado][S3-PAR] Buscando imagens do codigo par em: {caminho_s3_par}"
+                            )
 
                             response_s3_par = s3_client.list_objects_v2(
-                                Bucket=S3_BUCKET,
-                                Prefix=caminho_s3_par
+                                Bucket=S3_BUCKET, Prefix=caminho_s3_par
                             )
 
                             nomes_ja_adicionados = {img["nome"] for img in imagens}
 
-                            if 'Contents' in response_s3_par:
-                                for obj in response_s3_par['Contents']:
-                                    key = obj['Key']
-                                    filename = key.split('/')[-1]
+                            if "Contents" in response_s3_par:
+                                for obj in response_s3_par["Contents"]:
+                                    key = obj["Key"]
+                                    filename = key.split("/")[-1]
 
                                     if not filename or not filename.startswith(cod_par):
                                         continue
@@ -5952,51 +5560,71 @@ def buscar_requisicao(cod_requisicao):
                                         continue
 
                                     try:
-                                        arquivo_local = os.path.join(TEMP_IMAGES_DIR, filename)
+                                        arquivo_local = os.path.join(
+                                            TEMP_IMAGES_DIR, filename
+                                        )
 
                                         if not os.path.exists(arquivo_local):
-                                            logger.info(f"[BuscarIntegrado][S3-PAR] Baixando: {key}")
-                                            s3_client.download_file(S3_BUCKET, key, arquivo_local)
+                                            logger.info(
+                                                f"[BuscarIntegrado][S3-PAR] Baixando: {key}"
+                                            )
+                                            s3_client.download_file(
+                                                S3_BUCKET, key, arquivo_local
+                                            )
                                         else:
-                                            logger.debug(f"[BuscarIntegrado][S3-PAR] Ja em cache: {filename}")
+                                            logger.debug(
+                                                f"[BuscarIntegrado][S3-PAR] Ja em cache: {filename}"
+                                            )
 
-                                        base_url = request.host_url.rstrip('/')
+                                        base_url = request.host_url.rstrip("/")
                                         url_local = f"{base_url}/api/imagem/{filename}"
 
-                                        imagens.append({
-                                            "nome": filename,
-                                            "url": url_local,
-                                            "tamanho": obj['Size'],
-                                            "dataCadastro": obj['LastModified'].isoformat(),
-                                            "codigoOrigem": cod_par
-                                        })
+                                        imagens.append(
+                                            {
+                                                "nome": filename,
+                                                "url": url_local,
+                                                "tamanho": obj["Size"],
+                                                "dataCadastro": obj[
+                                                    "LastModified"
+                                                ].isoformat(),
+                                                "codigoOrigem": cod_par,
+                                            }
+                                        )
                                         nomes_ja_adicionados.add(filename)
 
                                     except Exception as e:
-                                        logger.error(f"[BuscarIntegrado][S3-PAR] Erro ao processar {filename}: {e}")
+                                        logger.error(
+                                            f"[BuscarIntegrado][S3-PAR] Erro ao processar {filename}: {e}"
+                                        )
 
-                                logger.info(f"[BuscarIntegrado][S3-PAR] Total de imagens apos merge do par: {len(imagens)}")
+                                logger.info(
+                                    f"[BuscarIntegrado][S3-PAR] Total de imagens apos merge do par: {len(imagens)}"
+                                )
                             else:
-                                logger.info(f"[BuscarIntegrado][S3-PAR] Nenhuma imagem do codigo par em {caminho_s3_par}")
+                                logger.info(
+                                    f"[BuscarIntegrado][S3-PAR] Nenhuma imagem do codigo par em {caminho_s3_par}"
+                                )
 
                         except Exception as e:
-                            logger.error(f"[BuscarIntegrado][S3-PAR] Erro ao buscar imagens do par {cod_par}: {e}")
-
-
+                            logger.error(
+                                f"[BuscarIntegrado][S3-PAR] Erro ao buscar imagens do par {cod_par}: {e}"
+                            )
 
                 # PASSO 5: Montar resposta ENRIQUECIDA com dados primários + complementares + sistema antigo + CSVs
 
                 id_medico = dados_aplis.get("CodMedico")
 
-                id_local_origem = dados_aplis.get("IdLocalOrigem")  # Definir aqui para uso posterior
+                id_local_origem = dados_aplis.get(
+                    "IdLocalOrigem"
+                )  # Definir aqui para uso posterior
 
+                logger.debug(
+                    f"[BuscarIntegrado] IDs da requisição: convenio={id_convenio}, fonte={id_fonte_pagadora}, local={id_local_origem}, medico={id_medico}"
+                )
 
-
-                logger.debug(f"[BuscarIntegrado] IDs da requisição: convenio={id_convenio}, fonte={id_fonte_pagadora}, local={id_local_origem}, medico={id_medico}")
-
-                logger.debug(f"[BuscarIntegrado] Nomes obtidos: convenio={nome_convenio}, fonte={nome_fonte_pagadora}, local={nome_local_origem}")
-
-                
+                logger.debug(
+                    f"[BuscarIntegrado] Nomes obtidos: convenio={nome_convenio}, fonte={nome_fonte_pagadora}, local={nome_local_origem}"
+                )
 
                 # ðŸ”´ LOG CRÍTICO: DEBUGAR RESPOSTA FINAL
 
@@ -6004,7 +5632,9 @@ def buscar_requisicao(cod_requisicao):
 
                 logger.info(f"[BuscarIntegrado] {'='*80}")
 
-                logger.info(f"[BuscarIntegrado] ðŸ” DEBUG - RESPOSTA QUE SERÁ ENVIADA AO FRONTEND")
+                logger.info(
+                    f"[BuscarIntegrado] ðŸ” DEBUG - RESPOSTA QUE SERÁ ENVIADA AO FRONTEND"
+                )
 
                 logger.info(f"[BuscarIntegrado] {'='*80}")
 
@@ -6030,281 +5660,274 @@ def buscar_requisicao(cod_requisicao):
 
                 logger.info(f"")
 
-                
-
                 # LOG: Verificar valor do numGuia antes de montar resposta
 
-                num_guia_final = dados_aplis.get("NumGuiaConvenio") or dados_aplis.get("NumExterno") or (dados_sistema_antigo.get("numGuia") if dados_sistema_antigo else None)
+                num_guia_final = (
+                    dados_aplis.get("NumGuiaConvenio")
+                    or dados_aplis.get("NumExterno")
+                    or (
+                        dados_sistema_antigo.get("numGuia")
+                        if dados_sistema_antigo
+                        else None
+                    )
+                )
 
-                logger.info(f"[BuscarIntegrado] ðŸŽ« NumGuia FINAL que será enviado: {num_guia_final}")
+                logger.info(
+                    f"[BuscarIntegrado] ðŸŽ« NumGuia FINAL que será enviado: {num_guia_final}"
+                )
 
-                logger.info(f"[BuscarIntegrado]    - NumGuiaConvenio (apLIS): {dados_aplis.get('NumGuiaConvenio')}")
+                logger.info(
+                    f"[BuscarIntegrado]    - NumGuiaConvenio (apLIS): {dados_aplis.get('NumGuiaConvenio')}"
+                )
 
-                logger.info(f"[BuscarIntegrado]    - NumExterno (apLIS): {dados_aplis.get('NumExterno')}")
+                logger.info(
+                    f"[BuscarIntegrado]    - NumExterno (apLIS): {dados_aplis.get('NumExterno')}"
+                )
 
-                logger.info(f"[BuscarIntegrado]    - numGuia (banco antigo): {dados_sistema_antigo.get('numGuia') if dados_sistema_antigo else 'N/A'}")
-
-                
+                logger.info(
+                    f"[BuscarIntegrado]    - numGuia (banco antigo): {dados_sistema_antigo.get('numGuia') if dados_sistema_antigo else 'N/A'}"
+                )
 
                 resultado = {
-
                     "sucesso": 1,
-
                     # ===== DADOS PRIMÁRIOS (da busca direta) =====
-
                     "dados_primarios": {
-
                         "codRequisicao": dados_aplis.get("CodRequisicao"),
-
                         "idRequisicao": dados_aplis.get("IdRequisicao"),
-
-                        "dtaColeta": dados_aplis.get("DtaColeta") or dados_aplis.get("DtaPrevista"),
-
-                        "numGuia": dados_aplis.get("NumGuiaConvenio") or dados_aplis.get("NumExterno"),
-
-                        "dadosClinicos": dados_aplis.get("IndicacaoClinica") or dados_aplis.get("NomExame")
-
+                        "dtaColeta": dados_aplis.get("DtaColeta")
+                        or dados_aplis.get("DtaPrevista"),
+                        "numGuia": dados_aplis.get("NumGuiaConvenio")
+                        or dados_aplis.get("NumExterno"),
+                        "dadosClinicos": dados_aplis.get("IndicacaoClinica")
+                        or dados_aplis.get("NomExame"),
                     },
-
                     # ===== DADOS DO PACIENTE (CPF é principal) =====
-
                     "paciente": {
-
                         "idPaciente": dados_aplis.get("CodPaciente"),
-
                         "nome": nome_paciente_final,  # âœ… PRIORIDADE: Receita Federal â†’ apLIS
-
                         "cpf": cpf_final,  # âœ… PRIORIDADE: Receita Federal â†’ apLIS
-
-
-
                         # ðŸ†• Dados do SISTEMA ANTIGO (se disponível) ou Receita Federal ou None (para OCR preencher)
-
                         "dtaNasc": data_nasc_final,  # âœ… PRIORIDADE: Receita Federal â†’ Sistema Antigo
-
-                        "sexo": dados_sistema_antigo.get("sexo") if dados_sistema_antigo else None,
-
-                        "rg": dados_sistema_antigo.get("rg") if dados_sistema_antigo else None,
-
-                        "rgOrgao": dados_sistema_antigo.get("rgOrgao") if dados_sistema_antigo else None,
-
-                        "rgUF": dados_sistema_antigo.get("rgUF") if dados_sistema_antigo else None,
-
-                        "nomeMae": dados_sistema_antigo.get("nomeMae") if dados_sistema_antigo else None,
-
-                        "estadoCivil": dados_sistema_antigo.get("estadoCivil") if dados_sistema_antigo else None,
-
-                        "passaporte": dados_sistema_antigo.get("passaporte") if dados_sistema_antigo else None,
-
-                        "matriculaConvenio": dados_sistema_antigo.get("matriculaConvenio") if dados_sistema_antigo else None,
-
-                        "validadeMatricula": dados_sistema_antigo.get("validadeMatricula") if dados_sistema_antigo else None,
-
-                        "numGuia": dados_aplis.get("NumGuiaConvenio") or dados_aplis.get("NumExterno") or (dados_sistema_antigo.get("numGuia") if dados_sistema_antigo else None),
-
-                        "telCelular": dados_sistema_antigo.get("telCelular") if dados_sistema_antigo else None,
-
-                        "telFixo": dados_sistema_antigo.get("telFixo") if dados_sistema_antigo else None,
-
-                        "email": dados_sistema_antigo.get("email") if dados_sistema_antigo else None,
-
-                        "endereco": dados_sistema_antigo.get("endereco", {}) if dados_sistema_antigo else {
-
-                            "cep": None,
-
-                            "logradouro": None,
-
-                            "numEndereco": None,
-
-                            "complemento": None,
-
-                            "bairro": None,
-
-                            "cidade": None,
-
-                            "uf": None
-
-                        }
-
+                        "sexo": (
+                            dados_sistema_antigo.get("sexo")
+                            if dados_sistema_antigo
+                            else None
+                        ),
+                        "rg": (
+                            dados_sistema_antigo.get("rg")
+                            if dados_sistema_antigo
+                            else None
+                        ),
+                        "rgOrgao": (
+                            dados_sistema_antigo.get("rgOrgao")
+                            if dados_sistema_antigo
+                            else None
+                        ),
+                        "rgUF": (
+                            dados_sistema_antigo.get("rgUF")
+                            if dados_sistema_antigo
+                            else None
+                        ),
+                        "nomeMae": (
+                            dados_sistema_antigo.get("nomeMae")
+                            if dados_sistema_antigo
+                            else None
+                        ),
+                        "estadoCivil": (
+                            dados_sistema_antigo.get("estadoCivil")
+                            if dados_sistema_antigo
+                            else None
+                        ),
+                        "passaporte": (
+                            dados_sistema_antigo.get("passaporte")
+                            if dados_sistema_antigo
+                            else None
+                        ),
+                        "matriculaConvenio": (
+                            dados_sistema_antigo.get("matriculaConvenio")
+                            if dados_sistema_antigo
+                            else None
+                        ),
+                        "validadeMatricula": (
+                            dados_sistema_antigo.get("validadeMatricula")
+                            if dados_sistema_antigo
+                            else None
+                        ),
+                        "numGuia": dados_aplis.get("NumGuiaConvenio")
+                        or dados_aplis.get("NumExterno")
+                        or (
+                            dados_sistema_antigo.get("numGuia")
+                            if dados_sistema_antigo
+                            else None
+                        ),
+                        "telCelular": (
+                            dados_sistema_antigo.get("telCelular")
+                            if dados_sistema_antigo
+                            else None
+                        ),
+                        "telFixo": (
+                            dados_sistema_antigo.get("telFixo")
+                            if dados_sistema_antigo
+                            else None
+                        ),
+                        "email": (
+                            dados_sistema_antigo.get("email")
+                            if dados_sistema_antigo
+                            else None
+                        ),
+                        "endereco": (
+                            dados_sistema_antigo.get("endereco", {})
+                            if dados_sistema_antigo
+                            else {
+                                "cep": None,
+                                "logradouro": None,
+                                "numEndereco": None,
+                                "complemento": None,
+                                "bairro": None,
+                                "cidade": None,
+                                "uf": None,
+                            }
+                        ),
                     },
-
                     # ===== DADOS COMPLEMENTARES (enriquecimento) =====
-
                     "dados_complementares": {
-
                         "idConvenio": id_convenio,
-
                         "idLocalOrigem": id_local_origem,
-
                         "idFontePagadora": id_fonte_pagadora,
-
-                        "idMedico": id_medico
-
-                    },
-
-                    # ===== DADOS DO MÃ‰DICO (enriquecido com CSV) =====
-
-                    "medico": {
-
                         "idMedico": id_medico,
-
+                    },
+                    # ===== DADOS DO MÃ‰DICO (enriquecido com CSV) =====
+                    "medico": {
+                        "idMedico": id_medico,
                         "crm": dados_aplis.get("CRM"),
-
                         "uf": dados_aplis.get("CRMUF"),
-
-                        "nome": nome_medico  # âœ… Enriquecido do CSV
-
+                        "nome": nome_medico,  # âœ… Enriquecido do CSV
                     },
-
                     # ===== INFORMAÃ‡Ã•ES DE ORIGEM (enriquecidas com CSV) =====
-
                     "convenio": {
-
                         "id": id_convenio,  # âœ… ID do convênio
-
-                        "nome": nome_convenio  # âœ… Vem do CSV via _buscar_convenio_nome()
-
+                        "nome": nome_convenio,  # âœ… Vem do CSV via _buscar_convenio_nome()
                     },
-
                     "fontePagadora": {
-
                         "id": id_fonte_pagadora,  # âœ… ID da fonte pagadora
-
-                        "nome": nome_fonte_pagadora  # âœ… Vem do CSV de instituições via _buscar_instituicao_nome()
-
+                        "nome": nome_fonte_pagadora,  # âœ… Vem do CSV de instituições via _buscar_instituicao_nome()
                     },
-
                     "localOrigem": {
-
                         "id": id_local_origem,  # âœ… ID do local de origem
-
-                        "nome": nome_local_origem  # âœ… Vem do CSV de instituições via _buscar_instituicao_nome()
-
+                        "nome": nome_local_origem,  # âœ… Vem do CSV de instituições via _buscar_instituicao_nome()
                     },
-
                     # ===== IMAGENS =====
-
                     "imagens": imagens,
-
                     "totalImagens": len(imagens),
-
                     # ===== COMPATIBILIDADE COM FRONTEND =====
-
                     "requisicao": {
-
                         "codRequisicao": dados_aplis.get("CodRequisicao"),
-
                         "idRequisicao": dados_aplis.get("IdRequisicao"),
-
-                        "dtaColeta": dados_aplis.get("DtaColeta") or dados_aplis.get("DtaPrevista"),
-
-                        "numGuia": dados_aplis.get("NumGuiaConvenio") or dados_aplis.get("NumExterno"),
-
-                        "dadosClinicos": dados_aplis.get("IndicacaoClinica") or dados_aplis.get("NomExame"),
-
+                        "dtaColeta": dados_aplis.get("DtaColeta")
+                        or dados_aplis.get("DtaPrevista"),
+                        "numGuia": dados_aplis.get("NumGuiaConvenio")
+                        or dados_aplis.get("NumExterno"),
+                        "dadosClinicos": dados_aplis.get("IndicacaoClinica")
+                        or dados_aplis.get("NomExame"),
                         "idConvenio": id_convenio,  # âœ… Com default
-
                         "idLocalOrigem": id_local_origem,  # âœ… Com default
-
                         "idFontePagadora": id_fonte_pagadora,  # âœ… Com default
-
-                        "idMedico": id_medico  # âœ… Com default
-
+                        "idMedico": id_medico,  # âœ… Com default
                     },
-
                     # ===== METADATA =====
-
                     "origem": "busca_direta_por_codigo_enriquecida",
-
                     "statusIntegracao": "completo_dois_sistemas",
-
                     "avisos": [
-
                         f"âœ… Sistema NOVO: codRequisicao, CPF, nome (tempo real - mesmo dia)",
-
                         f"âœ… Sistema NOVO: médico, convênio, local origem, fonte pagadora",
-
                         f"{'âœ… Sistema ANTIGO: dtaNasc, sexo, RG, telefone, endereço completo' if dados_sistema_antigo else 'âš ️ Sistema ANTIGO: Dados não encontrados (paciente pode ser novo ou ter 1 dia de atraso)'}",
-
                         f"{'âœ… RECEITA FEDERAL: Dados validados e corrigidos' if validacao_cpf.get('dados_corrigidos') else 'âœ… RECEITA FEDERAL: Dados conferem' if validacao_cpf.get('fonte_dados') == 'receita_federal' else 'âš ️ RECEITA FEDERAL: Validação não disponível'}",
-
-                        f"ðŸ“‹ OCR: Pode complementar/substituir dados se houver imagens"
-
+                        f"ðŸ“‹ OCR: Pode complementar/substituir dados se houver imagens",
                     ],
-
                     "sistemas_utilizados": {
-
                         "sistema_novo": "requisicaoListar (tempo real)",
-
-                        "sistema_antigo": "admissaoListar (dados completos)" if dados_sistema_antigo else "não consultado",
-
+                        "sistema_antigo": (
+                            "admissaoListar (dados completos)"
+                            if dados_sistema_antigo
+                            else "não consultado"
+                        ),
                         "sistema_antigo_sucesso": dados_sistema_antigo is not None,
-
-                        "receita_federal": validacao_cpf.get("fonte_dados") == "receita_federal",
-
-                        "receita_federal_corrigiu": validacao_cpf.get("dados_corrigidos", False)
-
+                        "receita_federal": validacao_cpf.get("fonte_dados")
+                        == "receita_federal",
+                        "receita_federal_corrigiu": validacao_cpf.get(
+                            "dados_corrigidos", False
+                        ),
                     },
-
                     "validacao_cpf": {
-
                         "fonte_dados": validacao_cpf.get("fonte_dados"),
-
-                        "dados_corrigidos": validacao_cpf.get("dados_corrigidos", False),
-
+                        "dados_corrigidos": validacao_cpf.get(
+                            "dados_corrigidos", False
+                        ),
                         "divergencias": validacao_cpf.get("divergencias"),
-
-                        "situacao_cadastral": validacao_cpf.get("situacao_cadastral")
-
+                        "situacao_cadastral": validacao_cpf.get("situacao_cadastral"),
                     },
-
                     # ===== SINCRONIZAÃ‡ÃƒO 0085 â†” 0200 =====
-
                     "sincronizacao": {
-
                         "sincronizado": req_correspondente is not None,
-
-                        "codigo_correspondente": req_correspondente.get("CodRequisicao") if req_correspondente else None,
-
-                        "tipo_sincronizacao": "0085 <-> 0200" if req_correspondente else None,
-
-                        "campos_sincronizados": [
-
-                            "nome", "cpf", "dtaNasc", "sexo", "rg", "rgOrgao", "rgUF",
-
-                            "nomeMae", "estadoCivil", "passaporte", "matriculaConvenio",
-
-                            "validadeMatricula", "telCelular", "telFixo", "endereco completo"
-
-                        ] if req_correspondente else []
-
-                    }
-
+                        "codigo_correspondente": (
+                            req_correspondente.get("CodRequisicao")
+                            if req_correspondente
+                            else None
+                        ),
+                        "tipo_sincronizacao": (
+                            "0085 <-> 0200" if req_correspondente else None
+                        ),
+                        "campos_sincronizados": (
+                            [
+                                "nome",
+                                "cpf",
+                                "dtaNasc",
+                                "sexo",
+                                "rg",
+                                "rgOrgao",
+                                "rgUF",
+                                "nomeMae",
+                                "estadoCivil",
+                                "passaporte",
+                                "matriculaConvenio",
+                                "validadeMatricula",
+                                "telCelular",
+                                "telFixo",
+                                "endereco completo",
+                            ]
+                            if req_correspondente
+                            else []
+                        ),
+                    },
                 }
 
-
-
-                logger.info(f"[BuscarIntegrado] [SUCESSO] {cod_requisicao} ({len(imagens)} imagens)")
+                logger.info(
+                    f"[BuscarIntegrado] [SUCESSO] {cod_requisicao} ({len(imagens)} imagens)"
+                )
 
                 return jsonify(resultado), 200
 
             else:
 
-                logger.warning(f"[BuscarIntegrado] [AVISO] Busca direta retornou lista vazia")
+                logger.warning(
+                    f"[BuscarIntegrado] [AVISO] Busca direta retornou lista vazia"
+                )
 
         else:
 
-            logger.warning(f"[BuscarIntegrado] [AVISO] Busca direta retornou sucesso={resposta_direta.get('dat', {}).get('sucesso')}")
+            logger.warning(
+                f"[BuscarIntegrado] [AVISO] Busca direta retornou sucesso={resposta_direta.get('dat', {}).get('sucesso')}"
+            )
 
-            logger.warning(f"[BuscarIntegrado] [AVISO] Resposta completa: {resposta_direta.get('dat', {})}")
-
-
+            logger.warning(
+                f"[BuscarIntegrado] [AVISO] Resposta completa: {resposta_direta.get('dat', {})}"
+            )
 
         # Se não encontrou por busca direta, tentar com período amplo (FALLBACK)
 
-        logger.warning(f"[BuscarIntegrado] Busca direta não retornou resultado, tentando com período amplo...")
-
-        
+        logger.warning(
+            f"[BuscarIntegrado] Busca direta não retornou resultado, tentando com período amplo..."
+        )
 
         # PASSO 1 (FALLBACK): Obter dados primários + complementares usando a integração
 
@@ -6314,69 +5937,59 @@ def buscar_requisicao(cod_requisicao):
 
         periodo_ini = (hoje - timedelta(days=365)).strftime("%Y-%m-%d")
 
-
-
         resposta_integrada = listar_requisicoes_detalhadas(
-
             id_evento="50",
-
             periodo_ini=periodo_ini,
-
             periodo_fim=periodo_fim,
-
-            enriquecer=True
-
+            enriquecer=True,
         )
-
-
 
         # Verificar se encontrou a requisição
 
         if resposta_integrada.get("dat", {}).get("sucesso") != 1:
 
-            logger.warning(f"[BuscarIntegrado] âŒ Requisição {cod_requisicao} NÃƒO ENCONTRADA em nenhuma busca")
+            logger.warning(
+                f"[BuscarIntegrado] âŒ Requisição {cod_requisicao} NÃƒO ENCONTRADA em nenhuma busca"
+            )
 
             logger.warning(f"[BuscarIntegrado] ðŸ’¡ POSSÍVEIS CAUSAS:")
 
-            logger.warning(f"[BuscarIntegrado]    1. Requisição não existe no sistema apLIS")
+            logger.warning(
+                f"[BuscarIntegrado]    1. Requisição não existe no sistema apLIS"
+            )
 
             logger.warning(f"[BuscarIntegrado]    2. Código digitado incorretamente")
 
-            logger.warning(f"[BuscarIntegrado]    3. Requisição foi cancelada ou excluída")
+            logger.warning(
+                f"[BuscarIntegrado]    3. Requisição foi cancelada ou excluída"
+            )
 
-            logger.warning(f"[BuscarIntegrado]    4. Problema de permissão/acesso na API apLIS")
+            logger.warning(
+                f"[BuscarIntegrado]    4. Problema de permissão/acesso na API apLIS"
+            )
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": "Requisição não encontrada no sistema apLIS",
-
-                "detalhes": "Verifique se o código está correto e se a requisição existe no apLIS",
-
-                "codRequisicao": cod_requisicao,
-
-                "sugestoes": [
-
-                    "Confirme o código da requisição",
-
-                    "Verifique se a requisição foi cadastrada no apLIS",
-
-                    "Tente novamente em alguns minutos (pode haver delay de sincronização)"
-
-                ]
-
-            }), 404
-
-
+            return (
+                jsonify(
+                    {
+                        "sucesso": 0,
+                        "erro": "Requisição não encontrada no sistema apLIS",
+                        "detalhes": "Verifique se o código está correto e se a requisição existe no apLIS",
+                        "codRequisicao": cod_requisicao,
+                        "sugestoes": [
+                            "Confirme o código da requisição",
+                            "Verifique se a requisição foi cadastrada no apLIS",
+                            "Tente novamente em alguns minutos (pode haver delay de sincronização)",
+                        ],
+                    }
+                ),
+                404,
+            )
 
         # PASSO 2: Buscar a requisição específica na lista integrada
 
         lista_requisicoes = resposta_integrada.get("dat", {}).get("lista", [])
 
         req_encontrada = None
-
-
 
         for req in lista_requisicoes:
 
@@ -6386,27 +5999,24 @@ def buscar_requisicao(cod_requisicao):
 
                 break
 
-
-
         if not req_encontrada:
 
-            logger.warning(f"[BuscarIntegrado] Código {cod_requisicao} não encontrado na lista integrada")
+            logger.warning(
+                f"[BuscarIntegrado] Código {cod_requisicao} não encontrado na lista integrada"
+            )
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": "Requisição não encontrada",
-
-                "codRequisicao": cod_requisicao
-
-            }), 404
-
-
+            return (
+                jsonify(
+                    {
+                        "sucesso": 0,
+                        "erro": "Requisição não encontrada",
+                        "codRequisicao": cod_requisicao,
+                    }
+                ),
+                404,
+            )
 
         logger.info(f"[BuscarIntegrado] âœ… Requisição encontrada: {cod_requisicao}")
-
-
 
         # PASSO 3: Buscar imagens no S3
 
@@ -6414,53 +6024,37 @@ def buscar_requisicao(cod_requisicao):
 
         s3_client = get_s3_client()
 
-
-
         if s3_client:
 
             try:
 
-                prefixo_lab = cod_requisicao[:4] if len(cod_requisicao) >= 4 else '0040'
+                prefixo_lab = cod_requisicao[:4] if len(cod_requisicao) >= 4 else "0040"
 
                 caminho_s3_base = f"lab/Arquivos/Foto/{prefixo_lab}/{cod_requisicao}"
 
-
-
-                logger.info(f"[BuscarIntegrado][S3] Buscando imagens em: {caminho_s3_base}")
-
-
-
-                response_s3 = s3_client.list_objects_v2(
-
-                    Bucket=S3_BUCKET,
-
-                    Prefix=caminho_s3_base
-
+                logger.info(
+                    f"[BuscarIntegrado][S3] Buscando imagens em: {caminho_s3_base}"
                 )
 
+                response_s3 = s3_client.list_objects_v2(
+                    Bucket=S3_BUCKET, Prefix=caminho_s3_base
+                )
 
+                if "Contents" in response_s3:
 
-                if 'Contents' in response_s3:
+                    for obj in response_s3["Contents"]:
 
-                    for obj in response_s3['Contents']:
+                        key = obj["Key"]
 
-                        key = obj['Key']
-
-                        filename = key.split('/')[-1]
-
-
+                        filename = key.split("/")[-1]
 
                         if not filename or not filename.startswith(cod_requisicao):
 
                             continue
 
-
-
                         try:
 
                             arquivo_local = os.path.join(TEMP_IMAGES_DIR, filename)
-
-
 
                             if not os.path.exists(arquivo_local):
 
@@ -6470,43 +6064,38 @@ def buscar_requisicao(cod_requisicao):
 
                             else:
 
-                                logger.debug(f"[BuscarIntegrado][S3] Já em cache: {filename}")
+                                logger.debug(
+                                    f"[BuscarIntegrado][S3] Já em cache: {filename}"
+                                )
 
-
-
-                            base_url = request.host_url.rstrip('/')
+                            base_url = request.host_url.rstrip("/")
 
                             url_local = f"{base_url}/api/imagem/{filename}"
 
-
-
-                            imagens.append({
-
-                                "nome": filename,
-
-                                "url": url_local,
-
-                                "tamanho": obj['Size'],
-
-                                "dataCadastro": obj['LastModified'].isoformat()
-
-                            })
-
-
+                            imagens.append(
+                                {
+                                    "nome": filename,
+                                    "url": url_local,
+                                    "tamanho": obj["Size"],
+                                    "dataCadastro": obj["LastModified"].isoformat(),
+                                }
+                            )
 
                         except Exception as e:
 
-                            logger.error(f"[BuscarIntegrado][S3] Erro ao processar {filename}: {e}")
+                            logger.error(
+                                f"[BuscarIntegrado][S3] Erro ao processar {filename}: {e}"
+                            )
 
-
-
-                    logger.info(f"[BuscarIntegrado][S3] âœ… Encontradas {len(imagens)} imagens")
+                    logger.info(
+                        f"[BuscarIntegrado][S3] âœ… Encontradas {len(imagens)} imagens"
+                    )
 
                 else:
 
-                    logger.info(f"[BuscarIntegrado][S3] Nenhuma imagem em {caminho_s3_base}")
-
-
+                    logger.info(
+                        f"[BuscarIntegrado][S3] Nenhuma imagem em {caminho_s3_base}"
+                    )
 
             except Exception as e:
 
@@ -6515,8 +6104,6 @@ def buscar_requisicao(cod_requisicao):
         else:
 
             logger.warning("[BuscarIntegrado][S3] Cliente S3 não disponível")
-
-
 
         # PASSO 4: Montar resposta INTEGRADA com estrutura compatível com o frontend
 
@@ -6530,8 +6117,6 @@ def buscar_requisicao(cod_requisicao):
 
         dados_complementares = req_encontrada.get("dados_complementares", {})
 
-        
-
         # Usar IDs conforme vêm da integração - os helpers tratarão None apropriadamente
 
         id_convenio_fallback = dados_complementares.get("idConvenio")
@@ -6542,184 +6127,121 @@ def buscar_requisicao(cod_requisicao):
 
         id_medico_fallback = dados_complementares.get("idMedico")
 
-        
-
         logger.info(f"[BuscarIntegrado] ðŸ” FALLBACK - IDs vindos da integração:")
 
         logger.info(f"[BuscarIntegrado]   - idConvenio: {id_convenio_fallback}")
 
         logger.info(f"[BuscarIntegrado]   - idLocalOrigem: {id_local_origem_fallback}")
 
-        logger.info(f"[BuscarIntegrado]   - idFontePagadora: {id_fonte_pagadora_fallback}")
+        logger.info(
+            f"[BuscarIntegrado]   - idFontePagadora: {id_fonte_pagadora_fallback}"
+        )
 
         logger.info(f"[BuscarIntegrado]   - idMedico: {id_medico_fallback}")
 
-        logger.info(f"[BuscarIntegrado] ðŸ” FALLBACK - Dados já enriquecidos da req_encontrada:")
+        logger.info(
+            f"[BuscarIntegrado] ðŸ” FALLBACK - Dados já enriquecidos da req_encontrada:"
+        )
 
         logger.info(f"[BuscarIntegrado]   - convenio: {req_encontrada.get('convenio')}")
 
-        logger.info(f"[BuscarIntegrado]   - localOrigem: {req_encontrada.get('localOrigem')}")
+        logger.info(
+            f"[BuscarIntegrado]   - localOrigem: {req_encontrada.get('localOrigem')}"
+        )
 
-        logger.info(f"[BuscarIntegrado]   - fontePagadora: {req_encontrada.get('fontePagadora')}")
+        logger.info(
+            f"[BuscarIntegrado]   - fontePagadora: {req_encontrada.get('fontePagadora')}"
+        )
 
-        
-
-        logger.debug(f"[BuscarIntegrado] IDs da integração: convenio={id_convenio_fallback}, fonte={id_fonte_pagadora_fallback}, local={id_local_origem_fallback}, medico={id_medico_fallback}")
-
-
+        logger.debug(
+            f"[BuscarIntegrado] IDs da integração: convenio={id_convenio_fallback}, fonte={id_fonte_pagadora_fallback}, local={id_local_origem_fallback}, medico={id_medico_fallback}"
+        )
 
         resultado = {
-
             "sucesso": 1,
-
             # ===== DADOS PRIMÁRIOS (da integração) =====
-
             "requisicao": {
-
                 "codRequisicao": dados_primarios.get("codRequisicao"),
-
                 "idRequisicao": dados_primarios.get("idRequisicao"),
-
                 "dtaColeta": dados_primarios.get("dtaColeta"),
-
                 "numGuia": dados_primarios.get("numGuia"),
-
                 "dadosClinicos": dados_primarios.get("dadosClinicos"),
-
                 # Dados complementares da integração (com defaults)
-
                 "idConvenio": id_convenio_fallback,
-
                 "idLocalOrigem": id_local_origem_fallback,
-
                 "idFontePagadora": id_fonte_pagadora_fallback,
-
                 "idMedico": id_medico_fallback,
-
                 # Status da requisição no apLIS: 0=Em andamento, 1=Concluído, 2=Cancelado
-
-                "StatusExame": status_exame
-
+                "StatusExame": status_exame,
             },
-
             # ===== DADOS DO PACIENTE (CPF é principal - vem do requisicaoListar) =====
-
             "paciente": {
-
                 "idPaciente": dados_pac.get("idPaciente"),
-
                 "nome": dados_pac.get("nome"),
-
                 "cpf": dados_pac.get("cpf"),  # âœ… PRINCIPAL - Vem do requisicaoListar
-
                 # Dados que virão do OCR:
-
                 "dtaNasc": dados_pac.get("dtaNasc"),
-
                 "sexo": dados_pac.get("sexo"),
-
                 "rg": dados_pac.get("rg"),
-
                 "telCelular": dados_pac.get("telCelular"),
-
-                "endereco": dados_pac.get("endereco", {})
-
+                "endereco": dados_pac.get("endereco", {}),
             },
-
             # ===== DADOS DO MÃ‰DICO (complementares) =====
-
             "medico": {
-
                 "nome": dados_med.get("nome"),
-
                 "crm": dados_med.get("crm"),
-
-                "uf": dados_med.get("uf")
-
+                "uf": dados_med.get("uf"),
             },
-
             # ===== INFORMAÃ‡Ã•ES DE ORIGEM (complementares) =====
-
             "convenio": {
-
                 "id": id_convenio_fallback,  # âœ… ID do convênio
-
-                **req_encontrada.get("convenio", {})
-
+                **req_encontrada.get("convenio", {}),
             },
-
             "fontePagadora": {
-
                 "id": id_fonte_pagadora_fallback,  # âœ… ID da fonte pagadora
-
-                **req_encontrada.get("fontePagadora", {})
-
+                **req_encontrada.get("fontePagadora", {}),
             },
-
             "localOrigem": {
-
                 "id": id_local_origem_fallback,  # âœ… ID do local de origem
-
-                **req_encontrada.get("localOrigem", {})
-
+                **req_encontrada.get("localOrigem", {}),
             },
-
             # ===== IMAGENS =====
-
             "imagens": imagens,
-
             "totalImagens": len(imagens),
-
             # ===== METADATA =====
-
             "origem": "requisicaoListar_integrado",
-
             "statusIntegracao": "completo",
-
             "avisos": [
-
                 "Dados primários: codRequisicao, CPF, nome paciente - do apLIS",
-
                 "Dados complementares: médico, convênio, local - enriquecidos",
-
-                "Dados do paciente (dtaNasc, sexo, rg, endereço) - virão do OCR"
-
-            ]
-
+                "Dados do paciente (dtaNasc, sexo, rg, endereço) - virão do OCR",
+            ],
         }
 
-
-
-        logger.info(f"[BuscarIntegrado] âœ… SUCESSO: {cod_requisicao} ({len(imagens)} imagens) - dados integrados retornados")
+        logger.info(
+            f"[BuscarIntegrado] âœ… SUCESSO: {cod_requisicao} ({len(imagens)} imagens) - dados integrados retornados"
+        )
 
         return jsonify(resultado), 200
 
-        
-
     except Exception as e:
 
-        logger.error(f"[BuscarIntegrado] âŒ Erro ao buscar requisição {cod_requisicao}: {str(e)}")
+        logger.error(
+            f"[BuscarIntegrado] âŒ Erro ao buscar requisição {cod_requisicao}: {str(e)}"
+        )
 
         import traceback
 
         logger.error(f"[BuscarIntegrado] Traceback: {traceback.format_exc()}")
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": f"Erro ao buscar requisição: {str(e)}"
-
-        }), 500
+        return (
+            jsonify({"sucesso": 0, "erro": f"Erro ao buscar requisição: {str(e)}"}),
+            500,
+        )
 
 
-
-
-
-@app.route('/api/debug/csv-dados', methods=['GET'])
-
+@app.route("/api/debug/csv-dados", methods=["GET"])
 def debug_csv_dados():
-
     """
 
     ðŸ§ª ENDPOINT DE DEBUG
@@ -6732,52 +6254,34 @@ def debug_csv_dados():
 
     """
 
-    return jsonify({
-
-        "sucesso": 1,
-
-        "dados": {
-
-            "medicos": {
-
-                "total": len(MEDICOS_CACHE),
-
-                "amostra": list(MEDICOS_CACHE.items())[:3]
-
-            },
-
-            "convenios": {
-
-                "total": len(CONVENIOS_CACHE),
-
-                "amostra": list(CONVENIOS_CACHE.items())[:5],
-
-                "todos_ids": list(CONVENIOS_CACHE.keys())
-
-            },
-
-            "instituicoes": {
-
-                "total": len(INSTITUICOES_CACHE),
-
-                "amostra": list(INSTITUICOES_CACHE.items())[:5],
-
-                "todos_ids": list(INSTITUICOES_CACHE.keys())
-
+    return (
+        jsonify(
+            {
+                "sucesso": 1,
+                "dados": {
+                    "medicos": {
+                        "total": len(MEDICOS_CACHE),
+                        "amostra": list(MEDICOS_CACHE.items())[:3],
+                    },
+                    "convenios": {
+                        "total": len(CONVENIOS_CACHE),
+                        "amostra": list(CONVENIOS_CACHE.items())[:5],
+                        "todos_ids": list(CONVENIOS_CACHE.keys()),
+                    },
+                    "instituicoes": {
+                        "total": len(INSTITUICOES_CACHE),
+                        "amostra": list(INSTITUICOES_CACHE.items())[:5],
+                        "todos_ids": list(INSTITUICOES_CACHE.keys()),
+                    },
+                },
             }
-
-        }
-
-    }), 200
-
+        ),
+        200,
+    )
 
 
-
-
-@app.route('/api/requisicoes/disponiveis', methods=['POST'])
-
+@app.route("/api/requisicoes/disponiveis", methods=["POST"])
 def requisicoes_disponiveis():
-
     """
 
     ðŸ§ª ENDPOINT DE DEBUG/TESTE
@@ -6786,7 +6290,7 @@ def requisicoes_disponiveis():
 
     Ãštil quando o usuário não sabe qual código buscar
 
-    
+
 
     Requisição:
 
@@ -6806,17 +6310,13 @@ def requisicoes_disponiveis():
 
         dados = request.json
 
-        
+        id_evento = dados.get("idEvento", "50")
 
-        id_evento = dados.get('idEvento', '50')
+        periodo_ini = dados.get("periodoIni")
 
-        periodo_ini = dados.get('periodoIni')
+        periodo_fim = dados.get("periodoFim")
 
-        periodo_fim = dados.get('periodoFim')
-
-        limite = dados.get('limite', 15)  # Retorna apenas os primeiros 15
-
-        
+        limite = dados.get("limite", 15)
 
         if not periodo_ini or not periodo_fim:
 
@@ -6835,31 +6335,19 @@ def requisicoes_disponiveis():
                 periodo_ini = ontem.strftime("%Y-%m-%d")
                 periodo_fim = ontem.strftime("%Y-%m-%d")
 
-        
+        logger.info(
+            f"[Disponiveis] Listando códigos disponíveis: evento={id_evento}, período={periodo_ini} a {periodo_fim}"
+        )
 
-        logger.info(f"[Disponiveis] Listando códigos disponíveis: evento={id_evento}, período={periodo_ini} a {periodo_fim}")
-
-        
-
-        resposta = listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquecer=False)
-
-        
+        resposta = listar_requisicoes_detalhadas(
+            id_evento, periodo_ini, periodo_fim, enriquecer=False
+        )
 
         if resposta.get("dat", {}).get("sucesso") != 1:
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": "Erro ao buscar requisições"
-
-            }), 500
-
-        
+            return jsonify({"sucesso": 0, "erro": "Erro ao buscar requisições"}), 500
 
         lista_requisicoes = resposta.get("dat", {}).get("lista", [])
-
-        
 
         # Filtrar apenas requisicoes que aguardam admissao (StatusExame=0)
 
@@ -6871,11 +6359,15 @@ def requisicoes_disponiveis():
 
             lista_original = len(lista_requisicoes)
 
-            lista_requisicoes = [req for req in lista_requisicoes if req.get("StatusExame") == 0 or req.get("StatusExame") == "0"]
+            lista_requisicoes = [
+                req
+                for req in lista_requisicoes
+                if req.get("StatusExame") == 0 or req.get("StatusExame") == "0"
+            ]
 
-            logger.info(f"[Disponiveis] Filtrado por Aguarda Admissao: {len(lista_requisicoes)} de {lista_original}")
-
-        
+            logger.info(
+                f"[Disponiveis] Filtrado por Aguarda Admissao: {len(lista_requisicoes)} de {lista_original}"
+            )
 
         # -------------------------------------------------------
         # DEDUPLICAR pares 0085/0200 ANTES de aplicar o limite.
@@ -6904,81 +6396,83 @@ def requisicoes_disponiveis():
                 cod_par = None
 
             if cod_par and cod_par in codigos_vistos:
-                logger.info(f"[Disponiveis] Dedup: pulando {cod} (par {cod_par} ja incluido)")
+                logger.info(
+                    f"[Disponiveis] Dedup: pulando {cod} (par {cod_par} ja incluido)"
+                )
                 continue
 
             codigos_vistos.add(cod)
             lista_dedup.append(req)
 
         if len(lista_dedup) < len(lista_requisicoes):
-            logger.info(f"[Disponiveis] Dedup 0085/0200: {len(lista_requisicoes)} -> {len(lista_dedup)} requisicoes unicas")
+            logger.info(
+                f"[Disponiveis] Dedup 0085/0200: {len(lista_requisicoes)} -> {len(lista_dedup)} requisicoes unicas"
+            )
 
         lista_requisicoes = lista_dedup
 
         # Extrair codigos e pacientes
 
+        sem_limite = False
+        try:
+            if limite is None or int(limite) <= 0:
+                sem_limite = True
+            else:
+                limite = int(limite)
+        except (TypeError, ValueError):
+            limite = 15
+
         codigos_disponiveis = []
 
-        for req in lista_requisicoes[:limite]:
+        lista_para_retorno = (
+            lista_requisicoes if sem_limite else lista_requisicoes[:limite]
+        )
 
-            codigos_disponiveis.append({
+        for req in lista_para_retorno:
 
-                "codigo": req.get("CodRequisicao"),
-
-                "CodRequisicao": req.get("CodRequisicao"),
-
-                "paciente": req.get("NomPaciente"),
-
-                "cpf": req.get("CPF"),
-
-                "data": req.get("DtaColeta") or req.get("DtaPrevista"),
-
-                "statusExame": req.get("StatusExame")
-
-            })
-
-        
+            codigos_disponiveis.append(
+                {
+                    "codigo": req.get("CodRequisicao"),
+                    "CodRequisicao": req.get("CodRequisicao"),
+                    "paciente": req.get("NomPaciente"),
+                    "cpf": req.get("CPF"),
+                    "data": req.get("DtaColeta") or req.get("DtaPrevista"),
+                    "statusExame": req.get("StatusExame"),
+                }
+            )
 
         logger.info(f"[Disponiveis] Retornando {len(codigos_disponiveis)} codigos")
 
-        
-
-        return jsonify({
-
-            "sucesso": 1,
-
-            "total": len(lista_requisicoes),
-
-            "requisicoes": codigos_disponiveis,
-
-            "codigos": codigos_disponiveis,
-
-            "mensagem": f"Primeiros {len(codigos_disponiveis)} de {len(lista_requisicoes)} requisições disponíveis"
-
-        }), 200
-
-        
+        return (
+            jsonify(
+                {
+                    "sucesso": 1,
+                    "total": len(lista_requisicoes),
+                    "requisicoes": codigos_disponiveis,
+                    "codigos": codigos_disponiveis,
+                    "mensagem": f"{len(codigos_disponiveis)} requisições carregadas para processamento",
+                }
+            ),
+            200,
+        )
 
     except Exception as e:
 
         logger.error(f"[Disponiveis] Erro: {str(e)}")
 
-        return jsonify({
+        return (
+            jsonify(
+                {
+                    "sucesso": 0,
+                    "erro": f"Erro ao listar requisições disponíveis: {str(e)}",
+                }
+            ),
+            500,
+        )
 
-            "sucesso": 0,
 
-            "erro": f"Erro ao listar requisições disponíveis: {str(e)}"
-
-        }), 500
-
-
-
-
-
-@app.route('/api/admissao/salvar', methods=['POST'])
-
+@app.route("/api/admissao/salvar", methods=["POST"])
 def salvar_admissao():
-
     """
 
     Endpoint para salvar admissão
@@ -6990,8 +6484,8 @@ def salvar_admissao():
         dados = request.json
 
         def _texto_placeholder(valor):
-            texto = str(valor or '').strip().lower()
-            return texto in ['', 'não informado', 'nao informado', 'null', 'undefined']
+            texto = str(valor or "").strip().lower()
+            return texto in ["", "não informado", "nao informado", "null", "undefined"]
 
         # Flags para evitar fallback silencioso quando usuário informou nomes explícitos
         convenio_nome_informado = False
@@ -7001,57 +6495,68 @@ def salvar_admissao():
         local_nome_informado = False
         local_nome_resolvido = False
 
-        logger.info(f"[SalvarAdmissao] Iniciando salvamento. Dados recebidos: {json.dumps(dados, indent=2, ensure_ascii=False)[:1000]}")
+        # Controle de sucesso parcial (paciente criado, mas admissão falhou)
+        paciente_criado_nesta_tentativa = False
+        paciente_criado_id = None
 
-
+        logger.info(
+            f"[SalvarAdmissao] Iniciando salvamento. Dados recebidos: {json.dumps(dados, indent=2, ensure_ascii=False)[:1000]}"
+        )
 
         # ðŸ†• Extrair credenciais do apLIS do usuário
 
-        aplis_usuario = dados.pop('aplis_usuario', None)
+        aplis_usuario = dados.pop("aplis_usuario", None)
 
-        aplis_senha = dados.pop('aplis_senha', None)
+        aplis_senha = dados.pop("aplis_senha", None)
 
-        logger.info(f"[SalvarAdmissao] Credenciais apLIS: usuario={aplis_usuario or 'PADRÃƒO'}")
-
-
+        logger.info(
+            f"[SalvarAdmissao] Credenciais apLIS: usuario={aplis_usuario or 'PADRÃƒO'}"
+        )
 
         # Validar e preservar código da requisição exatamente como informado
 
-        if 'codRequisicao' in dados:
+        if "codRequisicao" in dados:
 
-            cod_requisicao_str = str(dados.get('codRequisicao') or '').strip()
+            cod_requisicao_str = str(dados.get("codRequisicao") or "").strip()
 
             if not cod_requisicao_str:
 
-                del dados['codRequisicao']
+                del dados["codRequisicao"]
 
             else:
 
-                dados['codRequisicao'] = cod_requisicao_str
+                dados["codRequisicao"] = cod_requisicao_str
 
                 # Requisições válidas no sistema: 13 dígitos iniciando com 0085 ou 0200
 
                 if not codigo_requisicao_valido(cod_requisicao_str):
 
-                    logger.warning(f"[SalvarAdmissao] âŒ Código de requisição inválido recebido: '{cod_requisicao_str}'")
+                    logger.warning(
+                        f"[SalvarAdmissao] âŒ Código de requisição inválido recebido: '{cod_requisicao_str}'"
+                    )
 
-                    return jsonify({
-
-                        "sucesso": 0,
-
-                        "erro": f"Código de requisição inválido: {cod_requisicao_str}"
-
-                    }), 400
-
-
+                    return (
+                        jsonify(
+                            {
+                                "sucesso": 0,
+                                "erro": f"Código de requisição inválido: {cod_requisicao_str}",
+                            }
+                        ),
+                        400,
+                    )
 
         # 1. Sanitização de IDs (Top Level)
 
-        campos_ids = ['idPaciente', 'idLaboratorio', 'idUnidade', 'idConvenio', 
-
-                      'idLocalOrigem', 'idFontePagadora', 'idMedico', 'idExame']
-
-        
+        campos_ids = [
+            "idPaciente",
+            "idLaboratorio",
+            "idUnidade",
+            "idConvenio",
+            "idLocalOrigem",
+            "idFontePagadora",
+            "idMedico",
+            "idExame",
+        ]
 
         for campo in campos_ids:
 
@@ -7061,7 +6566,7 @@ def salvar_admissao():
 
                     # Remover campos vazios opcionais para não enviar lixo
 
-                    if campo not in ['idPaciente', 'idLaboratorio', 'idUnidade']: 
+                    if campo not in ["idPaciente", "idLaboratorio", "idUnidade"]:
 
                         del dados[campo]
 
@@ -7073,39 +6578,41 @@ def salvar_admissao():
 
                         # Se for 0 e opcional, remover (apLIS pode rejeitar ID 0 como chave estrangeira inválida)
 
-                        if dados[campo] == 0 and campo not in ['idPaciente', 'idLaboratorio', 'idUnidade']:
+                        if dados[campo] == 0 and campo not in [
+                            "idPaciente",
+                            "idLaboratorio",
+                            "idUnidade",
+                        ]:
 
                             del dados[campo]
 
                     except (ValueError, TypeError):
 
-                        logger.warning(f"[SalvarAdmissao] Aviso: Campo {campo} não é numérico: {dados[campo]}")
-
-
+                        logger.warning(
+                            f"[SalvarAdmissao] Aviso: Campo {campo} não é numérico: {dados[campo]}"
+                        )
 
         # 2. Sanitização de Data (dtaColeta)
 
-        if 'dtaColeta' in dados and dados['dtaColeta']:
+        if "dtaColeta" in dados and dados["dtaColeta"]:
 
             # Remover hora se houver (apLIS espera YYYY-MM-DD)
 
-            if 'T' in dados['dtaColeta']:
+            if "T" in dados["dtaColeta"]:
 
-                dados['dtaColeta'] = dados['dtaColeta'].split('T')[0]
+                dados["dtaColeta"] = dados["dtaColeta"].split("T")[0]
 
-            elif ' ' in dados['dtaColeta']:
+            elif " " in dados["dtaColeta"]:
 
-                dados['dtaColeta'] = dados['dtaColeta'].split(' ')[0]
-
-
+                dados["dtaColeta"] = dados["dtaColeta"].split(" ")[0]
 
         # 3. Sanitização de examesConvenio
 
-        if 'examesConvenio' in dados and isinstance(dados['examesConvenio'], list):
+        if "examesConvenio" in dados and isinstance(dados["examesConvenio"], list):
 
             novos_exames = []
 
-            for item in dados['examesConvenio']:
+            for item in dados["examesConvenio"]:
 
                 if isinstance(item, dict):
 
@@ -7113,15 +6620,17 @@ def salvar_admissao():
 
                     # Se for objeto, extrair APENAS o ID (apLIS espera lista de IDs simples, não objetos)
 
-                    if 'idExame' in item and item['idExame']:
+                    if "idExame" in item and item["idExame"]:
 
                         try:
 
-                            novos_exames.append(int(item['idExame']))
+                            novos_exames.append(int(item["idExame"]))
 
                         except:
 
-                            logger.warning(f"[SalvarAdmissao] Erro ao converter idExame: {item}")
+                            logger.warning(
+                                f"[SalvarAdmissao] Erro ao converter idExame: {item}"
+                            )
 
                 elif isinstance(item, (int, str)) and item:
 
@@ -7135,17 +6644,17 @@ def salvar_admissao():
 
                         pass
 
-            dados['examesConvenio'] = novos_exames
+            dados["examesConvenio"] = novos_exames
 
-            logger.info(f"[SalvarAdmissao] examesConvenio sanitizados: {len(novos_exames)} exames")
-
-            
+            logger.info(
+                f"[SalvarAdmissao] examesConvenio sanitizados: {len(novos_exames)} exames"
+            )
 
             # Se lista ficou vazia, remover chave para evitar erro de lista vazia (se apLIS não gostar)
 
             if not novos_exames:
 
-                del dados['examesConvenio']
+                del dados["examesConvenio"]
 
             else:
 
@@ -7153,120 +6662,173 @@ def salvar_admissao():
 
                 # Usamos o primeiro exame da lista como principal
 
-                dados['idExame'] = novos_exames[0]
-
-        
+                dados["idExame"] = novos_exames[0]
 
         # Se veio apenas idExame na raiz e não tem lista, criar lista
 
-        if 'idExame' in dados and 'examesConvenio' not in dados:
+        if "idExame" in dados and "examesConvenio" not in dados:
 
-             dados['examesConvenio'] = [int(dados['idExame'])]
-
-
+            dados["examesConvenio"] = [int(dados["idExame"])]
 
         # IMPORTANTE: NÃƒO remover idExame da raiz - o apLIS precisa TANTO do idExame
 
         # na raiz QUANTO da lista examesConvenio para funcionar corretamente
 
-
+        # Regra de negócio temporária: fluxo 0085 deve usar CITOLOGIA EM MEIO LÍQUIDO
+        cod_req_digits = "".join(filter(str.isdigit, str(dados.get("codRequisicao") or "")))
+        if cod_req_digits.startswith("0085"):
+            id_exame_citologia_meio_liquido = 24
+            dados["idExame"] = id_exame_citologia_meio_liquido
+            dados["examesConvenio"] = [id_exame_citologia_meio_liquido]
+            logger.info(
+                "[SalvarAdmissao] ✅ Regra 0085 aplicada: idExame/examesConvenio fixados em CITOLOGIA EM MEIO LÍQUIDO (ID 24)"
+            )
 
         # Limpar placeholders textuais antes de converter nomes → IDs
-        for _campo_texto in ['convenio', 'localOrigem', 'origem', 'fontePagadora']:
-            if _campo_texto in dados and isinstance(dados.get(_campo_texto), str) and _texto_placeholder(dados.get(_campo_texto)):
+        for _campo_texto in ["convenio", "localOrigem", "origem", "fontePagadora"]:
+            if (
+                _campo_texto in dados
+                and isinstance(dados.get(_campo_texto), str)
+                and _texto_placeholder(dados.get(_campo_texto))
+            ):
                 del dados[_campo_texto]
 
         # ðŸ†• 4. Converter convênio/local/fonte por NOME para IDs (quando necessário)
 
         # 4.1 Convênio: aceitar nome em `convenio` (somente quando idConvenio não vier válido)
-        if 'convenio' in dados:
-            nome_convenio = dados.get('convenio')
-            id_convenio_informado = dados.get('idConvenio')
-            tem_id_convenio_valido = isinstance(id_convenio_informado, int) and id_convenio_informado > 0
-            if isinstance(nome_convenio, str) and nome_convenio.strip() and not tem_id_convenio_valido:
+        if "convenio" in dados:
+            nome_convenio = dados.get("convenio")
+            id_convenio_informado = dados.get("idConvenio")
+            tem_id_convenio_valido = (
+                isinstance(id_convenio_informado, int) and id_convenio_informado > 0
+            )
+            if (
+                isinstance(nome_convenio, str)
+                and nome_convenio.strip()
+                and not tem_id_convenio_valido
+            ):
                 convenio_nome_informado = True
-                logger.info(f"[SalvarAdmissao] 🔍 Recebido convenio como nome: '{nome_convenio}'")
+                logger.info(
+                    f"[SalvarAdmissao] 🔍 Recebido convenio como nome: '{nome_convenio}'"
+                )
                 id_convenio = _buscar_id_por_nome_convenio(nome_convenio)
                 if not id_convenio:
                     id_convenio = _buscar_id_convenio_por_nome_banco(nome_convenio)
                 if id_convenio:
                     try:
-                        dados['idConvenio'] = int(id_convenio)
+                        dados["idConvenio"] = int(id_convenio)
                         convenio_nome_resolvido = True
-                        logger.info(f"[SalvarAdmissao] ✅ Convênio convertido/priorizado: '{nome_convenio}' → ID {dados['idConvenio']}")
+                        logger.info(
+                            f"[SalvarAdmissao] ✅ Convênio convertido/priorizado: '{nome_convenio}' → ID {dados['idConvenio']}"
+                        )
                     except Exception:
-                        logger.warning(f"[SalvarAdmissao] ⚠️ Falha ao converter ID de convênio '{id_convenio}' para int")
+                        logger.warning(
+                            f"[SalvarAdmissao] ⚠️ Falha ao converter ID de convênio '{id_convenio}' para int"
+                        )
                 else:
-                    logger.warning(f"[SalvarAdmissao] ⚠️ Convênio '{nome_convenio}' não encontrado no cache")
-            elif isinstance(nome_convenio, str) and nome_convenio.strip() and tem_id_convenio_valido:
+                    logger.warning(
+                        f"[SalvarAdmissao] ⚠️ Convênio '{nome_convenio}' não encontrado no cache"
+                    )
+            elif (
+                isinstance(nome_convenio, str)
+                and nome_convenio.strip()
+                and tem_id_convenio_valido
+            ):
                 convenio_nome_informado = True
                 convenio_nome_resolvido = True
-                logger.info(f"[SalvarAdmissao] ✅ Mantendo idConvenio informado no payload: {id_convenio_informado} (ignorando nome '{nome_convenio}')")
+                logger.info(
+                    f"[SalvarAdmissao] ✅ Mantendo idConvenio informado no payload: {id_convenio_informado} (ignorando nome '{nome_convenio}')"
+                )
             # evitar enviar campo textual para a API downstream
-            del dados['convenio']
+            del dados["convenio"]
 
         # 4.2 Local de origem: aceitar nome em `localOrigem` ou `origem`
         # Regra de precedência: manter idLocalOrigem informado; converter por nome apenas se id ausente ou placeholder (1)
         nome_local = None
-        if isinstance(dados.get('localOrigem'), str) and dados.get('localOrigem', '').strip():
-            nome_local = dados.get('localOrigem')
-        elif isinstance(dados.get('origem'), str) and dados.get('origem', '').strip():
-            nome_local = dados.get('origem')
+        if (
+            isinstance(dados.get("localOrigem"), str)
+            and dados.get("localOrigem", "").strip()
+        ):
+            nome_local = dados.get("localOrigem")
+        elif isinstance(dados.get("origem"), str) and dados.get("origem", "").strip():
+            nome_local = dados.get("origem")
 
-        id_local_informado = dados.get('idLocalOrigem')
-        tem_id_local_valido = isinstance(id_local_informado, int) and id_local_informado > 0
-        precisa_converter_local_por_nome = (not tem_id_local_valido) or (id_local_informado == 1)
+        id_local_informado = dados.get("idLocalOrigem")
+        tem_id_local_valido = (
+            isinstance(id_local_informado, int) and id_local_informado > 0
+        )
+        precisa_converter_local_por_nome = (not tem_id_local_valido) or (
+            id_local_informado == 1
+        )
 
         if nome_local and precisa_converter_local_por_nome:
             local_nome_informado = True
-            logger.info(f"[SalvarAdmissao] 🔍 Recebido local de origem como nome: '{nome_local}'")
+            logger.info(
+                f"[SalvarAdmissao] 🔍 Recebido local de origem como nome: '{nome_local}'"
+            )
             id_local = _buscar_id_por_nome_instituicao(nome_local)
             if not id_local:
                 id_local = _buscar_id_local_origem_por_nome_banco(nome_local)
             if id_local:
                 try:
-                    dados['idLocalOrigem'] = int(id_local)
+                    dados["idLocalOrigem"] = int(id_local)
                     local_nome_resolvido = True
-                    logger.info(f"[SalvarAdmissao] ✅ Local de origem convertido/priorizado: '{nome_local}' → ID {dados['idLocalOrigem']}")
+                    logger.info(
+                        f"[SalvarAdmissao] ✅ Local de origem convertido/priorizado: '{nome_local}' → ID {dados['idLocalOrigem']}"
+                    )
                 except Exception:
-                    logger.warning(f"[SalvarAdmissao] ⚠️ Falha ao converter ID de local de origem '{id_local}' para int")
+                    logger.warning(
+                        f"[SalvarAdmissao] ⚠️ Falha ao converter ID de local de origem '{id_local}' para int"
+                    )
             else:
-                logger.warning(f"[SalvarAdmissao] ⚠️ Local de origem '{nome_local}' não encontrado no cache")
+                logger.warning(
+                    f"[SalvarAdmissao] ⚠️ Local de origem '{nome_local}' não encontrado no cache"
+                )
         elif nome_local and tem_id_local_valido and id_local_informado != 1:
             local_nome_informado = True
             local_nome_resolvido = True
-            logger.info(f"[SalvarAdmissao] ✅ Mantendo idLocalOrigem informado no payload: {id_local_informado} (ignorando nome '{nome_local}')")
+            logger.info(
+                f"[SalvarAdmissao] ✅ Mantendo idLocalOrigem informado no payload: {id_local_informado} (ignorando nome '{nome_local}')"
+            )
 
-        if 'localOrigem' in dados:
-            del dados['localOrigem']
-        if 'origem' in dados:
-            del dados['origem']
+        if "localOrigem" in dados:
+            del dados["localOrigem"]
+        if "origem" in dados:
+            del dados["origem"]
 
         # 4.3 Fonte pagadora: aceitar nome em `fontePagadora` (somente quando idFontePagadora não vier válido)
 
         logger.info(f"[SalvarAdmissao] ðŸ” DEBUG: Verificando campo fontePagadora...")
 
-        logger.info(f"[SalvarAdmissao] ðŸ” DEBUG: 'fontePagadora' in dados? {'fontePagadora' in dados}")
+        logger.info(
+            f"[SalvarAdmissao] ðŸ” DEBUG: 'fontePagadora' in dados? {'fontePagadora' in dados}"
+        )
 
-        if 'fontePagadora' in dados:
+        if "fontePagadora" in dados:
 
-            logger.info(f"[SalvarAdmissao] ðŸ” DEBUG: Valor: {dados['fontePagadora']}, Tipo: {type(dados['fontePagadora'])}")
+            logger.info(
+                f"[SalvarAdmissao] ðŸ” DEBUG: Valor: {dados['fontePagadora']}, Tipo: {type(dados['fontePagadora'])}"
+            )
 
-        
+        id_fonte_informado = dados.get("idFontePagadora")
+        tem_id_fonte_valido = (
+            isinstance(id_fonte_informado, int) and id_fonte_informado > 0
+        )
 
-        id_fonte_informado = dados.get('idFontePagadora')
-        tem_id_fonte_valido = isinstance(id_fonte_informado, int) and id_fonte_informado > 0
-
-        if 'fontePagadora' in dados and isinstance(dados['fontePagadora'], str) and not tem_id_fonte_valido:
+        if (
+            "fontePagadora" in dados
+            and isinstance(dados["fontePagadora"], str)
+            and not tem_id_fonte_valido
+        ):
             fonte_nome_informado = True
 
-            nome_fonte = dados['fontePagadora']
+            nome_fonte = dados["fontePagadora"]
 
-            logger.info(f"[SalvarAdmissao] ðŸ” Recebido fontePagadora como nome: '{nome_fonte}'")
+            logger.info(
+                f"[SalvarAdmissao] ðŸ” Recebido fontePagadora como nome: '{nome_fonte}'"
+            )
 
             logger.info(f"[SalvarAdmissao] ðŸ”„ Buscando ID da instituição no cache...")
-
-            
 
             instituicao = buscar_instituicao_por_nome(nome_fonte)
 
@@ -7276,99 +6838,141 @@ def salvar_admissao():
 
                 if id_fonte_db:
 
-                    instituicao = {'id': int(id_fonte_db), 'nome': nome_fonte}
+                    instituicao = {"id": int(id_fonte_db), "nome": nome_fonte}
 
             if instituicao:
 
-                dados['idFontePagadora'] = instituicao['id']
+                dados["idFontePagadora"] = instituicao["id"]
                 fonte_nome_resolvida = True
 
-                logger.info(f"[SalvarAdmissao] âœ… Fonte pagadora convertida: '{nome_fonte}' â†’ ID {instituicao['id']}")
+                logger.info(
+                    f"[SalvarAdmissao] âœ… Fonte pagadora convertida: '{nome_fonte}' â†’ ID {instituicao['id']}"
+                )
 
                 # Remover o campo de nome para não causar confusão
 
-                del dados['fontePagadora']
+                del dados["fontePagadora"]
 
             else:
 
-                logger.warning(f"[SalvarAdmissao] âš ️ Fonte pagadora '{nome_fonte}' não encontrada no cache")
+                logger.warning(
+                    f"[SalvarAdmissao] âš ️ Fonte pagadora '{nome_fonte}' não encontrada no cache"
+                )
 
                 # Manter o campo para tentar usar default depois
 
-                del dados['fontePagadora']
-        elif 'fontePagadora' in dados and isinstance(dados['fontePagadora'], str) and tem_id_fonte_valido:
+                del dados["fontePagadora"]
+        elif (
+            "fontePagadora" in dados
+            and isinstance(dados["fontePagadora"], str)
+            and tem_id_fonte_valido
+        ):
             fonte_nome_informado = True
             fonte_nome_resolvida = True
-            logger.info(f"[SalvarAdmissao] ✅ Mantendo idFontePagadora informado no payload: {id_fonte_informado} (ignorando nome '{dados['fontePagadora']}')")
-            del dados['fontePagadora']
+            logger.info(
+                f"[SalvarAdmissao] ✅ Mantendo idFontePagadora informado no payload: {id_fonte_informado} (ignorando nome '{dados['fontePagadora']}')"
+            )
+            del dados["fontePagadora"]
 
         # Bloquear fallback silencioso para default quando o usuário informou texto explícito
-        if convenio_nome_informado and not convenio_nome_resolvido and not dados.get('idConvenio'):
-            logger.error("[SalvarAdmissao] ❌ Convênio informado não pôde ser resolvido para ID; abortando para evitar default indevido")
-            return jsonify({
-                "sucesso": 0,
-                "erro": "Convênio informado não encontrado. Selecione uma opção válida da lista e tente novamente."
-            }), 400
+        if (
+            convenio_nome_informado
+            and not convenio_nome_resolvido
+            and not dados.get("idConvenio")
+        ):
+            logger.error(
+                "[SalvarAdmissao] ❌ Convênio informado não pôde ser resolvido para ID; abortando para evitar default indevido"
+            )
+            return (
+                jsonify(
+                    {
+                        "sucesso": 0,
+                        "erro": "Convênio informado não encontrado. Selecione uma opção válida da lista e tente novamente.",
+                    }
+                ),
+                400,
+            )
 
-        if fonte_nome_informado and not fonte_nome_resolvida and not dados.get('idFontePagadora'):
-            logger.error("[SalvarAdmissao] ❌ Fonte pagadora informada não pôde ser resolvida para ID; abortando para evitar default indevido")
-            return jsonify({
-                "sucesso": 0,
-                "erro": "Fonte pagadora informada não encontrada. Selecione uma opção válida da lista e tente novamente."
-            }), 400
+        if (
+            fonte_nome_informado
+            and not fonte_nome_resolvida
+            and not dados.get("idFontePagadora")
+        ):
+            logger.error(
+                "[SalvarAdmissao] ❌ Fonte pagadora informada não pôde ser resolvida para ID; abortando para evitar default indevido"
+            )
+            return (
+                jsonify(
+                    {
+                        "sucesso": 0,
+                        "erro": "Fonte pagadora informada não encontrada. Selecione uma opção válida da lista e tente novamente.",
+                    }
+                ),
+                400,
+            )
 
-        if local_nome_informado and not local_nome_resolvido and (not dados.get('idLocalOrigem') or dados.get('idLocalOrigem') == 1):
-            logger.error("[SalvarAdmissao] ❌ Local de origem informado não pôde ser resolvido para ID; abortando para evitar default indevido")
-            return jsonify({
-                "sucesso": 0,
-                "erro": "Local de origem informado não encontrado. Selecione uma opção válida da lista e tente novamente."
-            }), 400
-
-
+        if (
+            local_nome_informado
+            and not local_nome_resolvido
+            and (not dados.get("idLocalOrigem") or dados.get("idLocalOrigem") == 1)
+        ):
+            logger.error(
+                "[SalvarAdmissao] ❌ Local de origem informado não pôde ser resolvido para ID; abortando para evitar default indevido"
+            )
+            return (
+                jsonify(
+                    {
+                        "sucesso": 0,
+                        "erro": "Local de origem informado não encontrado. Selecione uma opção válida da lista e tente novamente.",
+                    }
+                ),
+                400,
+            )
 
         # 5. Defaults e Limpeza (CAMPOS OBRIGATÃ“RIOS DO APLIS)
 
-        if 'idLaboratorio' not in dados or not dados['idLaboratorio']:
+        if "idLaboratorio" not in dados or not dados["idLaboratorio"]:
 
-            logger.info("[SalvarAdmissao] idLaboratorio não informado, usando default: 1")
+            logger.info(
+                "[SalvarAdmissao] idLaboratorio não informado, usando default: 1"
+            )
 
-            dados['idLaboratorio'] = 1
+            dados["idLaboratorio"] = 1
 
-
-
-        if 'idUnidade' not in dados or not dados['idUnidade']:
+        if "idUnidade" not in dados or not dados["idUnidade"]:
 
             logger.info("[SalvarAdmissao] idUnidade não informada, usando default: 1")
 
-            dados['idUnidade'] = 1
-
-
+            dados["idUnidade"] = 1
 
         # ðŸ†• VERIFICAR SE REQUISIÃ‡ÃƒO JÁ EXISTE (para evitar conflito de fonte pagadora)
 
         requisicao_existente = None
 
-        fonte_do_ocr = dados.get('_fonte_dados') == 'ocr'  # Flag indicando que os dados vieram do OCR
+        fonte_do_ocr = (
+            dados.get("_fonte_dados") == "ocr"
+        )  # Flag indicando que os dados vieram do OCR
 
-        
+        if "codRequisicao" in dados and dados["codRequisicao"]:
 
-        if 'codRequisicao' in dados and dados['codRequisicao']:
+            logger.info(
+                f"[SalvarAdmissao] ðŸ” Verificando se requisição {dados['codRequisicao']} já existe..."
+            )
 
-            logger.info(f"[SalvarAdmissao] ðŸ” Verificando se requisição {dados['codRequisicao']} já existe...")
-
-            logger.info(f"[SalvarAdmissao] ðŸ“Š Fonte dos dados: {'OCR (PRIORIDADE)' if fonte_do_ocr else 'Banco/API'}")
-
-            
+            logger.info(
+                f"[SalvarAdmissao] ðŸ“Š Fonte dos dados: {'OCR (PRIORIDADE)' if fonte_do_ocr else 'Banco/API'}"
+            )
 
             try:
 
-                ids_banco = buscar_ids_banco(dados['codRequisicao'])
+                ids_banco = buscar_ids_banco(dados["codRequisicao"])
 
                 tem_algum_id_banco = bool(
-                    ids_banco and (
-                        ids_banco.get('IdConvenio') or
-                        ids_banco.get('IdFontePagadora') or
-                        ids_banco.get('IdLocalOrigem')
+                    ids_banco
+                    and (
+                        ids_banco.get("IdConvenio")
+                        or ids_banco.get("IdFontePagadora")
+                        or ids_banco.get("IdLocalOrigem")
                     )
                 )
 
@@ -7383,61 +6987,85 @@ def salvar_admissao():
                         f"IdLocalOrigem={ids_banco.get('IdLocalOrigem')}"
                     )
 
-                    
-
                     # ðŸ†• LÃ“GICA DE PRIORIZAÃ‡ÃƒO:
 
                     # - Se dados vieram do OCR: SEMPRE usar dados do OCR (mais atualizados/corretos)
 
                     # - Se dados vieram de edição manual no sistema: manter valor informado no payload
 
-                    if 'idFontePagadora' in dados and dados['idFontePagadora'] != ids_banco.get('IdFontePagadora'):
+                    if "idFontePagadora" in dados and dados[
+                        "idFontePagadora"
+                    ] != ids_banco.get("IdFontePagadora"):
 
                         if fonte_do_ocr:
 
-                            logger.warning(f"[SalvarAdmissao] âš ️ Divergência detectada entre OCR e banco!")
+                            logger.warning(
+                                f"[SalvarAdmissao] âš ️ Divergência detectada entre OCR e banco!"
+                            )
 
-                            logger.warning(f"[SalvarAdmissao]   ðŸ’³ Fonte do OCR (NOVA): {dados['idFontePagadora']}")
+                            logger.warning(
+                                f"[SalvarAdmissao]   ðŸ’³ Fonte do OCR (NOVA): {dados['idFontePagadora']}"
+                            )
 
-                            logger.warning(f"[SalvarAdmissao]   ðŸ’¾ Fonte do BANCO (ANTIGA): {ids_banco.get('IdFontePagadora')}")
+                            logger.warning(
+                                f"[SalvarAdmissao]   ðŸ’¾ Fonte do BANCO (ANTIGA): {ids_banco.get('IdFontePagadora')}"
+                            )
 
-                            logger.warning(f"[SalvarAdmissao]   âœ… USANDO DADOS DO OCR (prioridade) para atualizar cadastro")
+                            logger.warning(
+                                f"[SalvarAdmissao]   âœ… USANDO DADOS DO OCR (prioridade) para atualizar cadastro"
+                            )
 
                             # NÃƒO sobrescrever - manter dados do OCR
 
                         else:
 
-                            logger.warning(f"[SalvarAdmissao] âš ️ Divergência detectada com edição manual!")
+                            logger.warning(
+                                f"[SalvarAdmissao] âš ️ Divergência detectada com edição manual!"
+                            )
 
-                            logger.warning(f"[SalvarAdmissao]   Fonte informada no sistema: {dados['idFontePagadora']}")
+                            logger.warning(
+                                f"[SalvarAdmissao]   Fonte informada no sistema: {dados['idFontePagadora']}"
+                            )
 
-                            logger.warning(f"[SalvarAdmissao]   Fonte cadastrada no banco: {ids_banco.get('IdFontePagadora')}")
+                            logger.warning(
+                                f"[SalvarAdmissao]   Fonte cadastrada no banco: {ids_banco.get('IdFontePagadora')}"
+                            )
 
-                            logger.warning(f"[SalvarAdmissao]   ✅ Mantendo fonte informada no sistema (não sobrescrever)")
+                            logger.warning(
+                                f"[SalvarAdmissao]   ✅ Mantendo fonte informada no sistema (não sobrescrever)"
+                            )
 
                 else:
 
-                    logger.info(f"[SalvarAdmissao] ℹ️ Requisição não encontrada ou sem IDs complementares no banco")
+                    logger.info(
+                        f"[SalvarAdmissao] ℹ️ Requisição não encontrada ou sem IDs complementares no banco"
+                    )
 
             except Exception as e:
 
-                logger.error(f"[SalvarAdmissao] Erro ao verificar requisição existente: {e}")
-
-
+                logger.error(
+                    f"[SalvarAdmissao] Erro ao verificar requisição existente: {e}"
+                )
 
         # CRÍTICO: apLIS exige convênio, fonte pagadora e médico (não podem ser null/0)
 
         # Se não foram informados, buscar IDs válidos do cache (preferencialmente PARTICULAR)
 
-        if 'idConvenio' not in dados or not dados.get('idConvenio'):
+        if "idConvenio" not in dados or not dados.get("idConvenio"):
 
             # Se requisição existe E dados NÃƒO vieram do OCR, usar convênio cadastrado
 
-            if requisicao_existente and requisicao_existente.get('IdConvenio') and not fonte_do_ocr:
+            if (
+                requisicao_existente
+                and requisicao_existente.get("IdConvenio")
+                and not fonte_do_ocr
+            ):
 
-                dados['idConvenio'] = requisicao_existente['IdConvenio']
+                dados["idConvenio"] = requisicao_existente["IdConvenio"]
 
-                logger.info(f"[SalvarAdmissao] ðŸ’¾ Usando convênio da requisição existente (banco): {dados['idConvenio']}")
+                logger.info(
+                    f"[SalvarAdmissao] ðŸ’¾ Usando convênio da requisição existente (banco): {dados['idConvenio']}"
+                )
 
             else:
 
@@ -7445,15 +7073,19 @@ def salvar_admissao():
 
                 if id_convenio_default:
 
-                    logger.info(f"[SalvarAdmissao] idConvenio não informado, usando default: {id_convenio_default}")
+                    logger.info(
+                        f"[SalvarAdmissao] idConvenio não informado, usando default: {id_convenio_default}"
+                    )
 
-                    dados['idConvenio'] = id_convenio_default
+                    dados["idConvenio"] = id_convenio_default
 
                 else:
 
                     # Ultimo recurso: query direta ao banco (caso obter_id_convenio_default falhou)
 
-                    logger.warning('[SalvarAdmissao] obter_id_convenio_default retornou None. Tentando fallback direto...')
+                    logger.warning(
+                        "[SalvarAdmissao] obter_id_convenio_default retornou None. Tentando fallback direto..."
+                    )
 
                     try:
 
@@ -7461,7 +7093,9 @@ def salvar_admissao():
 
                         _cur_fc = _conn_fc.cursor(pymysql.cursors.DictCursor)
 
-                        _cur_fc.execute('SELECT IdConvenio AS id, NomConvenio AS nome FROM newdb.fatconvenio WHERE Inativo = 0 LIMIT 1')
+                        _cur_fc.execute(
+                            "SELECT IdConvenio AS id, NomConvenio AS nome FROM newdb.fatconvenio WHERE Inativo = 0 LIMIT 1"
+                        )
 
                         _row_fc = _cur_fc.fetchone()
 
@@ -7471,21 +7105,43 @@ def salvar_admissao():
 
                         if _row_fc:
 
-                            dados['idConvenio'] = int(_row_fc['id'])
+                            dados["idConvenio"] = int(_row_fc["id"])
 
-                            logger.info(f'[SalvarAdmissao] idConvenio (ultimo recurso): ID={_row_fc["id"]}, Nome={_row_fc["nome"]}')
+                            logger.info(
+                                f'[SalvarAdmissao] idConvenio (ultimo recurso): ID={_row_fc["id"]}, Nome={_row_fc["nome"]}'
+                            )
 
                         else:
 
-                            logger.error('[SalvarAdmissao] Tabela fatconvenio sem dados!')
+                            logger.error(
+                                "[SalvarAdmissao] Tabela fatconvenio sem dados!"
+                            )
 
-                            return jsonify({'sucesso': 0, 'erro': 'Convenio nao informado e sem registros no banco.'}), 400
+                            return (
+                                jsonify(
+                                    {
+                                        "sucesso": 0,
+                                        "erro": "Convenio nao informado e sem registros no banco.",
+                                    }
+                                ),
+                                400,
+                            )
 
                     except Exception as _e_fc:
 
-                        logger.error(f'[SalvarAdmissao] Erro fallback idConvenio: {_e_fc}')
+                        logger.error(
+                            f"[SalvarAdmissao] Erro fallback idConvenio: {_e_fc}"
+                        )
 
-                        return jsonify({'sucesso': 0, 'erro': 'Erro ao buscar convenio no banco.'}), 400
+                        return (
+                            jsonify(
+                                {
+                                    "sucesso": 0,
+                                    "erro": "Erro ao buscar convenio no banco.",
+                                }
+                            ),
+                            400,
+                        )
 
         else:
 
@@ -7493,19 +7149,25 @@ def salvar_admissao():
 
             if fonte_do_ocr:
 
-                logger.info(f"[SalvarAdmissao] ðŸ“¸ Convênio do OCR: {dados['idConvenio']}")
+                logger.info(
+                    f"[SalvarAdmissao] ðŸ“¸ Convênio do OCR: {dados['idConvenio']}"
+                )
 
-
-
-        if 'idFontePagadora' not in dados or not dados.get('idFontePagadora'):
+        if "idFontePagadora" not in dados or not dados.get("idFontePagadora"):
 
             # Se requisição existe E dados NÃƒO vieram do OCR, usar fonte pagadora cadastrada
 
-            if requisicao_existente and requisicao_existente.get('IdFontePagadora') and not fonte_do_ocr:
+            if (
+                requisicao_existente
+                and requisicao_existente.get("IdFontePagadora")
+                and not fonte_do_ocr
+            ):
 
-                dados['idFontePagadora'] = requisicao_existente['IdFontePagadora']
+                dados["idFontePagadora"] = requisicao_existente["IdFontePagadora"]
 
-                logger.info(f"[SalvarAdmissao] ðŸ’¾ Usando fonte pagadora da requisição existente (banco): {dados['idFontePagadora']}")
+                logger.info(
+                    f"[SalvarAdmissao] ðŸ’¾ Usando fonte pagadora da requisição existente (banco): {dados['idFontePagadora']}"
+                )
 
             else:
 
@@ -7513,48 +7175,82 @@ def salvar_admissao():
 
                 if id_instituicao_default:
 
-                    logger.info(f"[SalvarAdmissao] idFontePagadora não informada, usando default: {id_instituicao_default}")
+                    logger.info(
+                        f"[SalvarAdmissao] idFontePagadora não informada, usando default: {id_instituicao_default}"
+                    )
 
-                    dados['idFontePagadora'] = id_instituicao_default
+                    dados["idFontePagadora"] = id_instituicao_default
 
                 else:
                     # Ultimo recurso: query direta ao banco (caso obter_id_instituicao_default falhou)
-                    logger.warning('[SalvarAdmissao] obter_id_instituicao_default retornou None. Tentando fallback direto...')
+                    logger.warning(
+                        "[SalvarAdmissao] obter_id_instituicao_default retornou None. Tentando fallback direto..."
+                    )
                     try:
                         _conn_fb = pymysql.connect(**DB_CONFIG)
                         _cur_fb = _conn_fb.cursor(pymysql.cursors.DictCursor)
-                        _cur_fb.execute('SELECT IdInstituicao AS id, NomFantasia AS nome FROM newdb.fatinstituicao WHERE Inativo = 0 LIMIT 1')
+                        _cur_fb.execute(
+                            "SELECT IdInstituicao AS id, NomFantasia AS nome FROM newdb.fatinstituicao WHERE Inativo = 0 LIMIT 1"
+                        )
                         _row_fb = _cur_fb.fetchone()
                         _cur_fb.close()
                         _conn_fb.close()
                         if _row_fb:
-                            dados['idFontePagadora'] = int(_row_fb['id'])
-                            logger.info(f'[SalvarAdmissao] idFontePagadora (ultimo recurso): ID={_row_fb["id"]}, Nome={_row_fb["nome"]}')
+                            dados["idFontePagadora"] = int(_row_fb["id"])
+                            logger.info(
+                                f'[SalvarAdmissao] idFontePagadora (ultimo recurso): ID={_row_fb["id"]}, Nome={_row_fb["nome"]}'
+                            )
                         else:
-                            logger.error('[SalvarAdmissao] Tabela fatinstituicao sem dados!')
-                            return jsonify({'sucesso': 0, 'erro': 'Fonte pagadora nao informada e sem registros no banco.'}), 400
+                            logger.error(
+                                "[SalvarAdmissao] Tabela fatinstituicao sem dados!"
+                            )
+                            return (
+                                jsonify(
+                                    {
+                                        "sucesso": 0,
+                                        "erro": "Fonte pagadora nao informada e sem registros no banco.",
+                                    }
+                                ),
+                                400,
+                            )
                     except Exception as _e_fb:
-                        logger.error(f'[SalvarAdmissao] Erro fallback idFontePagadora: {_e_fb}')
-                        return jsonify({'sucesso': 0, 'erro': 'Erro ao buscar fonte pagadora no banco.'}), 400
+                        logger.error(
+                            f"[SalvarAdmissao] Erro fallback idFontePagadora: {_e_fb}"
+                        )
+                        return (
+                            jsonify(
+                                {
+                                    "sucesso": 0,
+                                    "erro": "Erro ao buscar fonte pagadora no banco.",
+                                }
+                            ),
+                            400,
+                        )
         else:
 
             # Se fonte pagadora foi informada E veio do OCR, logar a fonte
 
             if fonte_do_ocr:
 
-                logger.info(f"[SalvarAdmissao] ðŸ“¸ Fonte pagadora do OCR: {dados['idFontePagadora']}")
-
-
+                logger.info(
+                    f"[SalvarAdmissao] ðŸ“¸ Fonte pagadora do OCR: {dados['idFontePagadora']}"
+                )
 
         # Garantir local de origem no payload final do apLIS
 
-        if 'idLocalOrigem' not in dados or not dados.get('idLocalOrigem'):
+        if "idLocalOrigem" not in dados or not dados.get("idLocalOrigem"):
 
-            if requisicao_existente and requisicao_existente.get('IdLocalOrigem') and not fonte_do_ocr:
+            if (
+                requisicao_existente
+                and requisicao_existente.get("IdLocalOrigem")
+                and not fonte_do_ocr
+            ):
 
-                dados['idLocalOrigem'] = requisicao_existente['IdLocalOrigem']
+                dados["idLocalOrigem"] = requisicao_existente["IdLocalOrigem"]
 
-                logger.info(f"[SalvarAdmissao] 💾 Usando local de origem da requisição existente (banco): {dados['idLocalOrigem']}")
+                logger.info(
+                    f"[SalvarAdmissao] 💾 Usando local de origem da requisição existente (banco): {dados['idLocalOrigem']}"
+                )
 
             else:
 
@@ -7566,7 +7262,9 @@ def salvar_admissao():
 
                     _cur_lo = _conn_lo.cursor(pymysql.cursors.DictCursor)
 
-                    _cur_lo.execute('SELECT IdInstituicao AS id, NomFantasia AS nome FROM newdb.fatinstituicao WHERE Local = 1 AND Inativo = 0 LIMIT 1')
+                    _cur_lo.execute(
+                        "SELECT IdInstituicao AS id, NomFantasia AS nome FROM newdb.fatinstituicao WHERE Local = 1 AND Inativo = 0 LIMIT 1"
+                    )
 
                     _row_lo = _cur_lo.fetchone()
 
@@ -7576,49 +7274,55 @@ def salvar_admissao():
 
                     if _row_lo:
 
-                        dados['idLocalOrigem'] = int(_row_lo['id'])
+                        dados["idLocalOrigem"] = int(_row_lo["id"])
 
-                        logger.info(f"[SalvarAdmissao] idLocalOrigem não informado, usando fallback Local=1: ID={_row_lo['id']}, Nome={_row_lo['nome']}")
+                        logger.info(
+                            f"[SalvarAdmissao] idLocalOrigem não informado, usando fallback Local=1: ID={_row_lo['id']}, Nome={_row_lo['nome']}"
+                        )
 
                 except Exception as _e_lo:
 
-                    logger.error(f"[SalvarAdmissao] Erro ao definir fallback de idLocalOrigem: {_e_lo}")
+                    logger.error(
+                        f"[SalvarAdmissao] Erro ao definir fallback de idLocalOrigem: {_e_lo}"
+                    )
 
         else:
 
-            logger.info(f"[SalvarAdmissao] ✅ Mantendo idLocalOrigem informado no sistema: {dados.get('idLocalOrigem')}")
+            logger.info(
+                f"[SalvarAdmissao] ✅ Mantendo idLocalOrigem informado no sistema: {dados.get('idLocalOrigem')}"
+            )
 
-
-
-        if 'idMedico' not in dados or not dados.get('idMedico'):
+        if "idMedico" not in dados or not dados.get("idMedico"):
 
             id_medico_default = obter_id_medico_default()
 
             if id_medico_default:
 
-                logger.info(f"[SalvarAdmissao] idMedico não informado, usando default: {id_medico_default}")
+                logger.info(
+                    f"[SalvarAdmissao] idMedico não informado, usando default: {id_medico_default}"
+                )
 
-                dados['idMedico'] = id_medico_default
+                dados["idMedico"] = id_medico_default
 
             else:
 
-                logger.error("[SalvarAdmissao] âŒ Cache de médicos vazio! Não é possível salvar sem médico.")
+                logger.error(
+                    "[SalvarAdmissao] âŒ Cache de médicos vazio! Não é possível salvar sem médico."
+                )
 
-                return jsonify({
+                return (
+                    jsonify(
+                        {
+                            "sucesso": 0,
+                            "erro": "Médico não informado e cache de médicos vazio. Configure os dados no sistema.",
+                        }
+                    ),
+                    400,
+                )
 
-                    "sucesso": 0,
+        if "codRequisicao" in dados and not dados["codRequisicao"]:
 
-                    "erro": "Médico não informado e cache de médicos vazio. Configure os dados no sistema."
-
-                }), 400
-
-
-
-        if 'codRequisicao' in dados and not dados['codRequisicao']:
-
-            del dados['codRequisicao']
-
-
+            del dados["codRequisicao"]
 
         # ðŸ†• VALIDAR numGuia (alguns convênios exigem 8, outros 9 dígitos)
 
@@ -7628,51 +7332,63 @@ def salvar_admissao():
 
         tem_num_guia_valido = False
 
-        if 'numGuia' in dados:
+        if "numGuia" in dados:
 
-            logger.info(f"[SalvarAdmissao] ðŸ” Campo numGuia recebido: '{dados['numGuia']}' (tipo: {type(dados['numGuia'])})")
+            logger.info(
+                f"[SalvarAdmissao] ðŸ” Campo numGuia recebido: '{dados['numGuia']}' (tipo: {type(dados['numGuia'])})"
+            )
 
-            num_guia = str(dados['numGuia']).strip()
+            num_guia = str(dados["numGuia"]).strip()
 
             # Remover caracteres não numéricos
 
-            num_guia_limpo = ''.join(filter(str.isdigit, num_guia))
+            num_guia_limpo = "".join(filter(str.isdigit, num_guia))
 
-            
+            logger.info(
+                f"[SalvarAdmissao] ðŸ” numGuia após limpeza: '{num_guia_limpo}' (tamanho: {len(num_guia_limpo)})"
+            )
 
-            logger.info(f"[SalvarAdmissao] ðŸ” numGuia após limpeza: '{num_guia_limpo}' (tamanho: {len(num_guia_limpo)})")
+            # Aceita 7, 8 ou 9 dígitos e rejeita apenas sequências de zeros
 
-            
-
-            # Aceita 8 ou 9 dígitos e rejeita apenas sequências de zeros
-
-            if num_guia_limpo and len(num_guia_limpo) in (8, 9) and num_guia_limpo not in ('00000000', '000000000'):
+            if (
+                num_guia_limpo
+                and len(num_guia_limpo) in (7, 8, 9)
+                and num_guia_limpo not in ("0000000", "00000000", "000000000")
+            ):
 
                 # Válido - manter
 
-                dados['numGuia'] = num_guia_limpo
+                dados["numGuia"] = num_guia_limpo
 
                 tem_num_guia_valido = True
 
-                logger.info(f"[SalvarAdmissao] âœ… numGuia válido, será enviado: {num_guia_limpo}")
+                logger.info(
+                    f"[SalvarAdmissao] âœ… numGuia válido, será enviado: {num_guia_limpo}"
+                )
 
             else:
 
                 # Inválido - remover
 
-                del dados['numGuia']
+                del dados["numGuia"]
 
-                logger.warning(f"[SalvarAdmissao] âš ️ numGuia inválido ou vazio ('{num_guia_limpo}'), campo removido")
+                logger.warning(
+                    f"[SalvarAdmissao] âš ️ numGuia inválido ou vazio ('{num_guia_limpo}'), campo removido"
+                )
 
-                logger.warning(f"[SalvarAdmissao] âš ️ ATENÃ‡ÃƒO: Se o apLIS rejeitar, pode ser por formato de dígitos incompatível para este convênio/exame")
+                logger.warning(
+                    f"[SalvarAdmissao] âš ️ ATENÃ‡ÃƒO: Se o apLIS rejeitar, pode ser por formato de dígitos incompatível para este convênio/exame"
+                )
 
         else:
 
-            logger.warning(f"[SalvarAdmissao] âš ️ Campo numGuia não presente nos dados recebidos")
+            logger.warning(
+                f"[SalvarAdmissao] âš ️ Campo numGuia não presente nos dados recebidos"
+            )
 
-            logger.warning(f"[SalvarAdmissao] âš ️ Alguns convênios exigem número da guia. Se o apLIS rejeitar, preencha o campo 'Número da Guia'")
-
-
+            logger.warning(
+                f"[SalvarAdmissao] âš ️ Alguns convênios exigem número da guia. Se o apLIS rejeitar, preencha o campo 'Número da Guia'"
+            )
 
         # ðŸ†• GERAR numGuia PROVISÃ“RIO se não tiver (previne erro do apLIS)
 
@@ -7680,159 +7396,251 @@ def salvar_admissao():
 
         # Solução: usar os últimos 9 dígitos do código da requisição como número da guia
 
-        if not tem_num_guia_valido and 'codRequisicao' in dados and dados['codRequisicao']:
+        if (
+            not tem_num_guia_valido
+            and "codRequisicao" in dados
+            and dados["codRequisicao"]
+        ):
 
-            cod_req_limpo = ''.join(filter(str.isdigit, str(dados['codRequisicao'])))
+            cod_req_limpo = "".join(filter(str.isdigit, str(dados["codRequisicao"])))
+            alvo_digitos_guia = 7 if cod_req_limpo.startswith("0085") else 9
 
-            if len(cod_req_limpo) >= 9:
+            if len(cod_req_limpo) >= alvo_digitos_guia:
 
-                # Pegar últimos 9 dígitos
+                # Pegar últimos dígitos conforme regra do fluxo
 
-                num_guia_provisorio = cod_req_limpo[-9:]
+                num_guia_provisorio = cod_req_limpo[-alvo_digitos_guia:]
 
-                dados['numGuia'] = num_guia_provisorio
+                dados["numGuia"] = num_guia_provisorio
 
-                logger.info(f"[SalvarAdmissao] ðŸ”„ numGuia gerado automaticamente (últimos 9 dígitos): {num_guia_provisorio}")
+                logger.info(
+                    f"[SalvarAdmissao] ðŸ”„ numGuia gerado automaticamente (últimos {alvo_digitos_guia} dígitos): {num_guia_provisorio}"
+                )
 
-                logger.info(f"[SalvarAdmissao] ðŸ’¡ Baseado no código da requisição: {dados['codRequisicao']}")
+                logger.info(
+                    f"[SalvarAdmissao] ðŸ’¡ Baseado no código da requisição: {dados['codRequisicao']}"
+                )
 
             else:
 
-                # Código muito curto, usar com zeros à esquerda
+                # Código muito curto, usar com zeros à esquerda respeitando tamanho-alvo
 
-                num_guia_provisorio = cod_req_limpo.zfill(9)[-9:]
+                num_guia_provisorio = cod_req_limpo.zfill(alvo_digitos_guia)[
+                    -alvo_digitos_guia:
+                ]
 
-                dados['numGuia'] = num_guia_provisorio
+                dados["numGuia"] = num_guia_provisorio
 
-                logger.info(f"[SalvarAdmissao] ðŸ”„ numGuia gerado (código curto, com padding): {num_guia_provisorio}")
-
+                logger.info(
+                    f"[SalvarAdmissao] ðŸ”„ numGuia gerado (código curto, com padding {alvo_digitos_guia}): {num_guia_provisorio}"
+                )
 
         # Capturar matrícula do convênio (campo de paciente) para atualização via pacienteAlterar
-        mat_convenio_raw = dados.get('matConvenio') or dados.get('MatConvenio')
-        mat_convenio_limpa = ''.join(filter(str.isdigit, str(mat_convenio_raw or '')))
+        mat_convenio_raw = (
+            dados.get("matConvenio")
+            or dados.get("MatConvenio")
+            or dados.get("matriculaConvenio")
+        )
+        # Aceitar carteirinha alfanumérica (alguns convênios usam letras)
+        mat_convenio_limpa = re.sub(r"[^0-9A-Za-z]", "", str(mat_convenio_raw or "")).upper()
+        cod_req_digits = "".join(filter(str.isdigit, str(dados.get("codRequisicao") or "")))
+
+        # Regra específica 0085: se carteirinha vier vazia, usar fallback de 7 dígitos
+        # (prioriza numGuia já sanitizado; se não houver, usa código da requisição)
+        if not mat_convenio_limpa and cod_req_digits.startswith("0085"):
+            num_guia_digits = "".join(filter(str.isdigit, str(dados.get("numGuia") or "")))
+            fallback_carteirinha = (
+                num_guia_digits[-7:]
+                if len(num_guia_digits) >= 7
+                else (cod_req_digits[-7:] if len(cod_req_digits) >= 7 else "")
+            )
+            if fallback_carteirinha:
+                mat_convenio_limpa = fallback_carteirinha
+                logger.warning(
+                    f"[SalvarAdmissao] ⚠️ Carteirinha ausente no fluxo 0085. Aplicando fallback automático (7 dígitos): {mat_convenio_limpa}"
+                )
+
+        # Regra dura 0085: SEMPRE enviar guia e carteirinha com 7 dígitos
+        # (evita divergência entre frontend/retry e requisito do convênio)
+        if cod_req_digits.startswith("0085"):
+            num_guia_digits = "".join(filter(str.isdigit, str(dados.get("numGuia") or "")))
+            if len(num_guia_digits) >= 7:
+                dados["numGuia"] = num_guia_digits[-7:]
+            elif len(cod_req_digits) >= 7:
+                dados["numGuia"] = cod_req_digits[-7:]
+
+            mat_digits = "".join(filter(str.isdigit, str(mat_convenio_limpa or "")))
+            if len(mat_digits) >= 7:
+                mat_convenio_limpa = mat_digits[-7:]
+            elif len(str(dados.get("numGuia") or "")) >= 7:
+                mat_convenio_limpa = str(dados.get("numGuia"))[-7:]
+            elif len(cod_req_digits) >= 7:
+                mat_convenio_limpa = cod_req_digits[-7:]
+
+            logger.warning(
+                f"[SalvarAdmissao][REGRA_0085_V4] Aplicada normalização rígida: numGuia={dados.get('numGuia')} | matConvenio={mat_convenio_limpa}"
+            )
+
         if mat_convenio_raw and not mat_convenio_limpa:
-            logger.warning(f"[SalvarAdmissao] ⚠️ matConvenio recebida sem dígitos válidos: '{mat_convenio_raw}'")
-
-
+            logger.warning(
+                f"[SalvarAdmissao] ⚠️ matConvenio recebida sem caracteres alfanuméricos válidos: '{mat_convenio_raw}'"
+            )
 
         # ðŸ†• LIMPAR campos vazios (apLIS rejeita strings vazias)
 
         # Remover campos que estão vazios para evitar erros de validação
 
-        campos_para_limpar = ['matConvenio', 'fontePagadora', 'dadosClinicos']
+        campos_para_limpar = ["matConvenio", "fontePagadora", "dadosClinicos"]
 
         for campo in campos_para_limpar:
 
-            if campo in dados and (dados[campo] == '' or dados[campo] is None):
+            if campo in dados and (dados[campo] == "" or dados[campo] is None):
 
-                logger.warning(f"[SalvarAdmissao] âš ️ Campo '{campo}' está vazio, removendo do payload")
+                logger.warning(
+                    f"[SalvarAdmissao] âš ️ Campo '{campo}' está vazio, removendo do payload"
+                )
 
                 del dados[campo]
 
-
-
         # matConvenio pode ser exigido pelo admissaoSalvar em alguns cenários
         # (ex.: quando pacienteAlterar não consegue persistir matrícula para o paciente)
-        for campo_paciente in ['validadeMatricula', 'MatConvenio', 'ValidadeMatricula']:
+        for campo_paciente in ["validadeMatricula", "ValidadeMatricula"]:
             if campo_paciente in dados:
-                logger.info(f'[SalvarAdmissao] Removendo campo de paciente do payload admissaoSalvar: {campo_paciente}')
+                logger.info(
+                    f"[SalvarAdmissao] Removendo campo de paciente do payload admissaoSalvar: {campo_paciente}"
+                )
                 del dados[campo_paciente]
 
         # Normalizar matConvenio quando informado (apLIS aceita variação por convênio)
         if mat_convenio_limpa:
-            dados['matConvenio'] = mat_convenio_limpa
-            logger.info(f"[SalvarAdmissao] ✅ Enviando matConvenio no admissaoSalvar (fallback): {mat_convenio_limpa} (len={len(mat_convenio_limpa)})")
-        elif 'matConvenio' in dados:
-            del dados['matConvenio']
-            logger.warning(f"[SalvarAdmissao] ⚠️ matConvenio removida do payload final por ausência de dígitos válidos: '{mat_convenio_raw}'")
-
-
+            dados["matConvenio"] = mat_convenio_limpa
+            dados["MatConvenio"] = mat_convenio_limpa
+            dados["matriculaConvenio"] = mat_convenio_limpa
+            logger.info(
+                f"[SalvarAdmissao] ✅ Enviando carteirinha no admissaoSalvar (aliases matConvenio/MatConvenio/matriculaConvenio): {mat_convenio_limpa} (len={len(mat_convenio_limpa)})"
+            )
+        elif "matConvenio" in dados:
+            del dados["matConvenio"]
+            dados.pop("MatConvenio", None)
+            dados.pop("matriculaConvenio", None)
+            logger.warning(
+                f"[SalvarAdmissao] ⚠️ matConvenio removida do payload final por ausência de caracteres válidos: '{mat_convenio_raw}'"
+            )
 
         # Validar idPaciente > 0 (se fornecido)
 
-        if 'idPaciente' in dados and (not isinstance(dados['idPaciente'], int) or dados['idPaciente'] <= 0):
+        if "idPaciente" in dados and (
+            not isinstance(dados["idPaciente"], int) or dados["idPaciente"] <= 0
+        ):
 
-             return jsonify({
-
-                "sucesso": 0,
-
-                "erro": f"ID do Paciente inválido: {dados.get('idPaciente')}"
-
-            }), 400
+            return (
+                jsonify(
+                    {
+                        "sucesso": 0,
+                        "erro": f"ID do Paciente inválido: {dados.get('idPaciente')}",
+                    }
+                ),
+                400,
+            )
 
         # 🆕 SE TEM idPaciente válido, atualizar paciente no apLIS (CPF/nascimento/matrícula)
         # Isso garante que pacientes com dados incompletos no apLIS sejam atualizados ao salvar
-        if dados.get('idPaciente') and isinstance(dados['idPaciente'], int) and dados['idPaciente'] > 0:
-            cpf_para_upd = dados.pop('NumCPF', None)
-            nome_para_upd = dados.pop('NomPaciente', None)
-            dta_para_upd = dados.pop('DtaNasc', None)
+        if (
+            dados.get("idPaciente")
+            and isinstance(dados["idPaciente"], int)
+            and dados["idPaciente"] > 0
+        ):
+            cpf_para_upd = dados.pop("NumCPF", None)
+            nome_para_upd = dados.pop("NomPaciente", None)
+            dta_para_upd = dados.pop("DtaNasc", None)
 
             if cpf_para_upd or dta_para_upd or mat_convenio_limpa:
                 try:
-                    dat_upd = {"idEvento": "4", "codPaciente": dados['idPaciente']}
+                    dat_upd = {"idEvento": "4", "codPaciente": dados["idPaciente"]}
                     if cpf_para_upd:
-                        dat_upd['cpf'] = cpf_para_upd
+                        dat_upd["cpf"] = cpf_para_upd
                     if dta_para_upd:
-                        dat_upd['dtaNascimento'] = dta_para_upd
+                        dat_upd["dtaNascimento"] = dta_para_upd
                     if nome_para_upd:
-                        dat_upd['nomePaciente'] = nome_para_upd
+                        dat_upd["nomePaciente"] = nome_para_upd
 
                     # Atualizar matrícula do convênio quando houver dígitos válidos
                     if mat_convenio_limpa:
-                        dat_upd['matriculaConvenio'] = mat_convenio_limpa
+                        dat_upd["matriculaConvenio"] = mat_convenio_limpa
 
-                    logger.info(f"[SalvarAdmissao] 🔄 Atualizando paciente {dados['idPaciente']} no apLIS (CPF/nascimento/matrícula)...")
-                    resp_upd = fazer_requisicao_aplis("pacienteAlterar", dat_upd, aplis_usuario, aplis_senha)
+                    logger.info(
+                        f"[SalvarAdmissao] 🔄 Atualizando paciente {dados['idPaciente']} no apLIS (CPF/nascimento/matrícula)..."
+                    )
+                    resp_upd = fazer_requisicao_aplis(
+                        "pacienteAlterar", dat_upd, aplis_usuario, aplis_senha
+                    )
                     if resp_upd.get("dat", {}).get("sucesso") == 1:
                         logger.info(f"[SalvarAdmissao] ✅ Paciente atualizado no apLIS")
                     else:
-                        logger.warning(f"[SalvarAdmissao] ⚠️ Não foi possível atualizar paciente: {resp_upd}")
+                        logger.warning(
+                            f"[SalvarAdmissao] ⚠️ Não foi possível atualizar paciente: {resp_upd}"
+                        )
                 except Exception as e_upd:
-                    logger.warning(f"[SalvarAdmissao] ⚠️ Erro ao atualizar paciente (não crítico): {e_upd}")
+                    logger.warning(
+                        f"[SalvarAdmissao] ⚠️ Erro ao atualizar paciente (não crítico): {e_upd}"
+                    )
 
         # 🆕 SE NÃO TEM idPaciente, tentar buscar/criar pelo CPF
 
-        if 'idPaciente' not in dados or dados.get('idPaciente') is None or dados.get('idPaciente') == '':
+        if (
+            "idPaciente" not in dados
+            or dados.get("idPaciente") is None
+            or dados.get("idPaciente") == ""
+        ):
 
-            logger.warning("[SalvarAdmissao] âš ️ idPaciente não fornecido - tentando buscar/criar paciente pelo CPF")
-
-
+            logger.warning(
+                "[SalvarAdmissao] âš ️ idPaciente não fornecido - tentando buscar/criar paciente pelo CPF"
+            )
 
             # Verificar se temos CPF para buscar (aceitar vários formatos)
 
-            cpf_paciente = dados.get('cpf') or dados.get('NumCPF') or dados.get('CPF')
+            cpf_paciente = dados.get("cpf") or dados.get("NumCPF") or dados.get("CPF")
 
-            nome_paciente = dados.get('nome') or dados.get('nomePaciente') or dados.get('NomPaciente')
+            nome_paciente = (
+                dados.get("nome")
+                or dados.get("nomePaciente")
+                or dados.get("NomPaciente")
+            )
 
-            data_nascimento = dados.get('dataNascimento') or dados.get('dtaNasc') or dados.get('DtaNasc') or dados.get('DtaNascimento')
-
-
+            data_nascimento = (
+                dados.get("dataNascimento")
+                or dados.get("dtaNasc")
+                or dados.get("DtaNasc")
+                or dados.get("DtaNascimento")
+            )
 
             if not cpf_paciente:
 
                 logger.error("[SalvarAdmissao] âŒ Dados do paciente não fornecidos!")
 
-                logger.error(f"[SalvarAdmissao] âŒ Campos recebidos: {list(dados.keys())}")
+                logger.error(
+                    f"[SalvarAdmissao] âŒ Campos recebidos: {list(dados.keys())}"
+                )
 
-                logger.error(f"[SalvarAdmissao] âŒ Valores: cpf={dados.get('cpf')}, NumCPF={dados.get('NumCPF')}, CPF={dados.get('CPF')}")
+                logger.error(
+                    f"[SalvarAdmissao] âŒ Valores: cpf={dados.get('cpf')}, NumCPF={dados.get('NumCPF')}, CPF={dados.get('CPF')}"
+                )
 
-                return jsonify({
-
-                    "sucesso": 0,
-
-                    "erro": "idPaciente não informado e CPF não encontrado nos dados recebidos. O frontend deve enviar 'cpf', 'NumCPF' ou 'CPF' junto com 'nome'/'NomPaciente' para criar novo paciente."
-
-                }), 400
-
-
+                return (
+                    jsonify(
+                        {
+                            "sucesso": 0,
+                            "erro": "idPaciente não informado e CPF não encontrado nos dados recebidos. O frontend deve enviar 'cpf', 'NumCPF' ou 'CPF' junto com 'nome'/'NomPaciente' para criar novo paciente.",
+                        }
+                    ),
+                    400,
+                )
 
             # Limpar CPF
 
-            cpf_limpo = ''.join(filter(str.isdigit, cpf_paciente))
+            cpf_limpo = "".join(filter(str.isdigit, cpf_paciente))
 
             logger.info(f"[SalvarAdmissao] ðŸ” Buscando paciente por CPF: {cpf_limpo}")
-
-
 
             # 1. BUSCAR PACIENTE NO BANCO LOCAL (MySQL)
 
@@ -7850,8 +7658,6 @@ def salvar_admissao():
 
                     resultado = cursor.fetchone()
 
-
-
                     if resultado:
 
                         # Paciente encontrado no banco local!
@@ -7860,9 +7666,11 @@ def salvar_admissao():
 
                         nome_encontrado = resultado[1]
 
-                        logger.info(f"[SalvarAdmissao] âœ… Paciente encontrado no banco LOCAL! ID: {cod_paciente} - {nome_encontrado}")
+                        logger.info(
+                            f"[SalvarAdmissao] âœ… Paciente encontrado no banco LOCAL! ID: {cod_paciente} - {nome_encontrado}"
+                        )
 
-                        dados['idPaciente'] = cod_paciente
+                        dados["idPaciente"] = cod_paciente
 
                         paciente_encontrado_local = True
 
@@ -7870,41 +7678,36 @@ def salvar_admissao():
 
             except Exception as e:
 
-                logger.error(f"[SalvarAdmissao] Erro ao buscar no banco local: {str(e)}")
-
-            
+                logger.error(
+                    f"[SalvarAdmissao] Erro ao buscar no banco local: {str(e)}"
+                )
 
             # 2. SE NÃƒO ENCONTROU LOCAL, BUSCAR NA API DO apLIS
 
             if not paciente_encontrado_local:
 
-                logger.warning(f"[SalvarAdmissao] âš ️ Paciente com CPF {cpf_limpo} não encontrado no banco local")
+                logger.warning(
+                    f"[SalvarAdmissao] âš ️ Paciente com CPF {cpf_limpo} não encontrado no banco local"
+                )
 
-                logger.info(f"[SalvarAdmissao] ðŸ” Buscando paciente na API do apLIS pelo CPF...")
-
-                
+                logger.info(
+                    f"[SalvarAdmissao] ðŸ” Buscando paciente na API do apLIS pelo CPF..."
+                )
 
                 try:
 
                     # Buscar paciente no apLIS usando pacienteListar
 
-                    dat_busca = {
-
-                        "cpf": cpf_limpo
-
-                    }
-
-                    
+                    dat_busca = {"cpf": cpf_limpo}
 
                     resposta_aplis = fazer_requisicao_aplis("pacienteListar", dat_busca)
 
-                    
-
-                    if resposta_aplis and resposta_aplis.get("dat", {}).get("sucesso") == 1:
+                    if (
+                        resposta_aplis
+                        and resposta_aplis.get("dat", {}).get("sucesso") == 1
+                    ):
 
                         lista_pacientes = resposta_aplis.get("dat", {}).get("lista", [])
-
-                        
 
                         if lista_pacientes and len(lista_pacientes) > 0:
 
@@ -7912,33 +7715,41 @@ def salvar_admissao():
 
                             paciente_aplis = lista_pacientes[0]
 
-                            id_paciente_aplis = paciente_aplis.get("CodPaciente") or paciente_aplis.get("IdPaciente") or paciente_aplis.get("idPaciente")
+                            id_paciente_aplis = (
+                                paciente_aplis.get("CodPaciente")
+                                or paciente_aplis.get("IdPaciente")
+                                or paciente_aplis.get("idPaciente")
+                            )
 
-                            nome_paciente_aplis = paciente_aplis.get("NomPaciente") or paciente_aplis.get("nomPaciente")
+                            nome_paciente_aplis = paciente_aplis.get(
+                                "NomPaciente"
+                            ) or paciente_aplis.get("nomPaciente")
 
-                            
-
-                            logger.info(f"[SalvarAdmissao] âœ… Paciente encontrado na API do apLIS!")
+                            logger.info(
+                                f"[SalvarAdmissao] âœ… Paciente encontrado na API do apLIS!"
+                            )
 
                             logger.info(f"[SalvarAdmissao]   ID: {id_paciente_aplis}")
 
-                            logger.info(f"[SalvarAdmissao]   Nome: {nome_paciente_aplis}")
+                            logger.info(
+                                f"[SalvarAdmissao]   Nome: {nome_paciente_aplis}"
+                            )
 
                             logger.info(f"[SalvarAdmissao]   CPF: {cpf_limpo}")
 
+                            dados["idPaciente"] = id_paciente_aplis
 
-
-                            dados['idPaciente'] = id_paciente_aplis
-
-                            paciente_encontrado_local = True  # Marcar como encontrado para não criar novo
-
-
+                            paciente_encontrado_local = (
+                                True  # Marcar como encontrado para não criar novo
+                            )
 
                             # ðŸ†• SALVAR NO BANCO LOCAL para cache (evita buscar no apLIS toda vez)
 
                             try:
 
-                                logger.info(f"[SalvarAdmissao] ðŸ’¾ Sincronizando paciente do apLIS para banco LOCAL...")
+                                logger.info(
+                                    f"[SalvarAdmissao] ðŸ’¾ Sincronizando paciente do apLIS para banco LOCAL..."
+                                )
 
                                 connection_sync = pymysql.connect(**DB_CONFIG)
 
@@ -7966,61 +7777,64 @@ def salvar_admissao():
 
                                     """
 
-
-
-                                    cursor_sync.execute(query_insert_sync, (
-
-                                        id_paciente_aplis,
-
-                                        nome_paciente_aplis,
-
-                                        cpf_limpo,
-
-                                        paciente_aplis.get('DtaNasc') or paciente_aplis.get('dtaNasc'),
-
-                                        paciente_aplis.get('NumRG') or paciente_aplis.get('rg'),
-
-                                        paciente_aplis.get('TelCelular') or paciente_aplis.get('telefone')
-
-                                    ))
+                                    cursor_sync.execute(
+                                        query_insert_sync,
+                                        (
+                                            id_paciente_aplis,
+                                            nome_paciente_aplis,
+                                            cpf_limpo,
+                                            paciente_aplis.get("DtaNasc")
+                                            or paciente_aplis.get("dtaNasc"),
+                                            paciente_aplis.get("NumRG")
+                                            or paciente_aplis.get("rg"),
+                                            paciente_aplis.get("TelCelular")
+                                            or paciente_aplis.get("telefone"),
+                                        ),
+                                    )
 
                                     connection_sync.commit()
 
-                                    logger.info(f"[SalvarAdmissao] âœ… Paciente sincronizado no banco LOCAL!")
+                                    logger.info(
+                                        f"[SalvarAdmissao] âœ… Paciente sincronizado no banco LOCAL!"
+                                    )
 
                                 connection_sync.close()
 
                             except Exception as e_sync:
 
-                                logger.error(f"[SalvarAdmissao] âš ️ Erro ao sincronizar no banco local (não crítico): {str(e_sync)}")
+                                logger.error(
+                                    f"[SalvarAdmissao] âš ️ Erro ao sincronizar no banco local (não crítico): {str(e_sync)}"
+                                )
 
                                 # Não interromper o fluxo se falhar a sincronização
 
                         else:
 
-                            logger.info(f"[SalvarAdmissao] â„¹️ Paciente com CPF {cpf_limpo} não encontrado na API do apLIS")
+                            logger.info(
+                                f"[SalvarAdmissao] â„¹️ Paciente com CPF {cpf_limpo} não encontrado na API do apLIS"
+                            )
 
                     else:
 
-                        logger.warning(f"[SalvarAdmissao] âš ️ Erro ao buscar paciente no apLIS: {resposta_aplis}")
-
-                        
+                        logger.warning(
+                            f"[SalvarAdmissao] âš ️ Erro ao buscar paciente no apLIS: {resposta_aplis}"
+                        )
 
                 except Exception as e:
 
-                    logger.error(f"[SalvarAdmissao] Erro ao buscar paciente no apLIS: {str(e)}")
+                    logger.error(
+                        f"[SalvarAdmissao] Erro ao buscar paciente no apLIS: {str(e)}"
+                    )
 
                     logger.error(traceback.format_exc())
-
-            
 
             # 3. SE NÃƒO ENCONTROU EM NENHUM LUGAR, CRIAR NOVO PACIENTE
 
             if not paciente_encontrado_local:
 
-                logger.warning(f"[SalvarAdmissao] âš ️ Paciente com CPF {cpf_limpo} não encontrado em nenhum sistema")
-
-
+                logger.warning(
+                    f"[SalvarAdmissao] âš ️ Paciente com CPF {cpf_limpo} não encontrado em nenhum sistema"
+                )
 
                 try:
 
@@ -8028,75 +7842,78 @@ def salvar_admissao():
 
                     if not nome_paciente:
 
-                        return jsonify({
-
-                            "sucesso": 0,
-
-                            "erro": "Paciente não encontrado no sistema e nome não foi fornecido. Impossível criar novo cadastro."
-
-                        }), 400
-
-
+                        return (
+                            jsonify(
+                                {
+                                    "sucesso": 0,
+                                    "erro": "Paciente não encontrado no sistema e nome não foi fornecido. Impossível criar novo cadastro.",
+                                }
+                            ),
+                            400,
+                        )
 
                     # 2. VALIDAR CPF NA RECEITA FEDERAL
 
-                    logger.info(f"[SalvarAdmissao] ðŸ” Validando CPF {cpf_limpo} na Receita Federal...")
+                    logger.info(
+                        f"[SalvarAdmissao] ðŸ” Validando CPF {cpf_limpo} na Receita Federal..."
+                    )
 
-                    dados_receita = consultar_cpf_receita_federal(cpf_limpo, data_nascimento)
-
-
+                    dados_receita = consultar_cpf_receita_federal(
+                        cpf_limpo, data_nascimento
+                    )
 
                     usa_metodo_sem_cpf = False
 
+                    if not dados_receita or not dados_receita.get("valido"):
 
+                        logger.warning(
+                            f"[SalvarAdmissao] âš ️ CPF {cpf_limpo} não validado pela Receita Federal"
+                        )
 
-                    if not dados_receita or not dados_receita.get('valido'):
-
-                        logger.warning(f"[SalvarAdmissao] âš ️ CPF {cpf_limpo} não validado pela Receita Federal")
-
-                        logger.info(f"[SalvarAdmissao] ðŸ”„ Usando método alternativo: Paciente sem documento (CPF não validado)")
+                        logger.info(
+                            f"[SalvarAdmissao] ðŸ”„ Usando método alternativo: Paciente sem documento (CPF não validado)"
+                        )
 
                         usa_metodo_sem_cpf = True
 
-
-
                         # Marcar que está usando método alternativo para retornar aviso ao frontend
 
-                        dados['_aviso_metodo_alternativo'] = True
+                        dados["_aviso_metodo_alternativo"] = True
 
-                        dados['_cpf_nao_validado'] = cpf_limpo
+                        dados["_cpf_nao_validado"] = cpf_limpo
 
                     else:
 
-                        logger.info(f"[SalvarAdmissao] âœ… CPF validado pela Receita Federal!")
+                        logger.info(
+                            f"[SalvarAdmissao] âœ… CPF validado pela Receita Federal!"
+                        )
 
-                        logger.info(f"[SalvarAdmissao]   Nome na RF: {dados_receita.get('nome')}")
-
-
+                        logger.info(
+                            f"[SalvarAdmissao]   Nome na RF: {dados_receita.get('nome')}"
+                        )
 
                     # 3. CRIAR PACIENTE NO apLIS
 
                     if usa_metodo_sem_cpf:
 
-                        logger.info(f"[SalvarAdmissao] ðŸ“ Criando novo paciente com método 'Sem Documento'...")
+                        logger.info(
+                            f"[SalvarAdmissao] ðŸ“ Criando novo paciente com método 'Sem Documento'..."
+                        )
 
-                        logger.warning(f"[SalvarAdmissao] âš ️ ATENÃ‡ÃƒO: CPF {cpf_limpo} NÃƒO FOI VALIDADO na Receita Federal - usando cpfAusente")
+                        logger.warning(
+                            f"[SalvarAdmissao] âš ️ ATENÃ‡ÃƒO: CPF {cpf_limpo} NÃƒO FOI VALIDADO na Receita Federal - usando cpfAusente"
+                        )
 
                     else:
 
-                        logger.info(f"[SalvarAdmissao] ðŸ“ Criando novo paciente no sistema...")
-
-
+                        logger.info(
+                            f"[SalvarAdmissao] ðŸ“ Criando novo paciente no sistema..."
+                        )
 
                     dat_paciente = {
-
                         "idEvento": "3",  # Evento de inclusão de paciente
-
-                        "nome": nome_paciente
-
+                        "nome": nome_paciente,
                     }
-
-
 
                     # Se CPF foi validado, enviar CPF. Se não, usar cpfAusente
 
@@ -8108,79 +7925,95 @@ def salvar_admissao():
 
                         dat_paciente["cpf"] = cpf_limpo
 
-
-
                     # Adicionar campos opcionais
 
                     if data_nascimento:
 
-                        if 'T' in data_nascimento:
+                        if "T" in data_nascimento:
 
-                            data_nascimento = data_nascimento.split('T')[0]
+                            data_nascimento = data_nascimento.split("T")[0]
 
-                        dat_paciente['dtaNascimento'] = data_nascimento
+                        dat_paciente["dtaNascimento"] = data_nascimento
 
-                    elif dados_receita and dados_receita.get('data_nascimento'):
+                    elif dados_receita and dados_receita.get("data_nascimento"):
 
-                        dat_paciente['dtaNascimento'] = dados_receita['data_nascimento']
+                        dat_paciente["dtaNascimento"] = dados_receita["data_nascimento"]
 
+                    if dados.get("rg"):
 
+                        dat_paciente["rg"] = dados["rg"]
 
-                    if dados.get('rg'):
+                    if (
+                        dados.get("telefone")
+                        or dados.get("telCelular")
+                        or dados.get("TelCelular")
+                    ):
 
-                        dat_paciente['rg'] = dados['rg']
+                        dat_paciente["telefone"] = (
+                            dados.get("telefone")
+                            or dados.get("telCelular")
+                            or dados.get("TelCelular")
+                        )
 
-                    if dados.get('telefone') or dados.get('telCelular') or dados.get('TelCelular'):
+                    if dados.get("email") or dados.get("Email"):
 
-                        dat_paciente['telefone'] = dados.get('telefone') or dados.get('telCelular') or dados.get('TelCelular')
+                        dat_paciente["email"] = dados.get("email") or dados.get("Email")
 
-                    if dados.get('email') or dados.get('Email'):
+                    if dados.get("sexo") or dados.get("Sexo"):
 
-                        dat_paciente['email'] = dados.get('email') or dados.get('Email')
+                        dat_paciente["sexo"] = dados.get("sexo") or dados.get("Sexo")
 
-                    if dados.get('sexo') or dados.get('Sexo'):
-
-                        dat_paciente['sexo'] = dados.get('sexo') or dados.get('Sexo')
-
-
+                    # Alguns convênios (principalmente fluxo 0085) exigem carteirinha já no cadastro do paciente
+                    # para permitir admissão na sequência
+                    if mat_convenio_limpa:
+                        dat_paciente["matriculaConvenio"] = mat_convenio_limpa
+                        logger.info(
+                            f"[SalvarAdmissao] ✅ Incluindo matriculaConvenio no pacienteSalvar: {mat_convenio_limpa}"
+                        )
 
                     # Log dos dados sendo enviados
 
-                    logger.info(f"[SalvarAdmissao] ðŸ“¤ Enviando para apLIS pacienteSalvar:")
+                    logger.info(
+                        f"[SalvarAdmissao] ðŸ“¤ Enviando para apLIS pacienteSalvar:"
+                    )
 
-                    logger.info(f"[SalvarAdmissao]   Dados: {json.dumps(dat_paciente, indent=2, ensure_ascii=False)}")
-
-
+                    logger.info(
+                        f"[SalvarAdmissao]   Dados: {json.dumps(dat_paciente, indent=2, ensure_ascii=False)}"
+                    )
 
                     # Chamar apLIS para criar
 
-                    resposta_paciente = fazer_requisicao_aplis("pacienteSalvar", dat_paciente)
-
-                    
+                    resposta_paciente = fazer_requisicao_aplis(
+                        "pacienteSalvar", dat_paciente
+                    )
 
                     # Log completo da resposta para debug
 
-                    logger.info(f"[SalvarAdmissao] ðŸ“‹ Resposta completa do apLIS pacienteSalvar:")
+                    logger.info(
+                        f"[SalvarAdmissao] ðŸ“‹ Resposta completa do apLIS pacienteSalvar:"
+                    )
 
-                    logger.info(f"[SalvarAdmissao]   JSON: {json.dumps(resposta_paciente, indent=2, ensure_ascii=False)}")
-
-
+                    logger.info(
+                        f"[SalvarAdmissao]   JSON: {json.dumps(resposta_paciente, indent=2, ensure_ascii=False)}"
+                    )
 
                     # Verificar se apLIS retornou resposta válida
 
                     if not resposta_paciente:
 
-                        logger.error(f"[SalvarAdmissao] âŒ apLIS não retornou resposta (None ou vazio)")
+                        logger.error(
+                            f"[SalvarAdmissao] âŒ apLIS não retornou resposta (None ou vazio)"
+                        )
 
-                        return jsonify({
-
-                            "sucesso": 0,
-
-                            "erro": "Erro ao criar novo paciente: apLIS não retornou resposta"
-
-                        }), 500
-
-                    
+                        return (
+                            jsonify(
+                                {
+                                    "sucesso": 0,
+                                    "erro": "Erro ao criar novo paciente: apLIS não retornou resposta",
+                                }
+                            ),
+                            500,
+                        )
 
                     if resposta_paciente.get("dat", {}).get("sucesso") == 1:
 
@@ -8188,39 +8021,54 @@ def salvar_admissao():
 
                         dat = resposta_paciente.get("dat", {})
 
-                        novo_id = dat.get("codPaciente") or dat.get("idPaciente") or dat.get("CodPaciente") or dat.get("IdPaciente") or dat.get("id")
+                        novo_id = (
+                            dat.get("codPaciente")
+                            or dat.get("idPaciente")
+                            or dat.get("CodPaciente")
+                            or dat.get("IdPaciente")
+                            or dat.get("id")
+                        )
 
-                        
+                        logger.info(
+                            f"[SalvarAdmissao] ðŸ“‹ Campos disponíveis na resposta 'dat': {list(dat.keys())}"
+                        )
 
-                        logger.info(f"[SalvarAdmissao] ðŸ“‹ Campos disponíveis na resposta 'dat': {list(dat.keys())}")
-
-                        logger.info(f"[SalvarAdmissao] ðŸ“‹ Valores dos campos: {json.dumps(dat, ensure_ascii=False)}")
-
-                        
+                        logger.info(
+                            f"[SalvarAdmissao] ðŸ“‹ Valores dos campos: {json.dumps(dat, ensure_ascii=False)}"
+                        )
 
                         if not novo_id:
 
-                            logger.error(f"[SalvarAdmissao] âŒ apLIS retornou sucesso mas não encontrou ID do paciente em nenhum campo esperado")
+                            logger.error(
+                                f"[SalvarAdmissao] âŒ apLIS retornou sucesso mas não encontrou ID do paciente em nenhum campo esperado"
+                            )
 
-                            logger.error(f"[SalvarAdmissao] âŒ Campos tentados: codPaciente, idPaciente, CodPaciente, IdPaciente, id")
+                            logger.error(
+                                f"[SalvarAdmissao] âŒ Campos tentados: codPaciente, idPaciente, CodPaciente, IdPaciente, id"
+                            )
 
-                            logger.error(f"[SalvarAdmissao] âŒ Resposta completa dat: {json.dumps(dat, ensure_ascii=False)}")
+                            logger.error(
+                                f"[SalvarAdmissao] âŒ Resposta completa dat: {json.dumps(dat, ensure_ascii=False)}"
+                            )
 
-                            return jsonify({
+                            return (
+                                jsonify(
+                                    {
+                                        "sucesso": 0,
+                                        "erro": f"Erro ao criar novo paciente: apLIS retornou sucesso mas não retornou ID do paciente. Campos disponíveis: {list(dat.keys())}",
+                                    }
+                                ),
+                                500,
+                            )
 
-                                "sucesso": 0,
+                        logger.info(
+                            f"[SalvarAdmissao] âœ… Paciente criado com sucesso! ID: {novo_id}"
+                        )
 
-                                "erro": f"Erro ao criar novo paciente: apLIS retornou sucesso mas não retornou ID do paciente. Campos disponíveis: {list(dat.keys())}"
+                        paciente_criado_nesta_tentativa = True
+                        paciente_criado_id = str(novo_id)
 
-                            }), 500
-
-                        
-
-                        logger.info(f"[SalvarAdmissao] âœ… Paciente criado com sucesso! ID: {novo_id}")
-
-                        dados['idPaciente'] = novo_id
-
-
+                        dados["idPaciente"] = novo_id
 
                         # ðŸ†• VERIFICAR SE NÃƒO HOUVE DUPLICAÃ‡ÃƒO (verificação adicional de segurança)
 
@@ -8228,57 +8076,71 @@ def salvar_admissao():
 
                             try:
 
-                                logger.info(f"[SalvarAdmissao] ðŸ” VERIFICANDO se houve duplicação do paciente (CPF: {cpf_limpo})...")
-
-
+                                logger.info(
+                                    f"[SalvarAdmissao] ðŸ” VERIFICANDO se houve duplicação do paciente (CPF: {cpf_limpo})..."
+                                )
 
                                 # Buscar todos os pacientes com este CPF no apLIS
 
                                 dat_verificacao = {"cpf": cpf_limpo}
 
-                                resposta_verificacao = fazer_requisicao_aplis("pacienteListar", dat_verificacao)
+                                resposta_verificacao = fazer_requisicao_aplis(
+                                    "pacienteListar", dat_verificacao
+                                )
 
+                                if (
+                                    resposta_verificacao
+                                    and resposta_verificacao.get("dat", {}).get(
+                                        "sucesso"
+                                    )
+                                    == 1
+                                ):
 
-
-                                if resposta_verificacao and resposta_verificacao.get("dat", {}).get("sucesso") == 1:
-
-                                    lista_encontrada = resposta_verificacao.get("dat", {}).get("lista", [])
+                                    lista_encontrada = resposta_verificacao.get(
+                                        "dat", {}
+                                    ).get("lista", [])
 
                                     quantidade = len(lista_encontrada)
 
-
-
                                     if quantidade == 1:
 
-                                        logger.info(f"[SalvarAdmissao] âœ… VERIFICAÃ‡ÃƒO OK: Apenas 1 paciente com CPF {cpf_limpo}")
+                                        logger.info(
+                                            f"[SalvarAdmissao] âœ… VERIFICAÃ‡ÃƒO OK: Apenas 1 paciente com CPF {cpf_limpo}"
+                                        )
 
-                                        logger.info(f"[SalvarAdmissao]   ID confirmado: {lista_encontrada[0].get('CodPaciente')}")
+                                        logger.info(
+                                            f"[SalvarAdmissao]   ID confirmado: {lista_encontrada[0].get('CodPaciente')}"
+                                        )
 
                                         # Adicionar confirmação para exibir na interface
 
-                                        dados['_verificacao_duplicacao'] = {
-
-                                            'realizada': True,
-
-                                            'status': 'ok',
-
-                                            'mensagem': f'âœ… Verificação OK: Apenas 1 paciente encontrado'
-
+                                        dados["_verificacao_duplicacao"] = {
+                                            "realizada": True,
+                                            "status": "ok",
+                                            "mensagem": f"âœ… Verificação OK: Apenas 1 paciente encontrado",
                                         }
 
                                     elif quantidade > 1:
 
-                                        logger.error(f"[SalvarAdmissao] âŒâŒâŒ DUPLICAÃ‡ÃƒO DETECTADA! âŒâŒâŒ")
+                                        logger.error(
+                                            f"[SalvarAdmissao] âŒâŒâŒ DUPLICAÃ‡ÃƒO DETECTADA! âŒâŒâŒ"
+                                        )
 
-                                        logger.error(f"[SalvarAdmissao]   CPF: {cpf_limpo}")
+                                        logger.error(
+                                            f"[SalvarAdmissao]   CPF: {cpf_limpo}"
+                                        )
 
-                                        logger.error(f"[SalvarAdmissao]   Quantidade de pacientes encontrados: {quantidade}")
+                                        logger.error(
+                                            f"[SalvarAdmissao]   Quantidade de pacientes encontrados: {quantidade}"
+                                        )
 
-                                        logger.error(f"[SalvarAdmissao]   IDs duplicados: {[p.get('CodPaciente') for p in lista_encontrada]}")
+                                        logger.error(
+                                            f"[SalvarAdmissao]   IDs duplicados: {[p.get('CodPaciente') for p in lista_encontrada]}"
+                                        )
 
-                                        logger.error(f"[SalvarAdmissao]   âš ️ AÃ‡ÃƒO NECESSÁRIA: Verificar e remover duplicatas no sistema apLIS!")
-
-
+                                        logger.error(
+                                            f"[SalvarAdmissao]   âš ️ AÃ‡ÃƒO NECESSÁRIA: Verificar e remover duplicatas no sistema apLIS!"
+                                        )
 
                                         # Preparar informações para exibir na interface
 
@@ -8286,47 +8148,43 @@ def salvar_admissao():
 
                                         for idx, pac in enumerate(lista_encontrada, 1):
 
-                                            logger.error(f"[SalvarAdmissao]   Paciente {idx}: ID={pac.get('CodPaciente')}, Nome={pac.get('NomPaciente')}")
+                                            logger.error(
+                                                f"[SalvarAdmissao]   Paciente {idx}: ID={pac.get('CodPaciente')}, Nome={pac.get('NomPaciente')}"
+                                            )
 
-                                            pacientes_duplicados.append({
+                                            pacientes_duplicados.append(
+                                                {
+                                                    "id": pac.get("CodPaciente"),
+                                                    "nome": pac.get("NomPaciente"),
+                                                    "cpf": cpf_limpo,
+                                                }
+                                            )
 
-                                                'id': pac.get('CodPaciente'),
-
-                                                'nome': pac.get('NomPaciente'),
-
-                                                'cpf': cpf_limpo
-
-                                            })
-
-
-
-                                        dados['_aviso_duplicacao'] = {
-
-                                            'tipo': 'duplicacao_detectada',
-
-                                            'mensagem': f'âŒ DUPLICAÃ‡ÃƒO DETECTADA! Encontrados {quantidade} pacientes com o mesmo CPF',
-
-                                            'cpf': cpf_limpo,
-
-                                            'quantidade': quantidade,
-
-                                            'pacientes': pacientes_duplicados
-
+                                        dados["_aviso_duplicacao"] = {
+                                            "tipo": "duplicacao_detectada",
+                                            "mensagem": f"âŒ DUPLICAÃ‡ÃƒO DETECTADA! Encontrados {quantidade} pacientes com o mesmo CPF",
+                                            "cpf": cpf_limpo,
+                                            "quantidade": quantidade,
+                                            "pacientes": pacientes_duplicados,
                                         }
 
                                     else:
 
-                                        logger.warning(f"[SalvarAdmissao] âš ️ ALERTA: Busca não retornou nenhum paciente (esperado 1)")
+                                        logger.warning(
+                                            f"[SalvarAdmissao] âš ️ ALERTA: Busca não retornou nenhum paciente (esperado 1)"
+                                        )
 
                                 else:
 
-                                    logger.warning(f"[SalvarAdmissao] âš ️ Não foi possível verificar duplicação: {resposta_verificacao}")
-
-
+                                    logger.warning(
+                                        f"[SalvarAdmissao] âš ️ Não foi possível verificar duplicação: {resposta_verificacao}"
+                                    )
 
                             except Exception as e_verif:
 
-                                logger.error(f"[SalvarAdmissao] âš ️ Erro ao verificar duplicação (não crítico): {str(e_verif)}")
+                                logger.error(
+                                    f"[SalvarAdmissao] âš ️ Erro ao verificar duplicação (não crítico): {str(e_verif)}"
+                                )
 
                                 import traceback
 
@@ -8334,13 +8192,13 @@ def salvar_admissao():
 
                                 # Não interromper o fluxo
 
-
-
                         # ðŸ†• SALVAR PACIENTE NO BANCO LOCAL para evitar duplicação futura
 
                         try:
 
-                            logger.info(f"[SalvarAdmissao] ðŸ’¾ Salvando paciente no banco LOCAL para prevenir duplicação...")
+                            logger.info(
+                                f"[SalvarAdmissao] ðŸ’¾ Salvando paciente no banco LOCAL para prevenir duplicação..."
+                            )
 
                             connection = pymysql.connect(**DB_CONFIG)
 
@@ -8372,43 +8230,48 @@ def salvar_admissao():
 
                                 """
 
-
-
-                                cursor.execute(query_insert, (
-
-                                    novo_id,
-
-                                    nome_paciente,
-
-                                    cpf_limpo if not usa_metodo_sem_cpf else None,
-
-                                    dados.get('DtaNasc') or data_nascimento or dat_paciente.get('dtaNascimento'),
-
-                                    dados.get('rg') or dados.get('RGNumero'),
-
-                                    dados.get('telefone') or dados.get('telCelular') or dados.get('TelCelular'),
-
-                                    dados.get('DscEndereco'),
-
-                                    dados.get('email') or dados.get('Email')
-
-                                ))
+                                cursor.execute(
+                                    query_insert,
+                                    (
+                                        novo_id,
+                                        nome_paciente,
+                                        cpf_limpo if not usa_metodo_sem_cpf else None,
+                                        dados.get("DtaNasc")
+                                        or data_nascimento
+                                        or dat_paciente.get("dtaNascimento"),
+                                        dados.get("rg") or dados.get("RGNumero"),
+                                        dados.get("telefone")
+                                        or dados.get("telCelular")
+                                        or dados.get("TelCelular"),
+                                        dados.get("DscEndereco"),
+                                        dados.get("email") or dados.get("Email"),
+                                    ),
+                                )
 
                                 connection.commit()
 
-                                logger.info(f"[SalvarAdmissao] âœ… Paciente {novo_id} salvo no banco LOCAL com sucesso!")
+                                logger.info(
+                                    f"[SalvarAdmissao] âœ… Paciente {novo_id} salvo no banco LOCAL com sucesso!"
+                                )
 
                             connection.close()
 
                         except Exception as e_local:
 
-                            logger.error(f"[SalvarAdmissao] âš ️ Erro ao salvar no banco local (não crítico): {str(e_local)}")
+                            logger.error(
+                                f"[SalvarAdmissao] âš ️ Erro ao salvar no banco local (não crítico): {str(e_local)}"
+                            )
 
                             # Não interromper o fluxo se falhar ao salvar no local
 
                     else:
 
-                        erro_msg = resposta_paciente.get("dat", {}).get("msg") or resposta_paciente.get("dat", {}).get("msgErro") or resposta_paciente.get("msg") or "Erro desconhecido"
+                        erro_msg = (
+                            resposta_paciente.get("dat", {}).get("msg")
+                            or resposta_paciente.get("dat", {}).get("msgErro")
+                            or resposta_paciente.get("msg")
+                            or "Erro desconhecido"
+                        )
 
                         cod_erro = resposta_paciente.get("dat", {}).get("codErro")
 
@@ -8418,51 +8281,48 @@ def salvar_admissao():
 
                         logger.error(f"[SalvarAdmissao]   Código erro: {cod_erro}")
 
-                        logger.error(f"[SalvarAdmissao]   Resposta completa: {json.dumps(resposta_paciente, ensure_ascii=False)}")
+                        logger.error(
+                            f"[SalvarAdmissao]   Resposta completa: {json.dumps(resposta_paciente, ensure_ascii=False)}"
+                        )
 
-                        return jsonify({
-
-                            "sucesso": 0,
-
-                            "erro": f"Erro ao criar novo paciente: {erro_msg}"
-
-                        }), 400
-
-
+                        return (
+                            jsonify(
+                                {
+                                    "sucesso": 0,
+                                    "erro": f"Erro ao criar novo paciente: {erro_msg}",
+                                }
+                            ),
+                            400,
+                        )
 
                 except Exception as e:
 
-                    logger.error(f"[SalvarAdmissao] Erro ao buscar/criar paciente: {str(e)}")
+                    logger.error(
+                        f"[SalvarAdmissao] Erro ao buscar/criar paciente: {str(e)}"
+                    )
 
                     import traceback
 
                     logger.error(traceback.format_exc())
 
-                    return jsonify({
-
-                        "sucesso": 0,
-
-                        "erro": f"Erro ao buscar/criar paciente: {str(e)}"
-
-                    }), 500
-
-
+                    return (
+                        jsonify(
+                            {
+                                "sucesso": 0,
+                                "erro": f"Erro ao buscar/criar paciente: {str(e)}",
+                            }
+                        ),
+                        500,
+                    )
 
         # Validar campos MÍNIMOS obrigatórios (conforme API apLIS admissaoSalvar)
 
         campos_obrigatorios = [
-
-            'idPaciente',    # ID do paciente no sistema
-
-            'dtaColeta',     # Data da coleta
-
-            'idLaboratorio', # ID do laboratório
-
-            'idUnidade'      # ID da unidade
-
+            "idPaciente",  # ID do paciente no sistema
+            "dtaColeta",  # Data da coleta
+            "idLaboratorio",  # ID do laboratório
+            "idUnidade",  # ID da unidade
         ]
-
-
 
         # Campos opcionais mas recomendados (API aceita sem eles)
 
@@ -8470,11 +8330,11 @@ def salvar_admissao():
 
         # idExame, examesConvenio, dadosClinicos, numGuia
 
-
-
-        campos_faltantes = [campo for campo in campos_obrigatorios if campo not in dados or dados[campo] is None]
-
-
+        campos_faltantes = [
+            campo
+            for campo in campos_obrigatorios
+            if campo not in dados or dados[campo] is None
+        ]
 
         if campos_faltantes:
 
@@ -8482,19 +8342,15 @@ def salvar_admissao():
 
             logger.warning(f"[SalvarAdmissao] âŒ {erro_msg}")
 
-            return jsonify({
+            return jsonify({"sucesso": 0, "erro": erro_msg}), 400
 
-                "sucesso": 0,
+        logger.info(
+            f"[SalvarAdmissao] Dados finais para apLIS: {json.dumps(dados, indent=2, ensure_ascii=False)[:1000]}"
+        )
 
-                "erro": erro_msg
-
-            }), 400
-
-
-
-        logger.info(f"[SalvarAdmissao] Dados finais para apLIS: {json.dumps(dados, indent=2, ensure_ascii=False)[:1000]}")
-
-        logger.info(f"[SalvarAdmissao] ðŸŽ« Campo numGuia no envio: {'PRESENTE (' + str(dados.get('numGuia')) + ')' if 'numGuia' in dados else 'AUSENTE (não será enviado)'}")
+        logger.info(
+            f"[SalvarAdmissao] ðŸŽ« Campo numGuia no envio: {'PRESENTE (' + str(dados.get('numGuia')) + ')' if 'numGuia' in dados else 'AUSENTE (não será enviado)'}"
+        )
 
         logger.info(f"[SalvarAdmissao] ðŸ” Campos completos enviados:")
 
@@ -8508,56 +8364,158 @@ def salvar_admissao():
 
         logger.info(f"[SalvarAdmissao]   - dtaColeta: {dados.get('dtaColeta')}")
 
-        logger.info(f"[SalvarAdmissao]   - examesConvenio: {dados.get('examesConvenio')}")
-
-
+        logger.info(
+            f"[SalvarAdmissao]   - examesConvenio: {dados.get('examesConvenio')}"
+        )
 
         # Chamar apLIS com credenciais do usuário
 
         resultado = salvar_admissao_aplis(dados, aplis_usuario, aplis_senha)
 
-        # Retry automático: alguns convênios/procedimentos exigem guia com 8 dígitos
-        if resultado.get("dat", {}).get("sucesso") != 1 and dados.get('numGuia'):
+        # Retry automático adaptativo para tamanho de guia/carteirinha (7/8 dígitos conforme regra do convênio)
+        if resultado.get("dat", {}).get("sucesso") != 1:
 
-            erro_retry_txt = " ".join([
-                str(resultado.get("erro") or ''),
-                str(resultado.get("msg") or ''),
-                str(resultado.get("dat", {}).get("msgErro") or ''),
-                str(resultado.get("dat", {}).get("msg") or ''),
-                str(resultado.get("dat", {}).get("erro") or '')
-            ])
-
-            num_guia_atual = ''.join(filter(str.isdigit, str(dados.get('numGuia') or '')))
+            erro_retry_txt = " ".join(
+                [
+                    str(resultado.get("erro") or ""),
+                    str(resultado.get("msg") or ""),
+                    str(resultado.get("dat", {}).get("msgErro") or ""),
+                    str(resultado.get("dat", {}).get("msg") or ""),
+                    str(resultado.get("dat", {}).get("erro") or ""),
+                ]
+            )
             erro_lower = erro_retry_txt.lower()
-            exige_8 = ('deve conter 8' in erro_lower) or (('8' in erro_lower) and ('guia' in erro_lower) and ('conter' in erro_lower))
 
-            if exige_8 and len(num_guia_atual) == 9:
-
-                dados_retry = dados.copy()
-                dados_retry['numGuia'] = num_guia_atual[-8:]
-
-                logger.warning(
-                    f"[SalvarAdmissao] ⚠️ apLIS rejeitou guia com 9 dígitos. Tentando retry com 8 dígitos: {dados_retry['numGuia']}"
+            def _exige_digitos(campo_nome: str, quantidade: int) -> bool:
+                return (
+                    (f"deve conter {quantidade}" in erro_lower)
+                    and (campo_nome in erro_lower)
+                ) or (
+                    (str(quantidade) in erro_lower)
+                    and (campo_nome in erro_lower)
+                    and ("conter" in erro_lower)
                 )
 
-                resultado_retry = salvar_admissao_aplis(dados_retry, aplis_usuario, aplis_senha)
+            exige_guia_7 = _exige_digitos("guia", 7)
+            exige_guia_8 = _exige_digitos("guia", 8)
+            exige_carteirinha_7 = _exige_digitos("carteirinha", 7)
+
+            dados_retry = dados.copy()
+            alterou_retry = False
+
+            num_guia_atual = "".join(filter(str.isdigit, str(dados.get("numGuia") or "")))
+            cod_req_retry_digits = "".join(
+                filter(str.isdigit, str(dados.get("codRequisicao") or ""))
+            )
+
+            if exige_guia_7 and len(num_guia_atual) >= 7:
+                dados_retry["numGuia"] = num_guia_atual[-7:]
+                alterou_retry = True
+                logger.warning(
+                    f"[SalvarAdmissao] ⚠️ apLIS exigiu guia com 7 dígitos. Retry com: {dados_retry['numGuia']}"
+                )
+            elif exige_guia_7 and len(cod_req_retry_digits) >= 7:
+                dados_retry["numGuia"] = cod_req_retry_digits[-7:]
+                alterou_retry = True
+                logger.warning(
+                    f"[SalvarAdmissao] ⚠️ apLIS exigiu guia com 7 dígitos e guia enviada era inválida. Retry com fallback do código da requisição: {dados_retry['numGuia']}"
+                )
+            elif exige_guia_8 and len(num_guia_atual) >= 8:
+                dados_retry["numGuia"] = num_guia_atual[-8:]
+                alterou_retry = True
+                logger.warning(
+                    f"[SalvarAdmissao] ⚠️ apLIS exigiu guia com 8 dígitos. Retry com: {dados_retry['numGuia']}"
+                )
+
+            # Alguns convênios exigem carteirinha estritamente numérica com 7 dígitos
+            mat_convenio_digitos = "".join(filter(str.isdigit, str(mat_convenio_limpa or "")))
+            if exige_carteirinha_7 and len(mat_convenio_digitos) >= 7:
+                mat_retry = mat_convenio_digitos[-7:]
+                dados_retry["matConvenio"] = mat_retry
+                dados_retry["MatConvenio"] = mat_retry
+                dados_retry["matriculaConvenio"] = mat_retry
+                alterou_retry = True
+                logger.warning(
+                    f"[SalvarAdmissao] ⚠️ apLIS exigiu carteirinha com 7 dígitos. Retry com: {mat_retry}"
+                )
+            elif exige_carteirinha_7:
+                guia_retry_digitos = "".join(
+                    filter(str.isdigit, str(dados_retry.get("numGuia") or ""))
+                )
+                mat_retry = (
+                    guia_retry_digitos[-7:]
+                    if len(guia_retry_digitos) >= 7
+                    else (cod_req_retry_digits[-7:] if len(cod_req_retry_digits) >= 7 else "")
+                )
+                if mat_retry:
+                    dados_retry["matConvenio"] = mat_retry
+                    dados_retry["MatConvenio"] = mat_retry
+                    dados_retry["matriculaConvenio"] = mat_retry
+                    alterou_retry = True
+                    logger.warning(
+                        f"[SalvarAdmissao] ⚠️ apLIS exigiu carteirinha com 7 dígitos e carteirinha enviada era inválida/ausente. Retry com fallback: {mat_retry}"
+                    )
+
+            if alterou_retry:
+                resultado_retry = salvar_admissao_aplis(
+                    dados_retry, aplis_usuario, aplis_senha
+                )
 
                 if resultado_retry.get("dat", {}).get("sucesso") == 1:
-                    logger.info("[SalvarAdmissao] ✅ Retry com guia de 8 dígitos funcionou")
+                    logger.info(
+                        "[SalvarAdmissao] ✅ Retry adaptativo de guia/carteirinha funcionou"
+                    )
                     dados = dados_retry
                     resultado = resultado_retry
                 else:
-                    logger.warning("[SalvarAdmissao] ⚠️ Retry com guia de 8 dígitos também falhou")
+                    logger.warning(
+                        "[SalvarAdmissao] ⚠️ Retry adaptativo de guia/carteirinha também falhou"
+                    )
 
+        # Retry automático para casos em que o apLIS ignora uma variação de chave da carteirinha
+        if resultado.get("dat", {}).get("sucesso") != 1 and mat_convenio_limpa:
+            erro_carteirinha_txt = " ".join(
+                [
+                    str(resultado.get("erro") or ""),
+                    str(resultado.get("msg") or ""),
+                    str(resultado.get("dat", {}).get("msgErro") or ""),
+                    str(resultado.get("dat", {}).get("msg") or ""),
+                    str(resultado.get("dat", {}).get("erro") or ""),
+                ]
+            ).lower()
 
+            if "carteirinha" in erro_carteirinha_txt and "obrigat" in erro_carteirinha_txt:
+                dados_retry_carteirinha = dados.copy()
+                dados_retry_carteirinha.pop("matConvenio", None)
+                dados_retry_carteirinha.pop("matriculaConvenio", None)
+                dados_retry_carteirinha["MatConvenio"] = mat_convenio_limpa
+
+                logger.warning(
+                    "[SalvarAdmissao] ⚠️ apLIS retornou carteirinha obrigatória. Tentando retry enviando somente chave 'MatConvenio'."
+                )
+
+                resultado_retry_carteirinha = salvar_admissao_aplis(
+                    dados_retry_carteirinha, aplis_usuario, aplis_senha
+                )
+
+                if resultado_retry_carteirinha.get("dat", {}).get("sucesso") == 1:
+                    logger.info(
+                        "[SalvarAdmissao] ✅ Retry com chave 'MatConvenio' funcionou"
+                    )
+                    dados = dados_retry_carteirinha
+                    resultado = resultado_retry_carteirinha
+                else:
+                    logger.warning(
+                        "[SalvarAdmissao] ⚠️ Retry com chave 'MatConvenio' também falhou"
+                    )
 
         if resultado.get("dat", {}).get("sucesso") == 1:
 
             cod_requisicao = resultado["dat"].get("codRequisicao")
 
-            logger.info(f"[SalvarAdmissao] âœ… Sucesso! CodRequisicao: {cod_requisicao}")
-
-
+            logger.info(
+                f"[SalvarAdmissao] âœ… Sucesso! CodRequisicao: {cod_requisicao}"
+            )
 
             # ðŸ†• ATUALIZAR STATUS NO SUPABASE PARA "SALVO"
 
@@ -8565,143 +8523,132 @@ def salvar_admissao():
 
                 try:
 
-                    logger.info(f"[SalvarAdmissao] ðŸ’¾ Atualizando status no Supabase: {cod_requisicao}")
-
-
+                    logger.info(
+                        f"[SalvarAdmissao] ðŸ’¾ Atualizando status no Supabase: {cod_requisicao}"
+                    )
 
                     # Buscar dados existentes no Supabase
 
                     resultado_busca = supabase_manager.buscar_requisicao(cod_requisicao)
 
-
-
-                    if resultado_busca.get('sucesso') == 1:
+                    if resultado_busca.get("sucesso") == 1:
 
                         # Requisição já existe, atualizar status
 
-                        dados_existentes = resultado_busca['dados']
-
-
+                        dados_existentes = resultado_busca["dados"]
 
                         # Atualizar apenas o status para "salvo"
 
                         dados_update = {
-
                             **dados_existentes,
-
-                            'status': 'salvo',
-
-                            'processado_por': 'sistema_admissao'
-
+                            "status": "salvo",
+                            "processado_por": "sistema_admissao",
                         }
-
-
 
                         # Salvar novamente (irá fazer UPDATE)
 
                         resultado_save = supabase_manager.salvar_requisicao(
-
                             cod_requisicao=cod_requisicao,
-
-                            dados_paciente=dados_existentes.get('dados_paciente', {}),
-
-                            dados_ocr=dados_existentes.get('dados_ocr'),
-
-                            dados_consolidados=dados_existentes.get('dados_consolidados'),
-
-                            exames=dados_existentes.get('exames'),
-
-                            exames_ids=dados_existentes.get('exames_ids'),
-
-                            processado_por='sistema_admissao'
-
+                            dados_paciente=dados_existentes.get("dados_paciente", {}),
+                            dados_ocr=dados_existentes.get("dados_ocr"),
+                            dados_consolidados=dados_existentes.get(
+                                "dados_consolidados"
+                            ),
+                            exames=dados_existentes.get("exames"),
+                            exames_ids=dados_existentes.get("exames_ids"),
+                            processado_por="sistema_admissao",
                         )
 
+                        if resultado_save.get("sucesso") == 1:
 
-
-                        if resultado_save.get('sucesso') == 1:
-
-                            logger.info(f"[SalvarAdmissao] âœ… Status atualizado no Supabase!")
+                            logger.info(
+                                f"[SalvarAdmissao] âœ… Status atualizado no Supabase!"
+                            )
 
                         else:
 
-                            logger.warning(f"[SalvarAdmissao] âš ️ Erro ao atualizar Supabase: {resultado_save.get('erro')}")
+                            logger.warning(
+                                f"[SalvarAdmissao] âš ️ Erro ao atualizar Supabase: {resultado_save.get('erro')}"
+                            )
 
                     else:
 
-                        logger.info(f"[SalvarAdmissao] â„¹️ Requisição não encontrada no Supabase (não foi processada via OCR)")
-
-
+                        logger.info(
+                            f"[SalvarAdmissao] â„¹️ Requisição não encontrada no Supabase (não foi processada via OCR)"
+                        )
 
                 except Exception as e:
 
-                    logger.warning(f"[SalvarAdmissao] âš ️ Erro ao atualizar Supabase (continuando): {str(e)}")
-
-
+                    logger.warning(
+                        f"[SalvarAdmissao] âš ️ Erro ao atualizar Supabase (continuando): {str(e)}"
+                    )
 
             # ðŸ†• CRIAR REQUISIÃ‡ÃƒO CORRESPONDENTE (0085 â†” 0200)
 
             cod_correspondente = None
 
-            if cod_requisicao and (cod_requisicao.startswith('0085') or cod_requisicao.startswith('0200')):
+            if cod_requisicao and (
+                cod_requisicao.startswith("0085") or cod_requisicao.startswith("0200")
+            ):
 
                 try:
 
-                    tipo_atual = '0085' if cod_requisicao.startswith('0085') else '0200'
+                    tipo_atual = "0085" if cod_requisicao.startswith("0085") else "0200"
 
-                    tipo_correspondente = '0200' if tipo_atual == '0085' else '0085'
+                    tipo_correspondente = "0200" if tipo_atual == "0085" else "0085"
 
                     cod_correspondente = tipo_correspondente + cod_requisicao[4:]
 
-                    
-
-                    logger.info(f"[SalvarAdmissao] ðŸ”„ Criando requisição correspondente: {cod_correspondente}")
-
-                    
+                    logger.info(
+                        f"[SalvarAdmissao] ðŸ”„ Criando requisição correspondente: {cod_correspondente}"
+                    )
 
                     # Copiar todos os dados da requisição original
 
                     dados_correspondente = dados.copy()
 
-                    
-
                     # Ajustar campos específicos se necessário
 
                     # O codRequisicao será o correspondente
 
-                    dados_correspondente['codRequisicao'] = cod_correspondente
-
-
+                    dados_correspondente["codRequisicao"] = cod_correspondente
 
                     # Chamar apLIS para criar a correspondente com credenciais do usuário
 
-                    resultado_correspondente = salvar_admissao_aplis(dados_correspondente, aplis_usuario, aplis_senha)
-
-                    
+                    resultado_correspondente = salvar_admissao_aplis(
+                        dados_correspondente, aplis_usuario, aplis_senha
+                    )
 
                     if resultado_correspondente.get("dat", {}).get("sucesso") == 1:
 
-                        logger.info(f"[SalvarAdmissao] âœ… Requisição correspondente criada: {cod_correspondente}")
+                        logger.info(
+                            f"[SalvarAdmissao] âœ… Requisição correspondente criada: {cod_correspondente}"
+                        )
 
                     else:
 
-                        erro_msg = resultado_correspondente.get("dat", {}).get("msg") or "Erro desconhecido"
+                        erro_msg = (
+                            resultado_correspondente.get("dat", {}).get("msg")
+                            or "Erro desconhecido"
+                        )
 
-                        logger.warning(f"[SalvarAdmissao] âš ️ Erro ao criar requisição correspondente: {erro_msg}")
+                        logger.warning(
+                            f"[SalvarAdmissao] âš ️ Erro ao criar requisição correspondente: {erro_msg}"
+                        )
 
-                        logger.warning(f"[SalvarAdmissao] âš ️ Resposta: {json.dumps(resultado_correspondente, ensure_ascii=False)}")
-
-                        
+                        logger.warning(
+                            f"[SalvarAdmissao] âš ️ Resposta: {json.dumps(resultado_correspondente, ensure_ascii=False)}"
+                        )
 
                 except Exception as e:
 
-                    logger.error(f"[SalvarAdmissao] âŒ Erro ao criar requisição correspondente: {str(e)}")
+                    logger.error(
+                        f"[SalvarAdmissao] âŒ Erro ao criar requisição correspondente: {str(e)}"
+                    )
 
                     import traceback
 
                     logger.error(traceback.format_exc())
-
-
 
             # ðŸ†• ============================================
 
@@ -8713,57 +8660,59 @@ def salvar_admissao():
 
                 # Extrair dados do paciente para o log
 
-                nome_paciente = dados.get('nomePaciente') or dados.get('nome') or dados.get('NomPaciente') or 'Não informado'
+                nome_paciente = (
+                    dados.get("nomePaciente")
+                    or dados.get("nome")
+                    or dados.get("NomPaciente")
+                    or "Não informado"
+                )
 
-                cpf_log = dados.get('cpf') or dados.get('CPF') or dados.get('NumCPF') or 'Não informado'
+                cpf_log = (
+                    dados.get("cpf")
+                    or dados.get("CPF")
+                    or dados.get("NumCPF")
+                    or "Não informado"
+                )
 
-                id_paciente_log = dados.get('idPaciente', 'Não informado')
+                id_paciente_log = dados.get("idPaciente", "Não informado")
 
-                convenio_log = dados.get('idConvenio', 'Não informado')
+                convenio_log = dados.get("idConvenio", "Não informado")
 
-                medico_log = dados.get('idMedico', 'Não informado')
+                medico_log = dados.get("idMedico", "Não informado")
 
-                data_coleta_log = dados.get('dtaColeta', 'Não informado')
-
-                
+                data_coleta_log = dados.get("dtaColeta", "Não informado")
 
                 # Buscar nomes dos relacionamentos (convênio e médico) para log mais legível
 
-                nome_convenio = 'Não identificado'
+                nome_convenio = "Não identificado"
 
-                if convenio_log != 'Não informado':
+                if convenio_log != "Não informado":
 
                     convenio_info = buscar_convenio_por_id(convenio_log)
 
                     if convenio_info:
 
-                        nome_convenio = convenio_info.get('nome', 'Não identificado')
+                        nome_convenio = convenio_info.get("nome", "Não identificado")
 
-                
+                nome_medico = "Não identificado"
 
-                nome_medico = 'Não identificado'
-
-                if medico_log != 'Não informado':
+                if medico_log != "Não informado":
 
                     # Buscar no cache de médicos (se houver)
 
                     for chave, medico_info in MEDICOS_CACHE.items():
 
-                        if str(medico_info.get('id')) == str(medico_log):
+                        if str(medico_info.get("id")) == str(medico_log):
 
-                            nome_medico = medico_info.get('nome', 'Não identificado')
+                            nome_medico = medico_info.get("nome", "Não identificado")
 
                             break
-
-                
 
                 # Timestamp do salvamento
 
                 from datetime import datetime
 
-                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-                
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 # Log estruturado e completo
 
@@ -8801,91 +8750,68 @@ def salvar_admissao():
 
                 logger.info(f"   â€¢ Data Coleta: {data_coleta_log}")
 
-                
-
                 # Exames (se houver)
 
-                if 'examesConvenio' in dados and dados['examesConvenio']:
+                if "examesConvenio" in dados and dados["examesConvenio"]:
 
-                    exames_ids = dados['examesConvenio']
+                    exames_ids = dados["examesConvenio"]
 
-                    logger.info(f"   â€¢ Exames: {len(exames_ids)} exame(s) - IDs: {exames_ids}")
-
-                
+                    logger.info(
+                        f"   â€¢ Exames: {len(exames_ids)} exame(s) - IDs: {exames_ids}"
+                    )
 
                 # Avisos especiais
 
-                if dados.get('_aviso_metodo_alternativo'):
+                if dados.get("_aviso_metodo_alternativo"):
 
                     logger.info("-" * 100)
 
                     logger.info("âš ️ AVISOS:")
 
-                    logger.info(f"   â€¢ CPF não validado na Receita Federal: {dados.get('_cpf_nao_validado')}")
+                    logger.info(
+                        f"   â€¢ CPF não validado na Receita Federal: {dados.get('_cpf_nao_validado')}"
+                    )
 
-                
-
-                if dados.get('_aviso_duplicacao'):
+                if dados.get("_aviso_duplicacao"):
 
                     logger.info("   âš ️ DUPLICAÃ‡ÃƒO DETECTADA - Ver detalhes acima")
 
-                
-
                 logger.info("=" * 100)
-
-                
 
             except Exception as e_log:
 
-                logger.error(f"[SalvarAdmissao] âš ️ Erro ao gerar log de admissão salva: {e_log}")
+                logger.error(
+                    f"[SalvarAdmissao] âš ️ Erro ao gerar log de admissão salva: {e_log}"
+                )
 
             # ============================================
-
-
 
             # Preparar resposta com aviso se usou método alternativo
 
             resposta = {
-
                 "sucesso": 1,
-
                 "mensagem": "Admissão salva com sucesso!",
-
                 "codRequisicao": cod_requisicao,
-
-                "dados": resultado["dat"]
-
+                "dados": resultado["dat"],
             }
-
-
 
             # ðŸ†• ADICIONAR AVISOS DE DUPLICAÃ‡ÃƒO E VERIFICAÃ‡ÃƒO
 
-            if dados.get('_aviso_duplicacao'):
+            if dados.get("_aviso_duplicacao"):
 
-                resposta['aviso_duplicacao'] = dados['_aviso_duplicacao']
+                resposta["aviso_duplicacao"] = dados["_aviso_duplicacao"]
 
+            if dados.get("_verificacao_duplicacao"):
 
+                resposta["verificacao_duplicacao"] = dados["_verificacao_duplicacao"]
 
-            if dados.get('_verificacao_duplicacao'):
+            if dados.get("_aviso_metodo_alternativo"):
 
-                resposta['verificacao_duplicacao'] = dados['_verificacao_duplicacao']
-
-
-
-            if dados.get('_aviso_metodo_alternativo'):
-
-                resposta['aviso_metodo_alternativo'] = {
-
-                    'tipo': 'cpf_nao_validado',
-
-                    'mensagem': f"âš ️ Paciente cadastrado com método alternativo (CPF não validado na Receita Federal)",
-
-                    'cpf': dados.get('_cpf_nao_validado')
-
+                resposta["aviso_metodo_alternativo"] = {
+                    "tipo": "cpf_nao_validado",
+                    "mensagem": f"âš ️ Paciente cadastrado com método alternativo (CPF não validado na Receita Federal)",
+                    "cpf": dados.get("_cpf_nao_validado"),
                 }
-
-
 
             # Adicionar código da correspondente se foi criada
 
@@ -8893,29 +8819,25 @@ def salvar_admissao():
 
                 resposta["codRequisicaoCorrespondente"] = cod_correspondente
 
-                resposta["mensagem"] = f"Admissão salva com sucesso! (Principal: {cod_requisicao}, Correspondente: {cod_correspondente})"
-
-            
+                resposta["mensagem"] = (
+                    f"Admissão salva com sucesso! (Principal: {cod_requisicao}, Correspondente: {cod_correspondente})"
+                )
 
             # Adicionar aviso se CPF não foi validado
 
-            if dados.get('_aviso_metodo_alternativo'):
+            if dados.get("_aviso_metodo_alternativo"):
 
-                cpf_nao_validado = dados.get('_cpf_nao_validado', 'não informado')
+                cpf_nao_validado = dados.get("_cpf_nao_validado", "não informado")
 
                 resposta["aviso"] = {
-
                     "tipo": "cpf_nao_validado",
-
                     "mensagem": f"âš ️ ATENÃ‡ÃƒO: Paciente cadastrado com método alternativo (CPF {cpf_nao_validado} não foi validado na Receita Federal). Verifique os dados do paciente.",
-
-                    "cpf": cpf_nao_validado
-
+                    "cpf": cpf_nao_validado,
                 }
 
-                logger.warning(f"[SalvarAdmissao] âš ️ Retornando aviso de CPF não validado: {cpf_nao_validado}")
-
-
+                logger.warning(
+                    f"[SalvarAdmissao] âš ️ Retornando aviso de CPF não validado: {cpf_nao_validado}"
+                )
 
             return jsonify(resposta), 200
 
@@ -8927,11 +8849,17 @@ def salvar_admissao():
 
             msg_aplis = resultado.get("msg")
 
-            cod_erro = resultado.get("dat", {}).get("codErro") if isinstance(resultado.get("dat"), dict) else None
+            cod_erro = (
+                resultado.get("dat", {}).get("codErro")
+                if isinstance(resultado.get("dat"), dict)
+                else None
+            )
 
-            msg_erro = resultado.get("dat", {}).get("msgErro") if isinstance(resultado.get("dat"), dict) else None
-
-            
+            msg_erro = (
+                resultado.get("dat", {}).get("msgErro")
+                if isinstance(resultado.get("dat"), dict)
+                else None
+            )
 
             # Se não tem erro no topo, procurar dentro de 'dat'
 
@@ -8941,9 +8869,12 @@ def salvar_admissao():
 
                 if isinstance(dat, dict):
 
-                    erro_aplis = dat.get("erro") or dat.get("mensagem") or dat.get("msg") or msg_erro
-
-            
+                    erro_aplis = (
+                        dat.get("erro")
+                        or dat.get("mensagem")
+                        or dat.get("msg")
+                        or msg_erro
+                    )
 
             if not erro_aplis:
 
@@ -8951,98 +8882,99 @@ def salvar_admissao():
 
                 erro_aplis = f"Erro não identificado no retorno do apLIS: {json.dumps(resultado, ensure_ascii=False)}"
 
-            
-
             # Se for erro de numGuia, adicionar informação de debug
 
             if "Guia Convênio" in str(erro_aplis) or "numGuia" in str(erro_aplis):
 
-                num_guia_enviado = dados.get('numGuia', 'NÃƒO ENVIADO')
+                num_guia_enviado = dados.get("numGuia", "NÃƒO ENVIADO")
                 erro_txt_lower = str(erro_aplis).lower()
-                if ('deve conter 8' in erro_txt_lower) or (('8' in erro_txt_lower) and ('guia' in erro_txt_lower) and ('conter' in erro_txt_lower)):
-                    esperado = '8 dígitos'
-                elif ('deve conter 9' in erro_txt_lower) or (('9' in erro_txt_lower) and ('guia' in erro_txt_lower) and ('conter' in erro_txt_lower)):
-                    esperado = '9 dígitos'
+                if ("deve conter 7" in erro_txt_lower) or (
+                    ("7" in erro_txt_lower)
+                    and ("guia" in erro_txt_lower)
+                    and ("conter" in erro_txt_lower)
+                ):
+                    esperado = "7 dígitos"
+                elif ("deve conter 8" in erro_txt_lower) or (
+                    ("8" in erro_txt_lower)
+                    and ("guia" in erro_txt_lower)
+                    and ("conter" in erro_txt_lower)
+                ):
+                    esperado = "8 dígitos"
+                elif ("deve conter 9" in erro_txt_lower) or (
+                    ("9" in erro_txt_lower)
+                    and ("guia" in erro_txt_lower)
+                    and ("conter" in erro_txt_lower)
+                ):
+                    esperado = "9 dígitos"
                 else:
-                    esperado = '8 ou 9 dígitos'
+                    esperado = "7, 8 ou 9 dígitos"
 
                 erro_aplis = (
-
                     f"âŒ {erro_aplis}\n\n"
-
                     f"ðŸ” DEBUG: numGuia enviado = '{num_guia_enviado}' (tamanho: {len(str(num_guia_enviado)) if num_guia_enviado != 'NÃƒO ENVIADO' else 0})\n\n"
-
                     f"ðŸ’¡ CAUSA: O convênio/procedimento selecionado EXIGE o número da guia ({esperado}).\n\n"
-
                     f"ðŸ”§ SOLUÃ‡ÃƒO:\n"
-
                     f"  1. Localize o campo 'Número da Guia' no formulário (lado direito)\n"
-
                     f"  2. Preencha com a quantidade de dígitos exigida no erro ({esperado})\n"
-
                     f"  3. Tente salvar novamente\n\n"
-
                     f"ðŸ“ ALTERNATIVA: Se não tiver o número da guia:\n"
-
                     f"  - Entre em contato com o convênio para obter\n"
-
                     f"  - Ou use um número provisório com formato válido para o convênio"
-
                 )
-
-            
 
             # Se for erro de fonte pagadora conflitante, adicionar explicação
 
-            if "fonte pagadora" in str(erro_aplis).lower() or "procedimentos cobrados" in str(erro_aplis).lower():
+            if (
+                "fonte pagadora" in str(erro_aplis).lower()
+                or "procedimentos cobrados" in str(erro_aplis).lower()
+            ):
 
                 logger.error(f"[SalvarAdmissao] ðŸ” ERRO DE FONTE PAGADORA DETECTADO")
 
-                logger.error(f"[SalvarAdmissao]   Fonte pagadora enviada: {dados.get('idFontePagadora')}")
+                logger.error(
+                    f"[SalvarAdmissao]   Fonte pagadora enviada: {dados.get('idFontePagadora')}"
+                )
 
-                logger.error(f"[SalvarAdmissao]   Convênio enviado: {dados.get('idConvenio')}")
+                logger.error(
+                    f"[SalvarAdmissao]   Convênio enviado: {dados.get('idConvenio')}"
+                )
 
-                logger.error(f"[SalvarAdmissao]   Código requisição: {dados.get('codRequisicao')}")
-
-                
+                logger.error(
+                    f"[SalvarAdmissao]   Código requisição: {dados.get('codRequisicao')}"
+                )
 
                 # Adicionar dica de solução
 
                 erro_aplis = (
-
                     f"{erro_aplis}\n\n"
-
                     f"ðŸ’¡ CAUSA: A requisição já existe no sistema com outra fonte pagadora. "
-
                     f"O apLIS não permite alterar a fonte pagadora de uma requisição existente.\n\n"
-
                     f"ðŸ”§ SOLUÃ‡ÃƒO: O sistema tentará usar automaticamente a fonte pagadora já cadastrada. "
-
                     f"Recarregue a página e tente novamente."
-
                 )
-
-            
 
             msg_final = f"{erro_aplis} {msg_aplis or ''}".strip()
 
+            if paciente_criado_nesta_tentativa and paciente_criado_id:
+                msg_final = (
+                    f"Paciente foi criado com sucesso (ID {paciente_criado_id}), "
+                    f"mas a admissão falhou.\n\n{msg_final}"
+                )
+
             logger.error(f"[SalvarAdmissao] âŒ ERRO DO apLIS: {msg_final}")
 
-            logger.error(f"[SalvarAdmissao] âŒ CodErro: {cod_erro}, MsgErro: {msg_erro}")
+            logger.error(
+                f"[SalvarAdmissao] âŒ CodErro: {cod_erro}, MsgErro: {msg_erro}"
+            )
 
-            logger.error(f"[SalvarAdmissao] âŒ Resposta completa: {json.dumps(resultado, ensure_ascii=False)}")
+            logger.error(
+                f"[SalvarAdmissao] âŒ Resposta completa: {json.dumps(resultado, ensure_ascii=False)}"
+            )
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": msg_final,
-
-                "detalhes": resultado
-
-            }), 400
-
-
+            return (
+                jsonify({"sucesso": 0, "erro": msg_final, "detalhes": resultado}),
+                400,
+            )
 
     except Exception as e:
 
@@ -9052,22 +8984,11 @@ def salvar_admissao():
 
         logger.error(traceback.format_exc())
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": f"Erro no servidor: {str(e)}"
-
-        }), 500
+        return jsonify({"sucesso": 0, "erro": f"Erro no servidor: {str(e)}"}), 500
 
 
-
-
-
-@app.route('/api/convenios/buscar-por-nome', methods=['POST'])
-
+@app.route("/api/convenios/buscar-por-nome", methods=["POST"])
 def buscar_convenio_por_nome():
-
     """
 
     Busca convênio por nome (para preencher ID quando OCR encontra carteirinha)
@@ -9078,98 +8999,80 @@ def buscar_convenio_por_nome():
 
         dados = request.json
 
-        nome_convenio = dados.get('nome_convenio', '').strip().upper()
-
-
+        nome_convenio = dados.get("nome_convenio", "").strip().upper()
 
         if not nome_convenio:
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": "Nome do convênio não fornecido"
-
-            }), 400
-
-
+            return (
+                jsonify({"sucesso": 0, "erro": "Nome do convênio não fornecido"}),
+                400,
+            )
 
         logger.info(f"[CONVENIO] Procurando convênio: {nome_convenio}")
-
-
 
         # Buscar no cache de convênios carregado
 
         for id_convenio, convenio_data in CONVENIOS_CACHE.items():
 
-            if convenio_data.get('nome', '').strip().upper() == nome_convenio:
+            if convenio_data.get("nome", "").strip().upper() == nome_convenio:
 
-                logger.info(f"[CONVENIO] âœ… Encontrado: ID={id_convenio}, Nome={convenio_data.get('nome')}")
+                logger.info(
+                    f"[CONVENIO] âœ… Encontrado: ID={id_convenio}, Nome={convenio_data.get('nome')}"
+                )
 
-                return jsonify({
-
-                    "sucesso": 1,
-
-                    "idConvenio": int(id_convenio),
-
-                    "nomeConvenio": convenio_data.get('nome')
-
-                }), 200
-
-
+                return (
+                    jsonify(
+                        {
+                            "sucesso": 1,
+                            "idConvenio": int(id_convenio),
+                            "nomeConvenio": convenio_data.get("nome"),
+                        }
+                    ),
+                    200,
+                )
 
         # Se não encontrará exato, tentar busca parcial (contém)
 
         for id_convenio, convenio_data in CONVENIOS_CACHE.items():
 
-            if nome_convenio in convenio_data.get('nome', '').strip().upper():
+            if nome_convenio in convenio_data.get("nome", "").strip().upper():
 
-                logger.info(f"[CONVENIO] âœ… Encontrado (busca parcial): ID={id_convenio}, Nome={convenio_data.get('nome')}")
+                logger.info(
+                    f"[CONVENIO] âœ… Encontrado (busca parcial): ID={id_convenio}, Nome={convenio_data.get('nome')}"
+                )
 
-                return jsonify({
-
-                    "sucesso": 1,
-
-                    "idConvenio": int(id_convenio),
-
-                    "nomeConvenio": convenio_data.get('nome')
-
-                }), 200
-
-
+                return (
+                    jsonify(
+                        {
+                            "sucesso": 1,
+                            "idConvenio": int(id_convenio),
+                            "nomeConvenio": convenio_data.get("nome"),
+                        }
+                    ),
+                    200,
+                )
 
         logger.warning(f"[CONVENIO] âŒ Convênio não encontrado: {nome_convenio}")
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": f"Convênio '{nome_convenio}' não encontrado"
-
-        }), 404
-
-
+        return (
+            jsonify(
+                {"sucesso": 0, "erro": f"Convênio '{nome_convenio}' não encontrado"}
+            ),
+            404,
+        )
 
     except Exception as e:
 
         logger.error(f"[CONVENIO] Erro: {str(e)}")
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": f"Erro ao buscar convênio: {str(e)}"
-
-        }), 500
+        return (
+            jsonify({"sucesso": 0, "erro": f"Erro ao buscar convênio: {str(e)}"}),
+            500,
+        )
 
 
-
-
-
-@app.route('/api/admissao/validar', methods=['POST'])
-
+@app.route("/api/admissao/validar", methods=["POST"])
 def validar_dados():
-
     """
 
     Valida dados antes de salvar
@@ -9184,92 +9087,72 @@ def validar_dados():
 
         avisos = []
 
-
-
         # Validar formato de data
 
-        if 'dtaColeta' in dados:
+        if "dtaColeta" in dados:
 
             try:
 
-                datetime.strptime(dados['dtaColeta'], '%Y-%m-%d')
+                datetime.strptime(dados["dtaColeta"], "%Y-%m-%d")
 
             except ValueError:
 
                 erros.append("Data de coleta inválida. Use formato YYYY-MM-DD")
 
-
-
         # Validar IDs positivos
 
-        campos_id = ['idLaboratorio', 'idUnidade', 'idPaciente', 'idConvenio',
-
-                     'idLocalOrigem', 'idFontePagadora', 'idMedico', 'idExame']
-
-
+        campos_id = [
+            "idLaboratorio",
+            "idUnidade",
+            "idPaciente",
+            "idConvenio",
+            "idLocalOrigem",
+            "idFontePagadora",
+            "idMedico",
+            "idExame",
+        ]
 
         for campo in campos_id:
 
-            if campo in dados and (not isinstance(dados[campo], int) or dados[campo] <= 0):
+            if campo in dados and (
+                not isinstance(dados[campo], int) or dados[campo] <= 0
+            ):
 
                 erros.append(f"{campo} deve ser um número inteiro positivo")
 
-
-
         # Validar array de exames
 
-        if 'examesConvenio' in dados:
+        if "examesConvenio" in dados:
 
-            if not isinstance(dados['examesConvenio'], list) or len(dados['examesConvenio']) == 0:
+            if (
+                not isinstance(dados["examesConvenio"], list)
+                or len(dados["examesConvenio"]) == 0
+            ):
 
                 erros.append("examesConvenio deve ser um array com pelo menos um exame")
 
-
-
         # Avisos
 
-        if 'numGuia' not in dados:
+        if "numGuia" not in dados:
 
             avisos.append("Número da guia não informado")
 
-
-
-        if 'dadosClinicos' not in dados:
+        if "dadosClinicos" not in dados:
 
             avisos.append("Dados clínicos não informados")
 
-
-
-        return jsonify({
-
-            "valido": len(erros) == 0,
-
-            "erros": erros,
-
-            "avisos": avisos
-
-        }), 200
-
-
+        return (
+            jsonify({"valido": len(erros) == 0, "erros": erros, "avisos": avisos}),
+            200,
+        )
 
     except Exception as e:
 
-        return jsonify({
-
-            "valido": False,
-
-            "erros": [f"Erro ao validar: {str(e)}"]
-
-        }), 500
+        return jsonify({"valido": False, "erros": [f"Erro ao validar: {str(e)}"]}), 500
 
 
-
-
-
-@app.route('/api/admissao/validar-cpf', methods=['POST'])
-
+@app.route("/api/admissao/validar-cpf", methods=["POST"])
 def validar_cpf_endpoint():
-
     """
 
     Valida CPF na Receita Federal
@@ -9334,224 +9217,172 @@ def validar_cpf_endpoint():
 
         dados = request.json
 
-        cpf = dados.get('cpf')
+        cpf = dados.get("cpf")
 
-        data_nascimento = dados.get('data_nascimento')
+        data_nascimento = dados.get("data_nascimento")
 
-        nome_ocr = dados.get('nome_ocr', '')
+        nome_ocr = dados.get("nome_ocr", "")
 
-        data_nascimento_ocr = dados.get('data_nascimento_ocr', '')
-
-
+        data_nascimento_ocr = dados.get("data_nascimento_ocr", "")
 
         if not cpf:
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "mensagem": "CPF não informado"
-
-            }), 400
-
-
+            return jsonify({"sucesso": 0, "mensagem": "CPF não informado"}), 400
 
         logger.info(f"[ValidarCPF] Recebida solicitação de validação: CPF={cpf}")
 
-        logger.info(f"[ValidarCPF] Dados do OCR: Nome='{nome_ocr}', Data Nasc='{data_nascimento_ocr}'")
-
-
+        logger.info(
+            f"[ValidarCPF] Dados do OCR: Nome='{nome_ocr}', Data Nasc='{data_nascimento_ocr}'"
+        )
 
         # Consultar Receita Federal
 
-        dados_receita = consultar_cpf_receita_federal(cpf, data_nascimento or data_nascimento_ocr)
-
-
+        dados_receita = consultar_cpf_receita_federal(
+            cpf, data_nascimento or data_nascimento_ocr
+        )
 
         if dados_receita:
 
-            logger.info(f"[ValidarCPF] âœ… CPF validado com sucesso: {dados_receita.get('nome')}")
-
-            
+            logger.info(
+                f"[ValidarCPF] âœ… CPF validado com sucesso: {dados_receita.get('nome')}"
+            )
 
             # Preparar comparação de dados
 
             comparacao = {
-
                 "nome": {
-
                     "sistema": nome_ocr,
-
-                    "receita_federal": dados_receita.get('nome', ''),
-
-                    "divergente": bool(nome_ocr and dados_receita.get('nome') and 
-
-                                      nome_ocr.upper().strip() != dados_receita.get('nome', '').upper().strip())
-
+                    "receita_federal": dados_receita.get("nome", ""),
+                    "divergente": bool(
+                        nome_ocr
+                        and dados_receita.get("nome")
+                        and nome_ocr.upper().strip()
+                        != dados_receita.get("nome", "").upper().strip()
+                    ),
                 },
-
                 "cpf": {
-
                     "sistema": cpf,
-
-                    "receita_federal": dados_receita.get('cpf', ''),
-
-                    "divergente": False  # CPF sempre será igual (usado para buscar)
-
+                    "receita_federal": dados_receita.get("cpf", ""),
+                    "divergente": False,  # CPF sempre será igual (usado para buscar)
                 },
-
                 "data_nascimento": {
-
                     "sistema": data_nascimento_ocr,
-
-                    "receita_federal": dados_receita.get('data_nascimento', ''),
-
-                    "divergente": bool(data_nascimento_ocr and dados_receita.get('data_nascimento') and
-
-                                      data_nascimento_ocr.replace('/', '').replace('-', '') != 
-
-                                      dados_receita.get('data_nascimento', '').replace('/', '').replace('-', ''))
-
-                }
-
+                    "receita_federal": dados_receita.get("data_nascimento", ""),
+                    "divergente": bool(
+                        data_nascimento_ocr
+                        and dados_receita.get("data_nascimento")
+                        and data_nascimento_ocr.replace("/", "").replace("-", "")
+                        != dados_receita.get("data_nascimento", "")
+                        .replace("/", "")
+                        .replace("-", "")
+                    ),
+                },
             }
-
-            
 
             logger.info(f"[ValidarCPF] ðŸ“Š Comparação preparada:")
 
-            logger.info(f"[ValidarCPF]   Nome: '{comparacao['nome']['sistema']}' vs '{comparacao['nome']['receita_federal']}' (divergente: {comparacao['nome']['divergente']})")
+            logger.info(
+                f"[ValidarCPF]   Nome: '{comparacao['nome']['sistema']}' vs '{comparacao['nome']['receita_federal']}' (divergente: {comparacao['nome']['divergente']})"
+            )
 
-            logger.info(f"[ValidarCPF]   Data: '{comparacao['data_nascimento']['sistema']}' vs '{comparacao['data_nascimento']['receita_federal']}' (divergente: {comparacao['data_nascimento']['divergente']})")
+            logger.info(
+                f"[ValidarCPF]   Data: '{comparacao['data_nascimento']['sistema']}' vs '{comparacao['data_nascimento']['receita_federal']}' (divergente: {comparacao['data_nascimento']['divergente']})"
+            )
 
-            
-
-            return jsonify({
-
-                "sucesso": 1,
-
-                "mensagem": "CPF validado com sucesso",
-
-                "dados_receita_federal": dados_receita,
-
-                "comparacao": comparacao
-
-            }), 200
+            return (
+                jsonify(
+                    {
+                        "sucesso": 1,
+                        "mensagem": "CPF validado com sucesso",
+                        "dados_receita_federal": dados_receita,
+                        "comparacao": comparacao,
+                    }
+                ),
+                200,
+            )
 
         else:
 
             logger.warning(f"[ValidarCPF] âŒ Não foi possível validar o CPF")
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "mensagem": "Não foi possível validar o CPF na Receita Federal"
-
-            }), 400
-
-
+            return (
+                jsonify(
+                    {
+                        "sucesso": 0,
+                        "mensagem": "Não foi possível validar o CPF na Receita Federal",
+                    }
+                ),
+                400,
+            )
 
     except Exception as e:
 
         logger.error(f"[ValidarCPF] ðŸ’¥ Erro ao validar CPF: {str(e)}")
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "mensagem": f"Erro ao validar CPF: {str(e)}"
-
-        }), 500
+        return (
+            jsonify({"sucesso": 0, "mensagem": f"Erro ao validar CPF: {str(e)}"}),
+            500,
+        )
 
 
-
-
-
-@app.route('/', methods=['GET'])
-
+@app.route("/", methods=["GET"])
 def index():
-
     """
 
     Página inicial - informações da API
 
     """
 
-    return jsonify({
-
-        "nome": "API de Admissão - Sistema Lab",
-
-        "versao": "2.0",
-
-        "status": "online",
-
-        "timestamp": datetime.now().isoformat(),
-
-        "endpoints": {
-
-            "health": "/api/health",
-
-            "teste_aplis": "/api/admissao/teste",
-
-            "listar_requisicoes": "/api/requisicoes/listar (POST) - Nova metodologia requisicaoListar",
-
-            "buscar_requisicao": "/api/requisicao/<codigo>",
-
-            "salvar_admissao": "/api/admissao/salvar (POST)",
-
-            "validar_dados": "/api/admissao/validar (POST)",
-
-            "validar_cpf": "/api/admissao/validar-cpf (POST)",
-
-            "processar_ocr": "/api/ocr/processar (POST)",
-
-            "consolidar_resultados": "/api/consolidar-resultados (POST)",
-
-            "buscar_exames": "/api/exames/buscar-por-nome (POST)",
-
-            "servir_imagem": "/api/imagem/<filename>"
-
-        },
-
-        "documentacao": "Veja README.md para mais informações",
-
-        "nota": "API agora usa metodologia requisicaoListar do apiaplisreduzido"
-
-    }), 200
+    return (
+        jsonify(
+            {
+                "nome": "API de Admissão - Sistema Lab",
+                "versao": "2.0",
+                "status": "online",
+                "timestamp": datetime.now().isoformat(),
+                "endpoints": {
+                    "health": "/api/health",
+                    "teste_aplis": "/api/admissao/teste",
+                    "listar_requisicoes": "/api/requisicoes/listar (POST) - Nova metodologia requisicaoListar",
+                    "buscar_requisicao": "/api/requisicao/<codigo>",
+                    "salvar_admissao": "/api/admissao/salvar (POST)",
+                    "validar_dados": "/api/admissao/validar (POST)",
+                    "validar_cpf": "/api/admissao/validar-cpf (POST)",
+                    "processar_ocr": "/api/ocr/processar (POST)",
+                    "consolidar_resultados": "/api/consolidar-resultados (POST)",
+                    "buscar_exames": "/api/exames/buscar-por-nome (POST)",
+                    "servir_imagem": "/api/imagem/<filename>",
+                },
+                "documentacao": "Veja README.md para mais informações",
+                "nota": "API agora usa metodologia requisicaoListar do apiaplisreduzido",
+            }
+        ),
+        200,
+    )
 
 
-
-
-
-@app.route('/api/health', methods=['GET'])
-
+@app.route("/api/health", methods=["GET"])
 def health_check():
-
     """
 
     Health check do servidor
 
     """
 
-    return jsonify({
-
-        "status": "online",
-
-        "servico": "API Admissão apLIS",
-
-        "timestamp": datetime.now().isoformat()
-
-    }), 200
-
-
-
+    return (
+        jsonify(
+            {
+                "status": "online",
+                "servico": "API Admissão apLIS",
+                "timestamp": datetime.now().isoformat(),
+            }
+        ),
+        200,
+    )
 
 
-@app.route('/api/admissao/teste', methods=['GET'])
-
+@app.route("/api/admissao/teste", methods=["GET"])
 def teste_conexao():
-
     """
 
     Testa conexão com apLIS
@@ -9562,36 +9393,33 @@ def teste_conexao():
 
         response = requests.get(APLIS_URL, timeout=10)
 
-        return jsonify({
-
-            "conexao_ok": True,
-
-            "status_code": response.status_code,
-
-            "mensagem": "Conexão com apLIS estabelecida"
-
-        }), 200
+        return (
+            jsonify(
+                {
+                    "conexao_ok": True,
+                    "status_code": response.status_code,
+                    "mensagem": "Conexão com apLIS estabelecida",
+                }
+            ),
+            200,
+        )
 
     except Exception as e:
 
-        return jsonify({
-
-            "conexao_ok": False,
-
-            "erro": str(e),
-
-            "mensagem": "Falha ao conectar com apLIS"
-
-        }), 500
-
-
-
+        return (
+            jsonify(
+                {
+                    "conexao_ok": False,
+                    "erro": str(e),
+                    "mensagem": "Falha ao conectar com apLIS",
+                }
+            ),
+            500,
+        )
 
 
-@app.route('/api/imagem/<filename>', methods=['GET'])
-
+@app.route("/api/imagem/<filename>", methods=["GET"])
 def servir_imagem(filename):
-
     """
 
     Serve imagem do diretório temporário
@@ -9606,25 +9434,21 @@ def servir_imagem(filename):
 
             # Detectar mimetype baseado na extensão
 
-            ext = filename.split('.')[-1].upper() if '.' in filename else ''
+            ext = filename.split(".")[-1].upper() if "." in filename else ""
 
-            mimetype = 'image/png'
+            mimetype = "image/png"
 
+            if ext == "PDF":
 
+                mimetype = "application/pdf"
 
-            if ext == 'PDF':
+            elif ext in ["JPG", "JPEG"]:
 
-                mimetype = 'application/pdf'
+                mimetype = "image/jpeg"
 
-            elif ext in ['JPG', 'JPEG']:
+            elif ext == "PNG":
 
-                mimetype = 'image/jpeg'
-
-            elif ext == 'PNG':
-
-                mimetype = 'image/png'
-
-
+                mimetype = "image/png"
 
             return send_file(arquivo_path, mimetype=mimetype)
 
@@ -9637,13 +9461,8 @@ def servir_imagem(filename):
         return jsonify({"erro": str(e)}), 500
 
 
-
-
-
-@app.route('/api/ocr/teste', methods=['GET'])
-
+@app.route("/api/ocr/teste", methods=["GET"])
 def teste_ocr():
-
     """Endpoint de teste para verificar se Vertex AI está funcionando"""
 
     try:
@@ -9652,22 +9471,28 @@ def teste_ocr():
 
         response = model.generate_content("Responda apenas: OK")
 
-        return jsonify({"sucesso": 1, "resposta": response.text.strip(), "modelo": "gemini-2.5-flash"})
+        return jsonify(
+            {
+                "sucesso": 1,
+                "resposta": response.text.strip(),
+                "modelo": "gemini-2.5-flash",
+            }
+        )
 
     except Exception as e:
 
         import traceback
 
-        return jsonify({"sucesso": 0, "erro": str(e), "traceback": traceback.format_exc()}), 500
+        return (
+            jsonify(
+                {"sucesso": 0, "erro": str(e), "traceback": traceback.format_exc()}
+            ),
+            500,
+        )
 
 
-
-
-
-@app.route('/api/ocr/processar', methods=['POST'])
-
+@app.route("/api/ocr/processar", methods=["POST"])
 def processar_ocr():
-
     """
 
     Processa OCR em uma imagem usando Vertex AI e extrai dados
@@ -9680,23 +9505,17 @@ def processar_ocr():
 
         dados = request.json
 
-        imagem_nome = dados.get('imagemNome')
+        imagem_nome = dados.get("imagemNome")
 
-        imagem_url = dados.get('imagemUrl')
-
-
+        imagem_url = dados.get("imagemUrl")
 
         if not imagem_nome:
 
             return jsonify({"sucesso": 0, "erro": "Nome da imagem não fornecido"}), 400
 
-
-
         logger.info(f"[OCR] Iniciando processamento: {imagem_nome}")
 
         logger.debug(f"[OCR] URL recebida: {imagem_url}")
-
-
 
         # Tentar primeiro em arquivo local, depois em S3 via URL
 
@@ -9704,15 +9523,13 @@ def processar_ocr():
 
         image_bytes = None
 
-
-
         # 1. Tentar arquivo local
 
         if os.path.exists(arquivo_path):
 
             logger.info(f"[OCR] Carregando de arquivo local: {arquivo_path}")
 
-            with open(arquivo_path, 'rb') as f:
+            with open(arquivo_path, "rb") as f:
 
                 image_bytes = f.read()
 
@@ -9730,79 +9547,75 @@ def processar_ocr():
 
                     image_bytes = response.content
 
-                    logger.info(f"[OCR] Imagem baixada do S3 com sucesso: {len(image_bytes)} bytes")
+                    logger.info(
+                        f"[OCR] Imagem baixada do S3 com sucesso: {len(image_bytes)} bytes"
+                    )
 
                 else:
 
-                    logger.error(f"[OCR] Erro ao baixar imagem: status {response.status_code}")
+                    logger.error(
+                        f"[OCR] Erro ao baixar imagem: status {response.status_code}"
+                    )
 
-                    return jsonify({
-
-                        "sucesso": 0,
-
-                        "erro": f"Erro ao baixar imagem do S3: status {response.status_code}"
-
-                    }), 400
+                    return (
+                        jsonify(
+                            {
+                                "sucesso": 0,
+                                "erro": f"Erro ao baixar imagem do S3: status {response.status_code}",
+                            }
+                        ),
+                        400,
+                    )
 
             except Exception as e:
 
                 logger.error(f"[OCR] Erro ao baixar de S3: {str(e)}")
 
-                return jsonify({
-
-                    "sucesso": 0,
-
-                    "erro": f"Erro ao baixar imagem: {str(e)}"
-
-                }), 400
+                return (
+                    jsonify({"sucesso": 0, "erro": f"Erro ao baixar imagem: {str(e)}"}),
+                    400,
+                )
 
         else:
 
             logger.error(f"[OCR] Imagem não encontrada: {imagem_nome}")
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": "Imagem não encontrada (nem arquivo local nem URL fornecida)"
-
-            }), 404
-
-
+            return (
+                jsonify(
+                    {
+                        "sucesso": 0,
+                        "erro": "Imagem não encontrada (nem arquivo local nem URL fornecida)",
+                    }
+                ),
+                404,
+            )
 
         if not image_bytes:
 
             logger.error(f"[OCR] Falha ao carregar dados da imagem: {imagem_nome}")
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": "Falha ao carregar dados da imagem"
-
-            }), 400
-
-
+            return (
+                jsonify({"sucesso": 0, "erro": "Falha ao carregar dados da imagem"}),
+                400,
+            )
 
         # Criar modelo Gemini (usando 2.5 Flash - estável e com boa cota)
 
         model = GenerativeModel("gemini-2.5-flash")
 
-
-
         # Detectar mime type baseado na extensão
 
-        ext = imagem_nome.split('.')[-1].upper()
+        ext = imagem_nome.split(".")[-1].upper()
 
-        if ext == 'PNG':
+        if ext == "PNG":
 
             mime_type = "image/png"
 
-        elif ext == 'PDF':
+        elif ext == "PDF":
 
             mime_type = "application/pdf"
 
-        elif ext in ['JPG', 'JPEG']:
+        elif ext in ["JPG", "JPEG"]:
 
             mime_type = "image/jpeg"
 
@@ -9810,17 +9623,11 @@ def processar_ocr():
 
             mime_type = "image/jpeg"
 
-
-
         logger.info(f"[OCR] Tipo MIME detectado: {mime_type}")
-
-
 
         # Criar parte da imagem/documento
 
         image_part = Part.from_data(data=image_bytes, mime_type=mime_type)
-
-
 
         # âš¡ APLICAR RATE LIMITING ANTES DE CHAMAR VERTEX AI
 
@@ -9830,13 +9637,9 @@ def processar_ocr():
 
         logger.info("[OCR] âœ… Rate limit OK, prosseguindo com requisição")
 
-
-
         # Prompt para extrair dados com rastreabilidade (importado de prompts_ocr.py)
 
         prompt = gerar_prompt_ocr(imagem_nome)
-
-
 
         # Gerar resposta com retry em caso de rate limit
 
@@ -9846,8 +9649,6 @@ def processar_ocr():
 
         retry_delay = 15  # Começar com 15 segundos
 
-
-
         for attempt in range(max_retries):
 
             try:
@@ -9856,8 +9657,10 @@ def processar_ocr():
 
                 texto_resposta = response.text.strip()
 
-                logger.info(f"[OCR] âœ… Resposta recebida do Vertex AI: {len(texto_resposta)} caracteres")
-                _registrar_tokens('ocr', response)
+                logger.info(
+                    f"[OCR] âœ… Resposta recebida do Vertex AI: {len(texto_resposta)} caracteres"
+                )
+                _registrar_tokens("ocr", response)
 
                 logger.debug(f"[OCR] Primeiros 500 chars: {texto_resposta[:500]}...")
 
@@ -9867,35 +9670,37 @@ def processar_ocr():
 
                 error_str = str(e)
 
-                logger.error(f"[OCR] Erro na tentativa {attempt + 1}/{max_retries}: {error_str}")
-
-
+                logger.error(
+                    f"[OCR] Erro na tentativa {attempt + 1}/{max_retries}: {error_str}"
+                )
 
                 # Se for erro 429 (rate limit) e ainda tem tentativas, aguardar
 
                 if "429" in error_str and attempt < max_retries - 1:
 
-                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff: 15s, 30s, 60s
+                    wait_time = retry_delay * (
+                        2**attempt
+                    )  # Exponential backoff: 15s, 30s, 60s
 
-                    logger.warning(f"[OCR] ⏳ Rate limit 429 detectado. Aguardando {wait_time}s antes de tentar novamente...")
+                    logger.warning(
+                        f"[OCR] ⏳ Rate limit 429 detectado. Aguardando {wait_time}s antes de tentar novamente..."
+                    )
 
                     time.sleep(wait_time)
 
                     continue
 
-
-
                 # Se não é 429 ou é a última tentativa, retornar erro
 
-                return jsonify({
-
-                    "sucesso": 0,
-
-                    "erro": f"Erro ao processar com Vertex AI: {error_str}"
-
-                }), 500
-
-
+                return (
+                    jsonify(
+                        {
+                            "sucesso": 0,
+                            "erro": f"Erro ao processar com Vertex AI: {error_str}",
+                        }
+                    ),
+                    500,
+                )
 
         # Salvar resposta completa em arquivo de debug
 
@@ -9903,7 +9708,7 @@ def processar_ocr():
 
             debug_path = os.path.join(TEMP_IMAGES_DIR, f"debug_ocr_{imagem_nome}.json")
 
-            with open(debug_path, 'w', encoding='utf-8') as f:
+            with open(debug_path, "w", encoding="utf-8") as f:
 
                 f.write(texto_resposta)
 
@@ -9913,19 +9718,17 @@ def processar_ocr():
 
             logger.warning(f"[OCR] Aviso ao salvar debug: {e}")
 
-
-
         # Limpar possíveis markdown do JSON
 
         if texto_resposta.startswith("```json"):
 
-            texto_resposta = texto_resposta.replace("```json", "").replace("```", "").strip()
+            texto_resposta = (
+                texto_resposta.replace("```json", "").replace("```", "").strip()
+            )
 
         elif texto_resposta.startswith("```"):
 
             texto_resposta = texto_resposta.replace("```", "").strip()
-
-
 
         # Parse do JSON
 
@@ -9935,16 +9738,17 @@ def processar_ocr():
 
             logger.info(f"[OCR] JSON parseado com sucesso")
 
-            logger.debug(f"[OCR] Tipo de documento: {dados_extraidos.get('tipo_documento')}")
+            logger.debug(
+                f"[OCR] Tipo de documento: {dados_extraidos.get('tipo_documento')}"
+            )
 
-            print(f"[OCR]  DEBUG - itens_exame RAW: {dados_extraidos.get('requisicao', {}).get('itens_exame')}")
-
-
+            print(
+                f"[OCR]  DEBUG - itens_exame RAW: {dados_extraidos.get('requisicao', {}).get('itens_exame')}"
+            )
 
             # ðŸ†• VALIDAÃ‡ÃƒO E CORREÃ‡ÃƒO AUTOMÁTICA DE DATAS
 
             def validar_e_corrigir_data(data_str, campo_nome="data"):
-
                 """
 
                 Valida e corrige datas no formato YYYY-MM-DD
@@ -9957,19 +9761,15 @@ def processar_ocr():
 
                     return data_str
 
-
-
                 try:
 
                     # Formato esperado: YYYY-MM-DD
 
-                    partes = data_str.split('-')
+                    partes = data_str.split("-")
 
                     if len(partes) != 3:
 
                         return data_str
-
-
 
                     ano, mes, dia = partes
 
@@ -9978,8 +9778,6 @@ def processar_ocr():
                     mes_int = int(mes)
 
                     dia_int = int(dia)
-
-
 
                     # Validação básica
 
@@ -9993,7 +9791,9 @@ def processar_ocr():
 
                             print(f"[OCR] âš ️ CORREÃ‡ÃƒO AUTOMÁTICA: {campo_nome}")
 
-                            print(f"[OCR]   Data INCORRETA: {data_str} (mês={mes_int} inválido)")
+                            print(
+                                f"[OCR]   Data INCORRETA: {data_str} (mês={mes_int} inválido)"
+                            )
 
                             print(f"[OCR]   Invertendo dia â†” mês...")
 
@@ -10003,19 +9803,15 @@ def processar_ocr():
 
                             return data_corrigida
 
-
-
                     # Se dia é inválido para o mês, também pode ser inversão
 
                     if dia_int > 31 or dia_int < 1:
 
-                        print(f"[OCR] âš ️ Data com dia inválido: {data_str} (dia={dia_int})")
-
-
+                        print(
+                            f"[OCR] âš ️ Data com dia inválido: {data_str} (dia={dia_int})"
+                        )
 
                     return data_str
-
-
 
                 except (ValueError, IndexError) as e:
 
@@ -10023,117 +9819,141 @@ def processar_ocr():
 
                     return data_str
 
-
-
             # Aplicar validação nas datas do paciente
 
-            if 'paciente' in dados_extraidos:
+            if "paciente" in dados_extraidos:
 
-                paciente = dados_extraidos['paciente']
-
-
+                paciente = dados_extraidos["paciente"]
 
                 # Validar Data de Nascimento
 
-                if 'DtaNascimento' in paciente and isinstance(paciente['DtaNascimento'], dict):
+                if "DtaNascimento" in paciente and isinstance(
+                    paciente["DtaNascimento"], dict
+                ):
 
-                    data_original = paciente['DtaNascimento'].get('valor')
+                    data_original = paciente["DtaNascimento"].get("valor")
 
-                    data_corrigida = validar_e_corrigir_data(data_original, "Data de Nascimento")
+                    data_corrigida = validar_e_corrigir_data(
+                        data_original, "Data de Nascimento"
+                    )
 
                     if data_corrigida != data_original:
 
-                        paciente['DtaNascimento'] = {
-
+                        paciente["DtaNascimento"] = {
                             "valor": data_corrigida,
-
                             "fonte": f"Calculado de idade: {data_original}",
-
-                            "confianca": 0.85  # Confiança um pouco menor pois é calculado
-
+                            "confianca": 0.85,  # Confiança um pouco menor pois é calculado
                         }
 
-                        print(f"[OCR] âœ… Data de nascimento corrigida: {data_corrigida}")
-
-
+                        print(
+                            f"[OCR] âœ… Data de nascimento corrigida: {data_corrigida}"
+                        )
 
                 # Validar Data de Coleta
 
-                if 'requisicao' in dados_extraidos and 'dtaColeta' in dados_extraidos['requisicao']:
+                if (
+                    "requisicao" in dados_extraidos
+                    and "dtaColeta" in dados_extraidos["requisicao"]
+                ):
 
-                    if isinstance(dados_extraidos['requisicao']['dtaColeta'], dict):
+                    if isinstance(dados_extraidos["requisicao"]["dtaColeta"], dict):
 
-                        data_original = dados_extraidos['requisicao']['dtaColeta'].get('valor')
+                        data_original = dados_extraidos["requisicao"]["dtaColeta"].get(
+                            "valor"
+                        )
 
-                        data_corrigida = validar_e_corrigir_data(data_original, "Data de Coleta")
+                        data_corrigida = validar_e_corrigir_data(
+                            data_original, "Data de Coleta"
+                        )
 
                         if data_corrigida != data_original:
 
-                            dados_extraidos['requisicao']['dtaColeta']['valor'] = data_corrigida
+                            dados_extraidos["requisicao"]["dtaColeta"][
+                                "valor"
+                            ] = data_corrigida
 
-                            if 'confianca' in dados_extraidos['requisicao']['dtaColeta']:
+                            if (
+                                "confianca"
+                                in dados_extraidos["requisicao"]["dtaColeta"]
+                            ):
 
-                                dados_extraidos['requisicao']['dtaColeta']['confianca'] = max(0.7, dados_extraidos['requisicao']['dtaColeta'].get('confianca', 0.9) - 0.2)
-
-
+                                dados_extraidos["requisicao"]["dtaColeta"][
+                                    "confianca"
+                                ] = max(
+                                    0.7,
+                                    dados_extraidos["requisicao"]["dtaColeta"].get(
+                                        "confianca", 0.9
+                                    )
+                                    - 0.2,
+                                )
 
             # LOG DETALHADO DOS DADOS DO PACIENTE
 
-            if 'paciente' in dados_extraidos:
+            if "paciente" in dados_extraidos:
 
                 print(f"[OCR]  DADOS DO PACIENTE EXTRAÍDOS ")
 
-                paciente = dados_extraidos['paciente']
-
-
+                paciente = dados_extraidos["paciente"]
 
                 # Nome
 
-                nome = paciente.get('NomPaciente', {}).get('valor') if isinstance(paciente.get('NomPaciente'), dict) else paciente.get('NomPaciente')
+                nome = (
+                    paciente.get("NomPaciente", {}).get("valor")
+                    if isinstance(paciente.get("NomPaciente"), dict)
+                    else paciente.get("NomPaciente")
+                )
 
                 print(f"[OCR]    Nome: {nome}")
 
-
-
                 # Data de Nascimento
 
-                data_nasc = paciente.get('DtaNascimento', {}).get('valor') if isinstance(paciente.get('DtaNascimento'), dict) else paciente.get('DtaNascimento')
+                data_nasc = (
+                    paciente.get("DtaNascimento", {}).get("valor")
+                    if isinstance(paciente.get("DtaNascimento"), dict)
+                    else paciente.get("DtaNascimento")
+                )
 
                 print(f"[OCR]    Data Nascimento: {data_nasc}")
 
-
-
                 # CPF
 
-                cpf = paciente.get('NumCPF', {}).get('valor') if isinstance(paciente.get('NumCPF'), dict) else paciente.get('NumCPF')
+                cpf = (
+                    paciente.get("NumCPF", {}).get("valor")
+                    if isinstance(paciente.get("NumCPF"), dict)
+                    else paciente.get("NumCPF")
+                )
 
                 print(f"[OCR]    CPF: {cpf}")
 
-
-
                 # RG
 
-                rg = paciente.get('NumRG', {}).get('valor') if isinstance(paciente.get('NumRG'), dict) else paciente.get('NumRG')
+                rg = (
+                    paciente.get("NumRG", {}).get("valor")
+                    if isinstance(paciente.get("NumRG"), dict)
+                    else paciente.get("NumRG")
+                )
 
                 print(f"[OCR]    RG: {rg}")
 
-
-
                 # Telefone
 
-                tel = paciente.get('TelCelular', {}).get('valor') if isinstance(paciente.get('TelCelular'), dict) else paciente.get('TelCelular')
+                tel = (
+                    paciente.get("TelCelular", {}).get("valor")
+                    if isinstance(paciente.get("TelCelular"), dict)
+                    else paciente.get("TelCelular")
+                )
 
                 print(f"[OCR]    Telefone: {tel}")
 
-
-
                 # Endereço
 
-                end = paciente.get('DscEndereco', {}).get('valor') if isinstance(paciente.get('DscEndereco'), dict) else paciente.get('DscEndereco')
+                end = (
+                    paciente.get("DscEndereco", {}).get("valor")
+                    if isinstance(paciente.get("DscEndereco"), dict)
+                    else paciente.get("DscEndereco")
+                )
 
                 print(f"[OCR]    Endereço: {end}")
-
-
 
                 print(f"[OCR] ")
 
@@ -10141,135 +9961,165 @@ def processar_ocr():
 
                 print(f"[OCR]  ATENÃ‡ÃƒO: Nenhum dado de paciente encontrado no JSON!")
 
-
-
         except json.JSONDecodeError as e:
 
             print(f"[OCR]  Erro ao fazer parse do JSON: {e}")
 
             print(f"[OCR] Texto recebido: {texto_resposta}")
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": "Erro ao processar resposta do OCR",
-
-                "detalhes": texto_resposta
-
-            }), 500
-
-
+            return (
+                jsonify(
+                    {
+                        "sucesso": 0,
+                        "erro": "Erro ao processar resposta do OCR",
+                        "detalhes": texto_resposta,
+                    }
+                ),
+                500,
+            )
 
         #  FALLBACK CRÍTICO: Se for pedido médico e não tiver exames, forçar extração
 
-        tipo_doc = dados_extraidos.get('tipo_documento', '')
+        tipo_doc = dados_extraidos.get("tipo_documento", "")
 
-        if tipo_doc == 'pedido_medico':
+        if tipo_doc == "pedido_medico":
 
-            if 'requisicao' not in dados_extraidos:
+            if "requisicao" not in dados_extraidos:
 
-                dados_extraidos['requisicao'] = {}
+                dados_extraidos["requisicao"] = {}
 
-            if 'itens_exame' not in dados_extraidos['requisicao'] or not dados_extraidos['requisicao']['itens_exame']:
+            if (
+                "itens_exame" not in dados_extraidos["requisicao"]
+                or not dados_extraidos["requisicao"]["itens_exame"]
+            ):
 
-                print(f"[OCR]  FALLBACK: Pedido médico sem exames detectado! Forçando extração...")
+                print(
+                    f"[OCR]  FALLBACK: Pedido médico sem exames detectado! Forçando extração..."
+                )
 
                 # Tentar extrair exame dos dados clínicos ou usar genérico
 
-                dados_clinicos_texto = dados_extraidos.get('requisicao', {}).get('dadosClinicos', {}).get('valor', '')
-
-
+                dados_clinicos_texto = (
+                    dados_extraidos.get("requisicao", {})
+                    .get("dadosClinicos", {})
+                    .get("valor", "")
+                )
 
                 # Lista de palavras-chave para identificar tipo de exame
 
                 exame_fallback = "EXAME HISTOPATOLÃ“GICO"  # Padrão genérico
 
-
-
                 if dados_clinicos_texto:
 
                     texto_upper = dados_clinicos_texto.upper()
 
-                    if any(keyword in texto_upper for keyword in ['BIOPSIA', 'BIÃ“PSIA', 'HISTOPATOLOG', 'LESAO', 'LESÃƒO']):
+                    if any(
+                        keyword in texto_upper
+                        for keyword in [
+                            "BIOPSIA",
+                            "BIÃ“PSIA",
+                            "HISTOPATOLOG",
+                            "LESAO",
+                            "LESÃƒO",
+                        ]
+                    ):
 
                         exame_fallback = "HISTOPATOLÃ“GICO"
 
-                    elif any(keyword in texto_upper for keyword in ['HEMOGRAMA', 'GLICEMIA', 'UREIA', 'CREATININA']):
+                    elif any(
+                        keyword in texto_upper
+                        for keyword in ["HEMOGRAMA", "GLICEMIA", "UREIA", "CREATININA"]
+                    ):
 
                         exame_fallback = "MEDICINA LABORATORIAL"
 
-                    elif any(keyword in texto_upper for keyword in ['CITOLOGIA', 'PAPANICO']):
+                    elif any(
+                        keyword in texto_upper for keyword in ["CITOLOGIA", "PAPANICO"]
+                    ):
 
                         exame_fallback = "COLPOCITOLOGIA"
 
-                    elif any(keyword in texto_upper for keyword in ['PCR', 'COVID']):
+                    elif any(keyword in texto_upper for keyword in ["PCR", "COVID"]):
 
                         exame_fallback = "PCR"
 
+                dados_extraidos["requisicao"]["itens_exame"] = [
+                    {
+                        "descricao_ocr": exame_fallback,
+                        "setor_sugerido": "anátomo patológico",
+                        "fonte_extracao": "fallback_automatico",
+                    }
+                ]
 
-
-                dados_extraidos['requisicao']['itens_exame'] = [{
-
-                    "descricao_ocr": exame_fallback,
-
-                    "setor_sugerido": "anátomo patológico",
-
-                    "fonte_extracao": "fallback_automatico"
-
-                }]
-
-                print(f"[OCR]  FALLBACK aplicado: Exame '{exame_fallback}' adicionado automaticamente")
-
-
+                print(
+                    f"[OCR]  FALLBACK aplicado: Exame '{exame_fallback}' adicionado automaticamente"
+                )
 
         # CORREÃ‡ÃƒO AUTOMÁTICA DE PORTUGUÃŠS
 
         print(f"[OCR] Aplicando correção automática de português...")
 
-
-
         # Corrigir dados clínicos
 
-        if 'requisicao' in dados_extraidos and isinstance(dados_extraidos['requisicao'], dict):
+        if "requisicao" in dados_extraidos and isinstance(
+            dados_extraidos["requisicao"], dict
+        ):
 
-            if 'dadosClinicos' in dados_extraidos['requisicao'] and isinstance(dados_extraidos['requisicao']['dadosClinicos'], dict):
+            if "dadosClinicos" in dados_extraidos["requisicao"] and isinstance(
+                dados_extraidos["requisicao"]["dadosClinicos"], dict
+            ):
 
-                texto_original = dados_extraidos['requisicao']['dadosClinicos'].get('valor', '')
+                texto_original = dados_extraidos["requisicao"]["dadosClinicos"].get(
+                    "valor", ""
+                )
 
                 if texto_original and isinstance(texto_original, str):
 
                     texto_corrigido = corrigir_portugues(texto_original)
 
-                    dados_extraidos['requisicao']['dadosClinicos']['valor'] = texto_corrigido
+                    dados_extraidos["requisicao"]["dadosClinicos"][
+                        "valor"
+                    ] = texto_corrigido
 
-                    print(f"[OCR]  Dados clínicos corrigidos: {texto_corrigido[:50]}...")
-
-
+                    print(
+                        f"[OCR]  Dados clínicos corrigidos: {texto_corrigido[:50]}..."
+                    )
 
             # Corrigir nomes dos exames
 
-            if 'itens_exame' in dados_extraidos['requisicao'] and isinstance(dados_extraidos['requisicao']['itens_exame'], list):
+            if "itens_exame" in dados_extraidos["requisicao"] and isinstance(
+                dados_extraidos["requisicao"]["itens_exame"], list
+            ):
 
-                print(f"[OCR]  Encontrados {len(dados_extraidos['requisicao']['itens_exame'])} exames para corrigir")
+                print(
+                    f"[OCR]  Encontrados {len(dados_extraidos['requisicao']['itens_exame'])} exames para corrigir"
+                )
 
-                for idx, exame in enumerate(dados_extraidos['requisicao']['itens_exame']):
+                for idx, exame in enumerate(
+                    dados_extraidos["requisicao"]["itens_exame"]
+                ):
 
-                    if isinstance(exame, dict) and 'descricao_ocr' in exame:
+                    if isinstance(exame, dict) and "descricao_ocr" in exame:
 
-                        texto_original = exame['descricao_ocr']
+                        texto_original = exame["descricao_ocr"]
 
                         if texto_original and isinstance(texto_original, str):
 
-                            print(f"[OCR]  Corrigindo exame {idx+1}: '{texto_original}'")
+                            print(
+                                f"[OCR]  Corrigindo exame {idx+1}: '{texto_original}'"
+                            )
 
                             texto_corrigido = corrigir_portugues(texto_original)
 
-                            exame['descricao_ocr'] = texto_corrigido
+                            exame["descricao_ocr"] = texto_corrigido
 
-                            exame['descricao_original'] = texto_original  # Manter original para referência
+                            exame["descricao_original"] = (
+                                texto_original  # Manter original para referência
+                            )
 
-                            print(f"[OCR]  Exame {idx+1} corrigido: '{texto_corrigido}'")
+                            print(
+                                f"[OCR]  Exame {idx+1} corrigido: '{texto_corrigido}'"
+                            )
 
                 print(f"[OCR]  Todos os exames foram corrigidos")
 
@@ -10277,29 +10127,29 @@ def processar_ocr():
 
                 print(f"[OCR]  AVISO: Nenhum exame encontrado no campo itens_exame!")
 
-
-
         # NÃƒO remover campos null - retornar tudo que o Gemini extraiu
 
         print(f"[OCR] Retornando {len(dados_extraidos)} campos extraídos")
 
-
-
         # DEBUG: Mostrar se tem itens_exame
 
-        if 'requisicao' in dados_extraidos and isinstance(dados_extraidos['requisicao'], dict):
+        if "requisicao" in dados_extraidos and isinstance(
+            dados_extraidos["requisicao"], dict
+        ):
 
-            if 'itens_exame' in dados_extraidos['requisicao']:
+            if "itens_exame" in dados_extraidos["requisicao"]:
 
-                print(f"[OCR] âœ“ itens_exame encontrado: {dados_extraidos['requisicao']['itens_exame']}")
+                print(
+                    f"[OCR] âœ“ itens_exame encontrado: {dados_extraidos['requisicao']['itens_exame']}"
+                )
 
             else:
 
                 print(f"[OCR] âš  itens_exame NÃƒO encontrado na requisicao!")
 
-                print(f"[OCR] Campos disponíveis em requisicao: {list(dados_extraidos['requisicao'].keys())}")
-
-
+                print(
+                    f"[OCR] Campos disponíveis em requisicao: {list(dados_extraidos['requisicao'].keys())}"
+                )
 
         # Log completo da resposta do Gemini para debug
 
@@ -10309,51 +10159,43 @@ def processar_ocr():
 
         print(f"[OCR] ======================================================")
 
-
-
         # ðŸ†• BUSCAR ID DO PACIENTE PELO CPF (EVITAR DUPLICAÃ‡ÃƒO)
 
         id_paciente_existente = None
 
-        if 'paciente' in dados_extraidos:
+        if "paciente" in dados_extraidos:
 
-            paciente_data = dados_extraidos['paciente']
-
-            
+            paciente_data = dados_extraidos["paciente"]
 
             # Extrair CPF (pode estar em diferentes formatos)
 
             cpf_extraido = None
 
-            if 'NumCPF' in paciente_data:
+            if "NumCPF" in paciente_data:
 
-                if isinstance(paciente_data['NumCPF'], dict):
+                if isinstance(paciente_data["NumCPF"], dict):
 
-                    cpf_extraido = paciente_data['NumCPF'].get('valor')
+                    cpf_extraido = paciente_data["NumCPF"].get("valor")
 
                 else:
 
-                    cpf_extraido = paciente_data['NumCPF']
+                    cpf_extraido = paciente_data["NumCPF"]
 
-            elif 'cpf' in paciente_data:
+            elif "cpf" in paciente_data:
 
-                cpf_extraido = paciente_data['cpf']
-
-            
+                cpf_extraido = paciente_data["cpf"]
 
             if cpf_extraido:
 
                 # Limpar CPF (remover pontos, traços, etc)
 
-                cpf_limpo = ''.join(filter(str.isdigit, str(cpf_extraido)))
-
-                
+                cpf_limpo = "".join(filter(str.isdigit, str(cpf_extraido)))
 
                 if cpf_limpo and len(cpf_limpo) == 11:
 
-                    logger.info(f"[OCR] ðŸ” Buscando paciente existente com CPF: {cpf_limpo}")
-
-                    
+                    logger.info(
+                        f"[OCR] ðŸ” Buscando paciente existente com CPF: {cpf_limpo}"
+                    )
 
                     # PASSO 1: Buscar no banco MySQL local
 
@@ -10369,77 +10211,80 @@ def processar_ocr():
 
                             resultado = cursor.fetchone()
 
-                            
-
                             if resultado:
 
                                 id_paciente_existente = resultado[0]
 
                                 nome_paciente_banco = resultado[1]
 
-                                logger.info(f"[OCR] âœ… Paciente ENCONTRADO no banco LOCAL! ID: {id_paciente_existente} - {nome_paciente_banco}")
+                                logger.info(
+                                    f"[OCR] âœ… Paciente ENCONTRADO no banco LOCAL! ID: {id_paciente_existente} - {nome_paciente_banco}"
+                                )
 
-                                logger.info(f"[OCR] ðŸ’¡ Este ID será usado para evitar duplicação")
-
-                                
+                                logger.info(
+                                    f"[OCR] ðŸ’¡ Este ID será usado para evitar duplicação"
+                                )
 
                                 # Adicionar ID ao paciente nos dados extraídos
 
-                                dados_extraidos['paciente']['IdPaciente'] = id_paciente_existente
+                                dados_extraidos["paciente"][
+                                    "IdPaciente"
+                                ] = id_paciente_existente
 
-                                dados_extraidos['paciente']['_paciente_existente'] = True
+                                dados_extraidos["paciente"][
+                                    "_paciente_existente"
+                                ] = True
 
-                                dados_extraidos['paciente']['_nome_banco'] = nome_paciente_banco
+                                dados_extraidos["paciente"][
+                                    "_nome_banco"
+                                ] = nome_paciente_banco
 
-                                dados_extraidos['paciente']['_fonte_busca'] = 'banco_local'
+                                dados_extraidos["paciente"][
+                                    "_fonte_busca"
+                                ] = "banco_local"
 
                             else:
 
-                                logger.info(f"[OCR] â„¹️ Paciente com CPF {cpf_limpo} NÃƒO encontrado no banco local")
-
-                        
+                                logger.info(
+                                    f"[OCR] â„¹️ Paciente com CPF {cpf_limpo} NÃƒO encontrado no banco local"
+                                )
 
                         connection.close()
 
-                        
-
                     except Exception as e:
 
-                        logger.error(f"[OCR] âš ️ Erro ao buscar paciente no banco local: {str(e)}")
+                        logger.error(
+                            f"[OCR] âš ️ Erro ao buscar paciente no banco local: {str(e)}"
+                        )
 
                         logger.error(traceback.format_exc())
-
-                    
 
                     # PASSO 2: Se não encontrou local, buscar na API do apLIS
 
                     if not id_paciente_existente:
 
-                        logger.info(f"[OCR] ðŸ” Buscando paciente na API do apLIS pelo CPF...")
-
-                        
+                        logger.info(
+                            f"[OCR] ðŸ” Buscando paciente na API do apLIS pelo CPF..."
+                        )
 
                         try:
 
                             # Buscar paciente no apLIS usando pacienteListar
 
-                            dat_busca = {
+                            dat_busca = {"cpf": cpf_limpo}
 
-                                "cpf": cpf_limpo
+                            resposta_aplis = fazer_requisicao_aplis(
+                                "pacienteListar", dat_busca
+                            )
 
-                            }
+                            if (
+                                resposta_aplis
+                                and resposta_aplis.get("dat", {}).get("sucesso") == 1
+                            ):
 
-                            
-
-                            resposta_aplis = fazer_requisicao_aplis("pacienteListar", dat_busca)
-
-                            
-
-                            if resposta_aplis and resposta_aplis.get("dat", {}).get("sucesso") == 1:
-
-                                lista_pacientes = resposta_aplis.get("dat", {}).get("lista", [])
-
-                                
+                                lista_pacientes = resposta_aplis.get("dat", {}).get(
+                                    "lista", []
+                                )
 
                                 if lista_pacientes and len(lista_pacientes) > 0:
 
@@ -10447,13 +10292,19 @@ def processar_ocr():
 
                                     paciente_aplis = lista_pacientes[0]
 
-                                    id_paciente_existente = paciente_aplis.get("CodPaciente") or paciente_aplis.get("IdPaciente") or paciente_aplis.get("idPaciente")
+                                    id_paciente_existente = (
+                                        paciente_aplis.get("CodPaciente")
+                                        or paciente_aplis.get("IdPaciente")
+                                        or paciente_aplis.get("idPaciente")
+                                    )
 
-                                    nome_paciente_aplis = paciente_aplis.get("NomPaciente") or paciente_aplis.get("nomPaciente")
+                                    nome_paciente_aplis = paciente_aplis.get(
+                                        "NomPaciente"
+                                    ) or paciente_aplis.get("nomPaciente")
 
-                                    
-
-                                    logger.info(f"[OCR] âœ… Paciente ENCONTRADO na API do apLIS!")
+                                    logger.info(
+                                        f"[OCR] âœ… Paciente ENCONTRADO na API do apLIS!"
+                                    )
 
                                     logger.info(f"[OCR]   ID: {id_paciente_existente}")
 
@@ -10461,37 +10312,53 @@ def processar_ocr():
 
                                     logger.info(f"[OCR]   CPF: {cpf_limpo}")
 
-                                    logger.info(f"[OCR] ðŸ’¡ Este ID será usado para evitar duplicação")
-
-                                    
+                                    logger.info(
+                                        f"[OCR] ðŸ’¡ Este ID será usado para evitar duplicação"
+                                    )
 
                                     # Adicionar ID ao paciente nos dados extraídos
 
-                                    dados_extraidos['paciente']['IdPaciente'] = id_paciente_existente
+                                    dados_extraidos["paciente"][
+                                        "IdPaciente"
+                                    ] = id_paciente_existente
 
-                                    dados_extraidos['paciente']['_paciente_existente'] = True
+                                    dados_extraidos["paciente"][
+                                        "_paciente_existente"
+                                    ] = True
 
-                                    dados_extraidos['paciente']['_nome_banco'] = nome_paciente_aplis
+                                    dados_extraidos["paciente"][
+                                        "_nome_banco"
+                                    ] = nome_paciente_aplis
 
-                                    dados_extraidos['paciente']['_fonte_busca'] = 'api_aplis'
+                                    dados_extraidos["paciente"][
+                                        "_fonte_busca"
+                                    ] = "api_aplis"
 
                                 else:
 
-                                    logger.info(f"[OCR] â„¹️ Paciente com CPF {cpf_limpo} NÃƒO encontrado na API do apLIS")
+                                    logger.info(
+                                        f"[OCR] â„¹️ Paciente com CPF {cpf_limpo} NÃƒO encontrado na API do apLIS"
+                                    )
 
-                                    logger.info(f"[OCR] ðŸ’¡ Será criado novo cadastro ao salvar")
+                                    logger.info(
+                                        f"[OCR] ðŸ’¡ Será criado novo cadastro ao salvar"
+                                    )
 
-                                    dados_extraidos['paciente']['_paciente_existente'] = False
+                                    dados_extraidos["paciente"][
+                                        "_paciente_existente"
+                                    ] = False
 
                             else:
 
-                                logger.warning(f"[OCR] âš ️ Erro ao buscar paciente no apLIS")
-
-                                
+                                logger.warning(
+                                    f"[OCR] âš ️ Erro ao buscar paciente no apLIS"
+                                )
 
                         except Exception as e:
 
-                            logger.error(f"[OCR] âš ️ Erro ao buscar paciente no apLIS: {str(e)}")
+                            logger.error(
+                                f"[OCR] âš ️ Erro ao buscar paciente no apLIS: {str(e)}"
+                            )
 
                             logger.error(traceback.format_exc())
 
@@ -10499,29 +10366,30 @@ def processar_ocr():
 
                 else:
 
-                    logger.warning(f"[OCR] âš ️ CPF extraído inválido: {cpf_extraido} (limpo: {cpf_limpo})")
+                    logger.warning(
+                        f"[OCR] âš ️ CPF extraído inválido: {cpf_extraido} (limpo: {cpf_limpo})"
+                    )
 
             else:
 
-                logger.warning(f"[OCR] âš ️ CPF não encontrado nos dados extraídos do paciente")
+                logger.warning(
+                    f"[OCR] âš ️ CPF não encontrado nos dados extraídos do paciente"
+                )
 
-
-
-        return jsonify({
-
-            "sucesso": 1,
-
-            "mensagem": "OCR processado com sucesso (português corrigido)",
-
-            "dados": dados_extraidos,
-
-            "id_paciente_existente": id_paciente_existente,  # ðŸ†• Retornar ID se encontrou
-
-            "debug_resposta_gemini": texto_resposta[:10000]  # Aumentado para 1000 chars
-
-        }), 200
-
-
+        return (
+            jsonify(
+                {
+                    "sucesso": 1,
+                    "mensagem": "OCR processado com sucesso (português corrigido)",
+                    "dados": dados_extraidos,
+                    "id_paciente_existente": id_paciente_existente,  # ðŸ†• Retornar ID se encontrou
+                    "debug_resposta_gemini": texto_resposta[
+                        :10000
+                    ],  # Aumentado para 1000 chars
+                }
+            ),
+            200,
+        )
 
     except Exception as e:
 
@@ -10533,22 +10401,19 @@ def processar_ocr():
 
         logger.exception(f"[OCR] Stack trace:")
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": f"Erro ao processar OCR: {str(e)}",
-
-            "traceback": tb
-
-        }), 500
-
-
-
+        return (
+            jsonify(
+                {
+                    "sucesso": 0,
+                    "erro": f"Erro ao processar OCR: {str(e)}",
+                    "traceback": tb,
+                }
+            ),
+            500,
+        )
 
 
 def corrigir_portugues(texto):
-
     """
 
     Corrige erros de português usando Vertex AI
@@ -10559,13 +10424,9 @@ def corrigir_portugues(texto):
 
         return texto
 
-
-
     try:
 
         model = GenerativeModel("gemini-2.5-flash")
-
-
 
         prompt = f"""Corrija APENAS os erros de ortografia e gramática no texto abaixo.
 
@@ -10581,18 +10442,14 @@ Texto: {texto}
 
 Texto corrigido:"""
 
-
-
         response = model.generate_content(prompt)
 
         texto_corrigido = response.text.strip()
-        _registrar_tokens('correcao', response)
+        _registrar_tokens("correcao", response)
 
         print(f"[CORREÃ‡ÃƒO] Original: {texto}")
 
         print(f"[CORREÃ‡ÃƒO] Corrigido: {texto_corrigido}")
-
-
 
         return texto_corrigido
 
@@ -10603,9 +10460,6 @@ Texto corrigido:"""
         return texto  # Retorna original se falhar
 
 
-
-
-
 # ============================================
 
 # MAPEAMENTO COMPLETO DE TODOS OS EXAMES (apenas ativos no banco)
@@ -10613,335 +10467,158 @@ Texto corrigido:"""
 # ============================================
 
 MAPEAMENTO_EXAMES = {
-
     # MEDICINA LABORATORIAL - aliases para OCR
-
     # Todos os sub-itens de laudos laboratoriais mapeiam para ID 49
-
-    'MEDICINA LABORATORIAL': 49,
-
-    'CREATININA': 49,
-
-    'EGFR': 49,
-
-    'FERRITINA': 49,
-
-    'FERRO SÉRICO': 49,
-
-    'FERRO SERICO': 49,
-
-    'GAMA GLUTAMIL TRANSFERASE': 49,
-
-    'GGT': 49,
-
-    'HEMOGLOBINA GLICADA': 49,
-
-    'HBA1C': 49,
-
-    'GLICOSE MÉDIA ESTIMADA': 49,
-
-    'GLICOSE MEDIA ESTIMADA': 49,
-
-    'GME': 49,
-
-    'GLICOSE': 49,
-
-    'HEMOGRAMA': 49,
-
-    'ERITRÓCITOS': 49,
-
-    'ERITROCITOS': 49,
-
-    'HEMOGLOBINA': 49,
-
-    'HEMATÓCRITO': 49,
-
-    'HEMATOCRITO': 49,
-
-    'VCM': 49,
-
-    'HCM': 49,
-
-    'CONCENTRAÇÃO HCM': 49,
-
-    'CONCENTRACAO HCM': 49,
-
-    'CHCM': 49,
-
-    'RDW': 49,
-
-    'LEUCÓCITOS': 49,
-
-    'LEUCOCITOS': 49,
-
-    'BASTONETES': 49,
-
-    'SEGMENTADOS': 49,
-
-    'EOSINÓFILOS': 49,
-
-    'EOSINOFILOS': 49,
-
-    'BASÓFILOS': 49,
-
-    'BASOFILOS': 49,
-
-    'LINFÓCITOS': 49,
-
-    'LINFOCITOS': 49,
-
-    'MONÓCITOS': 49,
-
-    'MONOCITOS': 49,
-
-    'PLAQUETAS': 49,
-
-    'MPV': 49,
-
-    'COLESTEROL TOTAL': 49,
-
-    'COLESTEROL LDL': 49,
-
-    'COLESTEROL HDL': 49,
-
-    'COLESTEROL NÃO HDL': 49,
-
-    'COLESTEROL NAO HDL': 49,
-
-    'COLESTEROL VLDL': 49,
-
-    'TRIGLICERÍDEOS': 49,
-
-    'TRIGLICERIDEOS': 49,
-
-    'TRIGLICERIDES': 49,
-
-    'TESTOSTERONA BIODISPONÍVEL': 49,
-
-    'TESTOSTERONA BIODISPONIVEL': 49,
-
-    'TESTOSTERONA TOTAL': 49,
-
-    'TESTOSTERONA LIVRE': 49,
-
-    'TESTOSTERONA': 49,
-
-    'SHBG': 49,
-
-    'TSH': 49,
-
-    'T4 LIVRE': 49,
-
-    'TIROXINA LIVRE': 49,
-
-    'TGO': 49,
-
-    'TGP': 49,
-
-    'TRANSAMINASE': 49,
-
-    'UREIA': 49,
-
-    'VITAMINA B12': 49,
-
-    'VITAMINA D': 49,
-
-    '25-HIDROXI': 49,
-
-    'ACIDO URICO': 49,
-
-    'ÁCIDO ÚRICO': 49,
-
-    'ALBUMINA': 49,
-
-    'BILIRRUBINA': 49,
-
-    'CALCIO': 49,
-
-    'CÁLCIO': 49,
-
-    'FOSFATASE ALCALINA': 49,
-
-    'FOSFORO': 49,
-
-    'FÓSFORO': 49,
-
-    'INSULINA': 49,
-
-    'MAGNESIO': 49,
-
-    'MAGNÉSIO': 49,
-
-    'PCR - PROTEINA C REATIVA': 49,
-
-    'PROTEINA C REATIVA': 49,
-
-    'PROTEÍNA C REATIVA': 49,
-
-    'SODIO': 49,
-
-    'SÓDIO': 49,
-
-    'POTASSIO': 49,
-
-    'POTÁSSIO': 49,
-
-    'CLORO': 49,
-
-
-
+    "MEDICINA LABORATORIAL": 49,
+    "CREATININA": 49,
+    "EGFR": 49,
+    "FERRITINA": 49,
+    "FERRO SÉRICO": 49,
+    "FERRO SERICO": 49,
+    "GAMA GLUTAMIL TRANSFERASE": 49,
+    "GGT": 49,
+    "HEMOGLOBINA GLICADA": 49,
+    "HBA1C": 49,
+    "GLICOSE MÉDIA ESTIMADA": 49,
+    "GLICOSE MEDIA ESTIMADA": 49,
+    "GME": 49,
+    "GLICOSE": 49,
+    "HEMOGRAMA": 49,
+    "ERITRÓCITOS": 49,
+    "ERITROCITOS": 49,
+    "HEMOGLOBINA": 49,
+    "HEMATÓCRITO": 49,
+    "HEMATOCRITO": 49,
+    "VCM": 49,
+    "HCM": 49,
+    "CONCENTRAÇÃO HCM": 49,
+    "CONCENTRACAO HCM": 49,
+    "CHCM": 49,
+    "RDW": 49,
+    "LEUCÓCITOS": 49,
+    "LEUCOCITOS": 49,
+    "BASTONETES": 49,
+    "SEGMENTADOS": 49,
+    "EOSINÓFILOS": 49,
+    "EOSINOFILOS": 49,
+    "BASÓFILOS": 49,
+    "BASOFILOS": 49,
+    "LINFÓCITOS": 49,
+    "LINFOCITOS": 49,
+    "MONÓCITOS": 49,
+    "MONOCITOS": 49,
+    "PLAQUETAS": 49,
+    "MPV": 49,
+    "COLESTEROL TOTAL": 49,
+    "COLESTEROL LDL": 49,
+    "COLESTEROL HDL": 49,
+    "COLESTEROL NÃO HDL": 49,
+    "COLESTEROL NAO HDL": 49,
+    "COLESTEROL VLDL": 49,
+    "TRIGLICERÍDEOS": 49,
+    "TRIGLICERIDEOS": 49,
+    "TRIGLICERIDES": 49,
+    "TESTOSTERONA BIODISPONÍVEL": 49,
+    "TESTOSTERONA BIODISPONIVEL": 49,
+    "TESTOSTERONA TOTAL": 49,
+    "TESTOSTERONA LIVRE": 49,
+    "TESTOSTERONA": 49,
+    "SHBG": 49,
+    "TSH": 49,
+    "T4 LIVRE": 49,
+    "TIROXINA LIVRE": 49,
+    "TGO": 49,
+    "TGP": 49,
+    "TRANSAMINASE": 49,
+    "UREIA": 49,
+    "VITAMINA B12": 49,
+    "VITAMINA D": 49,
+    "25-HIDROXI": 49,
+    "ACIDO URICO": 49,
+    "ÁCIDO ÚRICO": 49,
+    "ALBUMINA": 49,
+    "BILIRRUBINA": 49,
+    "CALCIO": 49,
+    "CÁLCIO": 49,
+    "FOSFATASE ALCALINA": 49,
+    "FOSFORO": 49,
+    "FÓSFORO": 49,
+    "INSULINA": 49,
+    "MAGNESIO": 49,
+    "MAGNÉSIO": 49,
+    "PCR - PROTEINA C REATIVA": 49,
+    "PROTEINA C REATIVA": 49,
+    "PROTEÍNA C REATIVA": 49,
+    "SODIO": 49,
+    "SÓDIO": 49,
+    "POTASSIO": 49,
+    "POTÁSSIO": 49,
+    "CLORO": 49,
     # CITOPATOLOGIA
-
-    'BACTERIOSCOPIA': 50,
-
-    'COLPOCITOLOGIA ONCÓTICA CONVENCIONAL': 20,
-
-    'COLPOCITOLOGIA ONCÓTICA EM MEIO LÍQUIDO': 24,
-
-    'CITOLOGIA HORMONAL ISOLADA': 21,
-
-    'CITOLOGIA ONCÓTICA DE LÍQUIDOS': 4,
-
-    'CITOLOGIA ANAL EM MEIO LIQUIDO': 34,
-
-    'CITOLOGIA EM MEIO LÍQUIDO URINÁRIO': 35,
-
-    'PROCEDIMENTO DIAGNÓSTICO LÂMINA DE PAAF ATÉ 5': 36,
-
-    'PUNÇÃO BIOPSIA ASPIRATIVA': 17,
-
-
-
+    "BACTERIOSCOPIA": 50,
+    "COLPOCITOLOGIA ONCÓTICA CONVENCIONAL": 20,
+    "COLPOCITOLOGIA ONCÓTICA EM MEIO LÍQUIDO": 24,
+    "CITOLOGIA HORMONAL ISOLADA": 21,
+    "CITOLOGIA ONCÓTICA DE LÍQUIDOS": 4,
+    "CITOLOGIA ANAL EM MEIO LIQUIDO": 34,
+    "CITOLOGIA EM MEIO LÍQUIDO URINÁRIO": 35,
+    "PROCEDIMENTO DIAGNÓSTICO LÂMINA DE PAAF ATÉ 5": 36,
+    "PUNÇÃO BIOPSIA ASPIRATIVA": 17,
     # ANÁTOMO PATOLÓGICO
-
-    'BIÓPSIA SOE': 1,
-
-    'BIOPSIA SOE': 1,
-
-    'BIÓPSIA': 1,  # Genérico = SOE
-
-    'HISTOPATOLOGIA': 1,  # Biópsia genérica
-
-    'HISTOPATOLÓGICO': 1,
-
-    'HISTOPATOLOGICO': 1,
-
-
-
-    'PEÇA CIRÚRGICA SIMPLES': 2,
-
-    'PECA CIRURGICA SIMPLES': 2,
-
-    'PEÇA CIRÚRGICA COMPLEXA': 14,
-
-    'PECA CIRURGICA COMPLEXA': 14,
-
-
-
-    'BIÓPSIA SIMPLES': 23,
-
-    'BIOPSIA SIMPLES': 23,
-
-    'BIÓPSIA GÁSTRICA': 38,
-
-    'BIOPSIA GASTRICA': 38,
-
-    'BIÓPSIA DE MÚLTIPLOS FRAGMENTOS': 40,
-
-    'BIOPSIA DE MULTIPLOS FRAGMENTOS': 40,
-
-
-
-    'NECRÓPSIA DE FETO': 43,
-
-    'NECROPSIA DE FETO': 43,
-
-
-
+    "BIÓPSIA SOE": 1,
+    "BIOPSIA SOE": 1,
+    "BIÓPSIA": 1,  # Genérico = SOE
+    "HISTOPATOLOGIA": 1,  # Biópsia genérica
+    "HISTOPATOLÓGICO": 1,
+    "HISTOPATOLOGICO": 1,
+    "PEÇA CIRÚRGICA SIMPLES": 2,
+    "PECA CIRURGICA SIMPLES": 2,
+    "PEÇA CIRÚRGICA COMPLEXA": 14,
+    "PECA CIRURGICA COMPLEXA": 14,
+    "BIÓPSIA SIMPLES": 23,
+    "BIOPSIA SIMPLES": 23,
+    "BIÓPSIA GÁSTRICA": 38,
+    "BIOPSIA GASTRICA": 38,
+    "BIÓPSIA DE MÚLTIPLOS FRAGMENTOS": 40,
+    "BIOPSIA DE MULTIPLOS FRAGMENTOS": 40,
+    "NECRÓPSIA DE FETO": 43,
+    "NECROPSIA DE FETO": 43,
     # VARIAÇÕES COMUNS DE BIÓPSIAS
-
-    'LESAO DE PELE': 23,  # Biópsia simples
-
-    'LESÃO DE PELE': 23,
-
-    'LESAO': 23,
-
-    'LESÃO': 23,
-
-    'PELE': 23,
-
-    'ABDOME': 23,
-
-    'NODULO': 23,
-
-    'NÓDULO': 23,
-
-    'MAMA': 23,
-
-    'TIREOIDE': 23,
-
-    'TIROIDE': 23,
-
-
-
+    "LESAO DE PELE": 23,  # Biópsia simples
+    "LESÃO DE PELE": 23,
+    "LESAO": 23,
+    "LESÃO": 23,
+    "PELE": 23,
+    "ABDOME": 23,
+    "NODULO": 23,
+    "NÓDULO": 23,
+    "MAMA": 23,
+    "TIREOIDE": 23,
+    "TIROIDE": 23,
     # PCR
-
-    'PCR': 51,
-
-    'PCR EM TEMPO REAL DE HPV BAIXO/ALTO RISCO': 52,
-
-
-
+    "PCR": 51,
+    "PCR EM TEMPO REAL DE HPV BAIXO/ALTO RISCO": 52,
     # REVISÃO
-
-    'REVISÃO DE LÂMINA INTERNA': 10,
-
-    'REVISAO DE LAMINA INTERNA': 10,
-
-    'REVISÃO DE LÂMINA EXTERNO (BLOCO)': 11,
-
-    'REVISAO DE LAMINA EXTERNO (BLOCO)': 11,
-
-    'REVISÃO DE LÂMINA EXTERNO (BLOCO + LÂMINA)': 15,
-
-    'REVISAO DE LAMINA EXTERNO (BLOCO + LAMINA)': 15,
-
-    'REVISÃO DE LÂMINA INTERNA - CITOLOGIA': 39,
-
-    'REVISAO DE LAMINA INTERNA - CITOLOGIA': 39,
-
-
-
+    "REVISÃO DE LÂMINA INTERNA": 10,
+    "REVISAO DE LAMINA INTERNA": 10,
+    "REVISÃO DE LÂMINA EXTERNO (BLOCO)": 11,
+    "REVISAO DE LAMINA EXTERNO (BLOCO)": 11,
+    "REVISÃO DE LÂMINA EXTERNO (BLOCO + LÂMINA)": 15,
+    "REVISAO DE LAMINA EXTERNO (BLOCO + LAMINA)": 15,
+    "REVISÃO DE LÂMINA INTERNA - CITOLOGIA": 39,
+    "REVISAO DE LAMINA INTERNA - CITOLOGIA": 39,
     # IMUNOISTOQUIMICA (apenas ativo: EXTERNA BLOCO+LAMINA)
-
-    'IMUNOISTOQUIMICA EXTERNA (BLOCO+LAMINA)': 13,
-
-
-
+    "IMUNOISTOQUIMICA EXTERNA (BLOCO+LAMINA)": 13,
     # PARCEIROS / CAPTURA HIBRIDA
-
-    'CAPTURA HIBRIDA': 22,
-
-
-
+    "CAPTURA HIBRIDA": 22,
     # REDE APLIS
-
-    'REDE - PAT. CLINICA': 29,
-
-
-
+    "REDE - PAT. CLINICA": 29,
     # FATURAMENTO EXTERNO
-
-    'FAT. EXT. CITO.': 46,
-
+    "FAT. EXT. CITO.": 46,
 }
 
 
-
-
-
 def identificar_tipo_exame_backend(nome):
-
     """
 
     Identifica o tipo de exame e retorna o ID correto baseado na lista completa de exames
@@ -10958,17 +10635,13 @@ def identificar_tipo_exame_backend(nome):
 
     nome_upper = nome.upper().strip()
 
-
-
     # 1. TENTAR MATCH EXATO NO DICIONÁRIO
 
     if nome_upper in MAPEAMENTO_EXAMES:
 
         cod = MAPEAMENTO_EXAMES[nome_upper]
 
-        return 'MATCH_EXATO', cod
-
-
+        return "MATCH_EXATO", cod
 
     # 2. TENTAR MATCH PARCIAL (contém)
 
@@ -10978,166 +10651,214 @@ def identificar_tipo_exame_backend(nome):
 
         if exame_nome in nome_upper or nome_upper in exame_nome:
 
-            return 'MATCH_PARCIAL', cod
-
-
+            return "MATCH_PARCIAL", cod
 
     # 3. CATEGORIZAÃ‡ÃƒO POR PALAVRAS-CHAVE PARA MEDICINA LABORATORIAL
 
     medicina_lab_keywords = [
-
-        'CREATININA', 'FERRITINA', 'FERRO', 'SÃ‰RICO', 'SERICO',
-
-        'GAMA', 'GLUTAMIL', 'TRANSFERASE', 'GGT',
-
-        'HEMOGLOBINA', 'GLICADA', 'HBA1C',
-
-        'HEMOGRAMA', 'LEUCOGRAMA', 'PLAQUETAS', 'ERITROGRAMA',
-
-        'LIPÍDICO', 'LIPIDICO', 'PERFIL', 'COLESTEROL', 'TRIGLICÃ‰RIDES', 'TRIGLICERIDES', 'HDL', 'LDL', 'VLDL',
-
-        'TESTOSTERONA', 'BIODISPONÍVEL', 'BIODISPONIVEL', 'LIVRE', 'TOTAL',
-
-        'TSH', 'TIREOTRÃ“FICO', 'TIREOTROPICO', 'TIREOESTIMULANTE', 'ULTRASSENSÍVEL', 'ULTRASSENSIVEL',
-
-        'TIROXINA', 'T4', 'T3', 'TRIIODOTIRONINA',
-
-        'TRANSAMINASE', 'OXALACÃ‰TICA', 'OXALACETICA', 'TGO', 'ASPARTATO', 'AMINO', 'AST',
-
-        'PIRÃšVICA', 'PIRUVICA', 'TGP', 'ALANINA', 'ALT',
-
-        'UREIA', 'UREICO', 'BUN',
-
-        'VITAMINA', 'B12', 'COBALAMINA', 'D', 'HIDROXI', '25-HIDROXI', 'CALCIFEROL',
-
-        'GLICOSE', 'GLICEMIA', 'JEJUM', 'PÃ“S', 'POS', 'PRANDIAL',
-
-        'ÁCIDO', 'ACIDO', 'ÃšRICO', 'URICO',
-
-        'CÁLCIO', 'CALCIO', 'IONICO', 'TOTAL',
-
-        'FÃ“SFORO', 'FOSFORO', 'FOSFATO',
-
-        'MAGNÃ‰SIO', 'MAGNESIO',
-
-        'SÃ“DIO', 'SODIO', 'NA',
-
-        'POTÁSSIO', 'POTASSIO', 'K',
-
-        'CLORO', 'CL',
-
-        'PROTEÍNA', 'PROTEINA',
-
-        'ALBUMINA', 'SÃ‰RICA', 'SERICA',
-
-        'GLOBULINA',
-
-        'BILIRRUBINA', 'DIRETA', 'INDIRETA',
-
-        'AMILASE', 'PANCREÁTICA', 'PANCREATICA',
-
-        'LIPASE',
-
-        'FOSFATASE', 'ALCALINA', 'FA',
-
-        'DESIDROGENASE', 'LÁTICA', 'LATICA', 'LDH',
-
-        'CPK', 'CREATINOQUINASE', 'MB', 'CK',
-
-        'TROPONINA',
-
-        'HORMÃ”NIO', 'HORMONIO',
-
-        'ELETROFORESE', 'PROTEINOGRAMA',
-
-        'PARATORMÃ”NIO', 'PARATORMONIO', 'PTH',
-
-        'CORTISOL',
-
-        'INSULINA',
-
-        'PROLACTINA',
-
-        'ESTRADIOL',
-
-        'PROGESTERONA',
-
-        'FSH', 'LH',
-
-        'BETA', 'HCG',
-
-        'PSA',
-
-        'FERRITINA',
-
-        'TRANSFERRINA',
-
-        'VHS', 'VELOCIDADE', 'HEMOSSEDIMENTAÃ‡ÃƒO', 'HEMOSSEDIMENTACAO',
-
-        'PCR', 'PROTEINA', 'C', 'REATIVA',
-
-        'FATOR', 'REUMATOIDE',
-
-        'ANTI', 'ANTICORPO'
-
+        "CREATININA",
+        "FERRITINA",
+        "FERRO",
+        "SÃ‰RICO",
+        "SERICO",
+        "GAMA",
+        "GLUTAMIL",
+        "TRANSFERASE",
+        "GGT",
+        "HEMOGLOBINA",
+        "GLICADA",
+        "HBA1C",
+        "HEMOGRAMA",
+        "LEUCOGRAMA",
+        "PLAQUETAS",
+        "ERITROGRAMA",
+        "LIPÍDICO",
+        "LIPIDICO",
+        "PERFIL",
+        "COLESTEROL",
+        "TRIGLICÃ‰RIDES",
+        "TRIGLICERIDES",
+        "HDL",
+        "LDL",
+        "VLDL",
+        "TESTOSTERONA",
+        "BIODISPONÍVEL",
+        "BIODISPONIVEL",
+        "LIVRE",
+        "TOTAL",
+        "TSH",
+        "TIREOTRÃ“FICO",
+        "TIREOTROPICO",
+        "TIREOESTIMULANTE",
+        "ULTRASSENSÍVEL",
+        "ULTRASSENSIVEL",
+        "TIROXINA",
+        "T4",
+        "T3",
+        "TRIIODOTIRONINA",
+        "TRANSAMINASE",
+        "OXALACÃ‰TICA",
+        "OXALACETICA",
+        "TGO",
+        "ASPARTATO",
+        "AMINO",
+        "AST",
+        "PIRÃšVICA",
+        "PIRUVICA",
+        "TGP",
+        "ALANINA",
+        "ALT",
+        "UREIA",
+        "UREICO",
+        "BUN",
+        "VITAMINA",
+        "B12",
+        "COBALAMINA",
+        "D",
+        "HIDROXI",
+        "25-HIDROXI",
+        "CALCIFEROL",
+        "GLICOSE",
+        "GLICEMIA",
+        "JEJUM",
+        "PÃ“S",
+        "POS",
+        "PRANDIAL",
+        "ÁCIDO",
+        "ACIDO",
+        "ÃšRICO",
+        "URICO",
+        "CÁLCIO",
+        "CALCIO",
+        "IONICO",
+        "TOTAL",
+        "FÃ“SFORO",
+        "FOSFORO",
+        "FOSFATO",
+        "MAGNÃ‰SIO",
+        "MAGNESIO",
+        "SÃ“DIO",
+        "SODIO",
+        "NA",
+        "POTÁSSIO",
+        "POTASSIO",
+        "K",
+        "CLORO",
+        "CL",
+        "PROTEÍNA",
+        "PROTEINA",
+        "ALBUMINA",
+        "SÃ‰RICA",
+        "SERICA",
+        "GLOBULINA",
+        "BILIRRUBINA",
+        "DIRETA",
+        "INDIRETA",
+        "AMILASE",
+        "PANCREÁTICA",
+        "PANCREATICA",
+        "LIPASE",
+        "FOSFATASE",
+        "ALCALINA",
+        "FA",
+        "DESIDROGENASE",
+        "LÁTICA",
+        "LATICA",
+        "LDH",
+        "CPK",
+        "CREATINOQUINASE",
+        "MB",
+        "CK",
+        "TROPONINA",
+        "HORMÃ”NIO",
+        "HORMONIO",
+        "ELETROFORESE",
+        "PROTEINOGRAMA",
+        "PARATORMÃ”NIO",
+        "PARATORMONIO",
+        "PTH",
+        "CORTISOL",
+        "INSULINA",
+        "PROLACTINA",
+        "ESTRADIOL",
+        "PROGESTERONA",
+        "FSH",
+        "LH",
+        "BETA",
+        "HCG",
+        "PSA",
+        "FERRITINA",
+        "TRANSFERRINA",
+        "VHS",
+        "VELOCIDADE",
+        "HEMOSSEDIMENTAÃ‡ÃƒO",
+        "HEMOSSEDIMENTACAO",
+        "PCR",
+        "PROTEINA",
+        "C",
+        "REATIVA",
+        "FATOR",
+        "REUMATOIDE",
+        "ANTI",
+        "ANTICORPO",
     ]
-
-
 
     # 4. FALLBACK: Categorização por tipo de exame
 
-
-
     # BIÃ“PSIAS / HISTOPATOLOGIA (palavras-chave genéricas) â†’ BIÃ“PSIA SOE (ID: 1)
 
-    biopsia_keywords = ['BIOPSIA', 'BIÃ“PSIA', 'HISTOPATOLOGIA', 'HISTOPATOLÃ“GICO',
-
-                        'HISTOPATOLOGICO', 'LESAO', 'LESÃƒO', 'NODULO', 'NÃ“DULO']
+    biopsia_keywords = [
+        "BIOPSIA",
+        "BIÃ“PSIA",
+        "HISTOPATOLOGIA",
+        "HISTOPATOLÃ“GICO",
+        "HISTOPATOLOGICO",
+        "LESAO",
+        "LESÃƒO",
+        "NODULO",
+        "NÃ“DULO",
+    ]
 
     if any(keyword in nome_upper for keyword in biopsia_keywords):
 
-        return 'ANÁTOMO PATOLÃ“GICO', 1
-
-
+        return "ANÁTOMO PATOLÃ“GICO", 1
 
     # CITOPATOLOGIA (palavras-chave genéricas) â†’ Depende do tipo específico
 
-    cito_keywords = ['CITOLOGIA', 'CITOPATOLOGIA', 'COLPOCITOLOGIA', 'PAPANICOLAU',
-
-                     'PREVENTIVO', 'ONCÃ“TICA', 'ONCOTICA']
+    cito_keywords = [
+        "CITOLOGIA",
+        "CITOPATOLOGIA",
+        "COLPOCITOLOGIA",
+        "PAPANICOLAU",
+        "PREVENTIVO",
+        "ONCÃ“TICA",
+        "ONCOTICA",
+    ]
 
     if any(keyword in nome_upper for keyword in cito_keywords):
 
         # Se tem "LIQUIDO" ou "LÍQUIDO", é meio líquido (ID: 24)
 
-        if 'LIQUIDO' in nome_upper or 'LÍQUIDO' in nome_upper:
+        if "LIQUIDO" in nome_upper or "LÍQUIDO" in nome_upper:
 
-            return 'CITOPATOLOGIA', 24
+            return "CITOPATOLOGIA", 24
 
         # Senão é convencional (ID: 20)
 
-        return 'CITOPATOLOGIA', 20
-
-
+        return "CITOPATOLOGIA", 20
 
     # MEDICINA LABORATORIAL (exames de sangue)
 
     if any(keyword in nome_upper for keyword in medicina_lab_keywords):
 
-        return 'MEDICINA LABORATORIAL', 49
-
-
+        return "MEDICINA LABORATORIAL", 49
 
     # Não identificado
 
-    return 'DESCONHECIDO', None
-
-
-
+    return "DESCONHECIDO", None
 
 
 def buscar_dados_requisicao_simples(cod_requisicao):
-
     """
 
     Busca dados básicos de uma requisição do apLIS (versão simplificada para consolidação)
@@ -11160,8 +10881,6 @@ def buscar_dados_requisicao_simples(cod_requisicao):
 
         logger.info(f"[BUSCA_SIMPLES] Buscando requisição {cod_requisicao} do apLIS...")
 
-
-
         # Buscar nos últimos 365 dias
 
         hoje = datetime.now()
@@ -11170,29 +10889,16 @@ def buscar_dados_requisicao_simples(cod_requisicao):
 
         periodo_ini = (hoje - timedelta(days=365)).strftime("%Y-%m-%d")
 
-
-
         dat = {
-
             "ordenar": "IdRequisicao",
-
             "idEvento": "50",
-
             "periodoIni": periodo_ini,
-
             "periodoFim": periodo_fim,
-
             "pagina": 1,
-
-            "tamanho": 100
-
+            "tamanho": 100,
         }
 
-
-
         resposta = fazer_requisicao_aplis("requisicaoListar", dat)
-
-
 
         if resposta.get("dat", {}).get("sucesso") != 1:
 
@@ -11200,11 +10906,7 @@ def buscar_dados_requisicao_simples(cod_requisicao):
 
             return None
 
-
-
         lista = resposta.get("dat", {}).get("lista", [])
-
-
 
         # Procurar requisição específica
 
@@ -11212,67 +10914,42 @@ def buscar_dados_requisicao_simples(cod_requisicao):
 
             if req.get("CodRequisicao") == cod_requisicao:
 
-                logger.info(f"[BUSCA_SIMPLES] âœ… Requisição encontrada: {cod_requisicao}")
-
-
+                logger.info(
+                    f"[BUSCA_SIMPLES] âœ… Requisição encontrada: {cod_requisicao}"
+                )
 
                 # Retornar formato simplificado com dados do paciente
 
                 return {
-
                     "requisicao": {
-
                         "codRequisicao": req.get("CodRequisicao"),
-
-                        "dtaColeta": req.get("DtaColeta")
-
+                        "dtaColeta": req.get("DtaColeta"),
                     },
-
                     "paciente": {
-
                         "idPaciente": req.get("CodPaciente"),
-
                         "nome": req.get("NomPaciente"),
-
                         "cpf": req.get("CPF"),
-
                         "dtaNasc": req.get("DtaNascimento"),
-
                         "sexo": req.get("Sexo"),
-
                         "telCelular": req.get("TelCelular"),
-
                         "rg": req.get("RG"),
-
                         "email": req.get("Email"),
-
                         "endereco": {
-
                             "logradouro": req.get("Logradouro"),
-
                             "numEndereco": req.get("NumEndereco"),
-
                             "bairro": req.get("Bairro"),
-
                             "cidade": req.get("Cidade"),
-
                             "uf": req.get("UF"),
-
-                            "cep": req.get("CEP")
-
-                        }
-
-                    }
-
+                            "cep": req.get("CEP"),
+                        },
+                    },
                 }
 
-
-
-        logger.warning(f"[BUSCA_SIMPLES] âš ️ Requisição {cod_requisicao} não encontrada")
+        logger.warning(
+            f"[BUSCA_SIMPLES] âš ️ Requisição {cod_requisicao} não encontrada"
+        )
 
         return None
-
-
 
     except Exception as e:
 
@@ -11285,13 +10962,8 @@ def buscar_dados_requisicao_simples(cod_requisicao):
         return None
 
 
-
-
-
-@app.route('/api/consolidar-resultados', methods=['POST'])
-
+@app.route("/api/consolidar-resultados", methods=["POST"])
 def consolidar_resultados():
-
     """
 
     Consolida todos os resultados de OCR no formato estruturado
@@ -11302,67 +10974,57 @@ def consolidar_resultados():
 
         dados = request.json
 
-        resultados_ocr = dados.get('resultados_ocr', [])
+        resultados_ocr = dados.get("resultados_ocr", [])
 
-        cod_requisicao = dados.get('codRequisicao')
+        cod_requisicao = dados.get("codRequisicao")
 
-        dados_api = dados.get('dados_api', {})  # Dados vindos da API (banco de dados)
+        dados_api = dados.get("dados_api", {})  # Dados vindos da API (banco de dados)
 
-
-
-        print(f"[CONSOLIDAR] Consolidando {len(resultados_ocr)} resultados OCR para requisição {cod_requisicao}")
+        print(
+            f"[CONSOLIDAR] Consolidando {len(resultados_ocr)} resultados OCR para requisição {cod_requisicao}"
+        )
 
         print(f"[CONSOLIDAR] Dados da API recebidos: {bool(dados_api)}")
-
-
 
         # ðŸ†• BUSCAR REQUISIÃ‡Ã•ES MÃšLTIPLAS AUTOMATICAMENTE (0085 e 0200)
 
         codigos_encontrados = set()
 
-
-
         # Coletar TODOS os códigos de barras do OCR
 
         for resultado in resultados_ocr:
 
-            dados_ocr = resultado.get('dados', {})
+            dados_ocr = resultado.get("dados", {})
 
-            comentarios = dados_ocr.get('comentarios_gerais', {})
-
-
+            comentarios = dados_ocr.get("comentarios_gerais", {})
 
             # Código único (retrocompatibilidade)
 
-            if comentarios.get('requisicao_entrada'):
+            if comentarios.get("requisicao_entrada"):
 
-                codigos_encontrados.add(comentarios['requisicao_entrada'])
-
-
+                codigos_encontrados.add(comentarios["requisicao_entrada"])
 
             # Múltiplos códigos (novo formato)
 
-            if isinstance(comentarios.get('codigos_barras'), list):
+            if isinstance(comentarios.get("codigos_barras"), list):
 
-                for codigo in comentarios['codigos_barras']:
+                for codigo in comentarios["codigos_barras"]:
 
                     if codigo and isinstance(codigo, str):
 
                         codigos_encontrados.add(codigo.strip())
 
-
-
-        print(f"[CONSOLIDAR] ðŸ“Š Códigos de barras encontrados no OCR: {codigos_encontrados}")
-
-
+        print(
+            f"[CONSOLIDAR] ðŸ“Š Códigos de barras encontrados no OCR: {codigos_encontrados}"
+        )
 
         # Se encontrou múltiplos códigos E não tem dados_api ainda, buscar todos
 
         if len(codigos_encontrados) > 1 and not dados_api:
 
-            print(f"[CONSOLIDAR] ðŸ” Buscando automaticamente {len(codigos_encontrados)} requisições...")
-
-
+            print(
+                f"[CONSOLIDAR] ðŸ” Buscando automaticamente {len(codigos_encontrados)} requisições..."
+            )
 
             requisicoes_buscadas = {}
 
@@ -11380,9 +11042,7 @@ def consolidar_resultados():
 
                     dados_req = buscar_dados_requisicao_simples(codigo)
 
-
-
-                    if dados_req and dados_req.get('paciente'):
+                    if dados_req and dados_req.get("paciente"):
 
                         requisicoes_buscadas[codigo] = dados_req
 
@@ -11390,9 +11050,9 @@ def consolidar_resultados():
 
                     else:
 
-                        print(f"[CONSOLIDAR] âš ️ Requisição {codigo} não encontrada ou sem dados de paciente")
-
-
+                        print(
+                            f"[CONSOLIDAR] âš ️ Requisição {codigo} não encontrada ou sem dados de paciente"
+                        )
 
                 except Exception as e:
 
@@ -11402,8 +11062,6 @@ def consolidar_resultados():
 
                     print(f"[CONSOLIDAR] Traceback: {traceback.format_exc()}")
 
-
-
             # Escolher a requisição com MAIS dados do paciente
 
             if requisicoes_buscadas:
@@ -11412,35 +11070,27 @@ def consolidar_resultados():
 
                 melhor_score = 0
 
-
-
                 for codigo, dados_req in requisicoes_buscadas.items():
 
-                    paciente = dados_req.get('paciente', {})
+                    paciente = dados_req.get("paciente", {})
 
                     # Score = quantidade de campos preenchidos
 
-                    score = sum([
+                    score = sum(
+                        [
+                            1 if paciente.get("nome") else 0,
+                            1 if paciente.get("cpf") else 0,
+                            1 if paciente.get("dtaNasc") else 0,
+                            1 if paciente.get("rg") else 0,
+                            1 if paciente.get("telCelular") else 0,
+                            1 if paciente.get("email") else 0,
+                            1 if paciente.get("endereco", {}).get("logradouro") else 0,
+                        ]
+                    )
 
-                        1 if paciente.get('nome') else 0,
-
-                        1 if paciente.get('cpf') else 0,
-
-                        1 if paciente.get('dtaNasc') else 0,
-
-                        1 if paciente.get('rg') else 0,
-
-                        1 if paciente.get('telCelular') else 0,
-
-                        1 if paciente.get('email') else 0,
-
-                        1 if paciente.get('endereco', {}).get('logradouro') else 0
-
-                    ])
-
-                    print(f"[CONSOLIDAR] ðŸ“ˆ Score de {codigo}: {score} campos preenchidos")
-
-
+                    print(
+                        f"[CONSOLIDAR] ðŸ“ˆ Score de {codigo}: {score} campos preenchidos"
+                    )
 
                     if score > melhor_score:
 
@@ -11448,161 +11098,162 @@ def consolidar_resultados():
 
                         melhor_codigo = codigo
 
-
-
                 if melhor_codigo:
 
                     dados_api = requisicoes_buscadas[melhor_codigo]
 
                     cod_requisicao = melhor_codigo
 
-                    print(f"[CONSOLIDAR] ðŸ† Usando requisição {melhor_codigo} (mais completa: {melhor_score} campos)")
+                    print(
+                        f"[CONSOLIDAR] ðŸ† Usando requisição {melhor_codigo} (mais completa: {melhor_score} campos)"
+                    )
 
-                    print(f"[CONSOLIDAR] ðŸ“‹ Paciente: {dados_api.get('paciente', {}).get('nome')}")
+                    print(
+                        f"[CONSOLIDAR] ðŸ“‹ Paciente: {dados_api.get('paciente', {}).get('nome')}"
+                    )
 
             else:
 
                 print(f"[CONSOLIDAR] âš ️ Nenhuma requisição encontrada no apLIS")
 
-
-
         # Estrutura do JSON consolidado
 
         resultado_consolidado = {
-
             "metadata": {
-
                 "timestamp_processamento": datetime.now().isoformat(),
-
                 "total_requisicoes": 1,
-
-                "versao_sistema": "2.0 - Sistema de Admissão com OCR"
-
+                "versao_sistema": "2.0 - Sistema de Admissão com OCR",
             },
-
-            "requisicoes": [{
-
-                "comentarios_gerais": {
-
-                    "alertas_processamento": "Processamento automático via OCR",
-
-                    "requisicao_entrada": cod_requisicao,
-
-                    "idLocalOrigem": None,
-
-                    "NomeLocalOrigem": None,
-
-                    "arquivos_analisados": [],
-
-                    "documentos_identificados": []
-
-                },
-
-                "paciente": {},
-
-                "medico": {},
-
-                "convenio": {},
-
-                "requisicao": {},
-
-                "amostras": {
-
-                    "qtd_frascos_total": {"valor": None, "fonte": None, "confianca": None},
-
-                    "tem_foto_frascos_juntos": {"valor": False, "fonte": None, "confianca": None},
-
-                    "frascos_individuais": [],
-
-                    "observacoes_frascos": {"valor": None, "fonte": None, "confianca": None}
-
-                },
-
-                "meta_dados_validacao": {
-
-                    "validacao_identidade": {
-
-                        "status": {"valor": None, "fonte": None, "confianca": None},
-
-                        "acao_sistema": {
-
-                            "mensagem": {"valor": None, "fonte": None, "confianca": None},
-
-                            "tipo_acao": {"valor": None, "fonte": None, "confianca": None},
-
-                            "destino": {"valor": None, "fonte": None, "confianca": None}
-
-                        }
-
+            "requisicoes": [
+                {
+                    "comentarios_gerais": {
+                        "alertas_processamento": "Processamento automático via OCR",
+                        "requisicao_entrada": cod_requisicao,
+                        "idLocalOrigem": None,
+                        "NomeLocalOrigem": None,
+                        "arquivos_analisados": [],
+                        "documentos_identificados": [],
                     },
-
-                    "completude_cadastral": {
-
-                        "status": {"valor": None, "fonte": None, "confianca": None},
-
-                        "acao_sistema": {
-
-                            "mensagem": {"valor": None, "fonte": None, "confianca": None},
-
-                            "tipo_acao": {"valor": None, "fonte": None, "confianca": None},
-
-                            "destino": {"valor": None, "fonte": None, "confianca": None}
-
-                        }
-
+                    "paciente": {},
+                    "medico": {},
+                    "convenio": {},
+                    "requisicao": {},
+                    "amostras": {
+                        "qtd_frascos_total": {
+                            "valor": None,
+                            "fonte": None,
+                            "confianca": None,
+                        },
+                        "tem_foto_frascos_juntos": {
+                            "valor": False,
+                            "fonte": None,
+                            "confianca": None,
+                        },
+                        "frascos_individuais": [],
+                        "observacoes_frascos": {
+                            "valor": None,
+                            "fonte": None,
+                            "confianca": None,
+                        },
                     },
-
-                    "codigo_barras_match": {
-
-                        "status": {"valor": None, "fonte": None, "confianca": None},
-
-                        "acao_sistema": {
-
-                            "mensagem": {"valor": None, "fonte": None, "confianca": None},
-
-                            "tipo_acao": {"valor": None, "fonte": None, "confianca": None},
-
-                            "destino": {"valor": None, "fonte": None, "confianca": None}
-
-                        }
-
+                    "meta_dados_validacao": {
+                        "validacao_identidade": {
+                            "status": {"valor": None, "fonte": None, "confianca": None},
+                            "acao_sistema": {
+                                "mensagem": {
+                                    "valor": None,
+                                    "fonte": None,
+                                    "confianca": None,
+                                },
+                                "tipo_acao": {
+                                    "valor": None,
+                                    "fonte": None,
+                                    "confianca": None,
+                                },
+                                "destino": {
+                                    "valor": None,
+                                    "fonte": None,
+                                    "confianca": None,
+                                },
+                            },
+                        },
+                        "completude_cadastral": {
+                            "status": {"valor": None, "fonte": None, "confianca": None},
+                            "acao_sistema": {
+                                "mensagem": {
+                                    "valor": None,
+                                    "fonte": None,
+                                    "confianca": None,
+                                },
+                                "tipo_acao": {
+                                    "valor": None,
+                                    "fonte": None,
+                                    "confianca": None,
+                                },
+                                "destino": {
+                                    "valor": None,
+                                    "fonte": None,
+                                    "confianca": None,
+                                },
+                            },
+                        },
+                        "codigo_barras_match": {
+                            "status": {"valor": None, "fonte": None, "confianca": None},
+                            "acao_sistema": {
+                                "mensagem": {
+                                    "valor": None,
+                                    "fonte": None,
+                                    "confianca": None,
+                                },
+                                "tipo_acao": {
+                                    "valor": None,
+                                    "fonte": None,
+                                    "confianca": None,
+                                },
+                                "destino": {
+                                    "valor": None,
+                                    "fonte": None,
+                                    "confianca": None,
+                                },
+                            },
+                        },
+                        "comprovante_pgto": {
+                            "status": {"valor": None, "fonte": None, "confianca": None},
+                            "acao_sistema": {
+                                "mensagem": {
+                                    "valor": None,
+                                    "fonte": None,
+                                    "confianca": None,
+                                },
+                                "tipo_acao": {
+                                    "valor": None,
+                                    "fonte": None,
+                                    "confianca": None,
+                                },
+                                "destino": {
+                                    "valor": None,
+                                    "fonte": None,
+                                    "confianca": None,
+                                },
+                            },
+                        },
+                        "meta_analise": {
+                            "valor": None,
+                            "fonte": None,
+                            "confianca": None,
+                        },
                     },
-
-                    "comprovante_pgto": {
-
-                        "status": {"valor": None, "fonte": None, "confianca": None},
-
-                        "acao_sistema": {
-
-                            "mensagem": {"valor": None, "fonte": None, "confianca": None},
-
-                            "tipo_acao": {"valor": None, "fonte": None, "confianca": None},
-
-                            "destino": {"valor": None, "fonte": None, "confianca": None}
-
-                        }
-
-                    },
-
-                    "meta_analise": {"valor": None, "fonte": None, "confianca": None}
-
                 }
-
-            }]
-
+            ],
         }
-
-
 
         # Processar cada resultado de OCR
 
         for idx, resultado in enumerate(resultados_ocr):
 
-            imagem_nome = resultado.get('imagem', '')
+            imagem_nome = resultado.get("imagem", "")
 
-            dados_ocr = resultado.get('dados', {})
-
-
+            dados_ocr = resultado.get("dados", {})
 
             print(f"[CONSOLIDAR] Processando resultado {idx+1}/{len(resultados_ocr)}")
 
@@ -11612,63 +11263,57 @@ def consolidar_resultados():
 
             print(f"[CONSOLIDAR] Tipo dos dados: {type(dados_ocr)}")
 
-
-
             # Debug dos tipos internos
 
             if isinstance(dados_ocr, dict):
 
-                for chave in ['paciente', 'medico', 'convenio', 'requisicao']:
+                for chave in ["paciente", "medico", "convenio", "requisicao"]:
 
                     if chave in dados_ocr:
 
-                        print(f"[CONSOLIDAR] Tipo de '{chave}': {type(dados_ocr[chave])}")
-
-
+                        print(
+                            f"[CONSOLIDAR] Tipo de '{chave}': {type(dados_ocr[chave])}"
+                        )
 
             # Adicionar documento identificado
 
-            resultado_consolidado["requisicoes"][0]["comentarios_gerais"]["documentos_identificados"].append({
+            resultado_consolidado["requisicoes"][0]["comentarios_gerais"][
+                "documentos_identificados"
+            ].append(
+                {
+                    "id_documento": f"doc_{idx+1}",
+                    "tipo_documento": dados_ocr.get("tipo_documento", "outro"),
+                    "descricao": f"Imagem: {imagem_nome}",
+                }
+            )
 
-                "id_documento": f"doc_{idx+1}",
-
-                "tipo_documento": dados_ocr.get('tipo_documento', 'outro'),
-
-                "descricao": f"Imagem: {imagem_nome}"
-
-            })
-
-
-
-            resultado_consolidado["requisicoes"][0]["comentarios_gerais"]["arquivos_analisados"].append(imagem_nome)
-
-
+            resultado_consolidado["requisicoes"][0]["comentarios_gerais"][
+                "arquivos_analisados"
+            ].append(imagem_nome)
 
             # Mesclar dados do paciente - ðŸ†• MESCLAGEM INTELIGENTE (não sobrescrever valores bons com null)
 
-            if 'paciente' in dados_ocr and isinstance(dados_ocr['paciente'], dict):
+            if "paciente" in dados_ocr and isinstance(dados_ocr["paciente"], dict):
 
-                for key, value in dados_ocr['paciente'].items():
+                for key, value in dados_ocr["paciente"].items():
 
-                    campo_atual = resultado_consolidado["requisicoes"][0]["paciente"].get(key)
-
-
+                    campo_atual = resultado_consolidado["requisicoes"][0][
+                        "paciente"
+                    ].get(key)
 
                     # Extrair valores e confiança do novo dado
 
                     if isinstance(value, dict):
 
-                        novo_valor = value.get('valor')
+                        novo_valor = value.get("valor")
 
-                        nova_confianca = value.get('confianca', 0)
+                        nova_confianca = value.get("confianca", 0)
 
                     else:
 
                         novo_valor = value
 
                         nova_confianca = 0
-
-
 
                     # Decidir se adiciona/sobrescreve
 
@@ -11680,27 +11325,31 @@ def consolidar_resultados():
 
                     elif isinstance(campo_atual, dict):
 
-                        valor_atual = campo_atual.get('valor')
+                        valor_atual = campo_atual.get("valor")
 
-                        confianca_atual = campo_atual.get('confianca', 0)
-
-
+                        confianca_atual = campo_atual.get("confianca", 0)
 
                         # Só sobrescrever se o novo valor for melhor
 
-                        if (valor_atual is None or valor_atual == '' or valor_atual == 'null') and novo_valor:
+                        if (
+                            valor_atual is None
+                            or valor_atual == ""
+                            or valor_atual == "null"
+                        ) and novo_valor:
 
-                            resultado_consolidado["requisicoes"][0]["paciente"][key] = value
+                            resultado_consolidado["requisicoes"][0]["paciente"][
+                                key
+                            ] = value
 
                         elif nova_confianca > confianca_atual and novo_valor:
 
-                            resultado_consolidado["requisicoes"][0]["paciente"][key] = value
+                            resultado_consolidado["requisicoes"][0]["paciente"][
+                                key
+                            ] = value
 
                     else:
 
                         resultado_consolidado["requisicoes"][0]["paciente"][key] = value
-
-
 
                 # ðŸ†• PÃ“S-PROCESSAMENTO: Verificar se DtaNascimento ou idade_formatada contém idade
 
@@ -11708,95 +11357,97 @@ def consolidar_resultados():
 
                 pac_consolidado = resultado_consolidado["requisicoes"][0]["paciente"]
 
-
-
                 # Verificar campo DtaNascimento
 
-                if 'DtaNascimento' in pac_consolidado:
+                if "DtaNascimento" in pac_consolidado:
 
-                    dta_obj = pac_consolidado['DtaNascimento']
+                    dta_obj = pac_consolidado["DtaNascimento"]
 
                     if isinstance(dta_obj, dict):
 
-                        dta_valor = dta_obj.get('valor')
+                        dta_valor = dta_obj.get("valor")
 
                         # Se contém "anos", é idade formatada
 
-                        if dta_valor and isinstance(dta_valor, str) and 'anos' in dta_valor.lower():
+                        if (
+                            dta_valor
+                            and isinstance(dta_valor, str)
+                            and "anos" in dta_valor.lower()
+                        ):
 
-                            print(f"[CONSOLIDAR] ðŸŽ‚ OCR extraiu idade no campo DtaNascimento: {dta_valor}")
+                            print(
+                                f"[CONSOLIDAR] ðŸŽ‚ OCR extraiu idade no campo DtaNascimento: {dta_valor}"
+                            )
 
-                            data_calculada = calcular_data_nascimento_por_idade(dta_valor)
+                            data_calculada = calcular_data_nascimento_por_idade(
+                                dta_valor
+                            )
 
                             if data_calculada:
 
-                                pac_consolidado['DtaNascimento'] = {
-
+                                pac_consolidado["DtaNascimento"] = {
                                     "valor": data_calculada,
-
                                     "fonte": f"Calculado de idade: {dta_valor}",
-
-                                    "confianca": 0.85
-
+                                    "confianca": 0.85,
                                 }
 
-                                print(f"[CONSOLIDAR] âœ… Data calculada: {data_calculada}")
-
-
+                                print(
+                                    f"[CONSOLIDAR] âœ… Data calculada: {data_calculada}"
+                                )
 
                 # Verificar campo idade_formatada (alternativo)
 
-                if 'idade_formatada' in pac_consolidado:
+                if "idade_formatada" in pac_consolidado:
 
-                    idade_obj = pac_consolidado['idade_formatada']
+                    idade_obj = pac_consolidado["idade_formatada"]
 
                     if isinstance(idade_obj, dict):
 
-                        idade_valor = idade_obj.get('valor')
+                        idade_valor = idade_obj.get("valor")
 
                         if idade_valor and isinstance(idade_valor, str):
 
-                            print(f"[CONSOLIDAR] ðŸŽ‚ OCR extraiu campo idade_formatada: {idade_valor}")
+                            print(
+                                f"[CONSOLIDAR] ðŸŽ‚ OCR extraiu campo idade_formatada: {idade_valor}"
+                            )
 
-                            data_calculada = calcular_data_nascimento_por_idade(idade_valor)
+                            data_calculada = calcular_data_nascimento_por_idade(
+                                idade_valor
+                            )
 
                             if data_calculada:
 
                                 # Criar ou atualizar DtaNascimento
 
-                                pac_consolidado['DtaNascimento'] = {
-
+                                pac_consolidado["DtaNascimento"] = {
                                     "valor": data_calculada,
-
                                     "fonte": f"Calculado de idade: {idade_valor}",
-
-                                    "confianca": 0.85
-
+                                    "confianca": 0.85,
                                 }
 
-                                print(f"[CONSOLIDAR] âœ… Data calculada de idade_formatada: {data_calculada}")
+                                print(
+                                    f"[CONSOLIDAR] âœ… Data calculada de idade_formatada: {data_calculada}"
+                                )
 
                                 # Remover campo idade_formatada após processamento
 
-                                del pac_consolidado['idade_formatada']
-
-
+                                del pac_consolidado["idade_formatada"]
 
             # Mesclar dados do médico - ðŸ†• MESCLAGEM INTELIGENTE
 
-            if 'medico' in dados_ocr and isinstance(dados_ocr['medico'], dict):
+            if "medico" in dados_ocr and isinstance(dados_ocr["medico"], dict):
 
-                for key, value in dados_ocr['medico'].items():
+                for key, value in dados_ocr["medico"].items():
 
-                    campo_atual = resultado_consolidado["requisicoes"][0]["medico"].get(key)
-
-
+                    campo_atual = resultado_consolidado["requisicoes"][0]["medico"].get(
+                        key
+                    )
 
                     if isinstance(value, dict):
 
-                        novo_valor = value.get('valor')
+                        novo_valor = value.get("valor")
 
-                        nova_confianca = value.get('confianca', 0)
+                        nova_confianca = value.get("confianca", 0)
 
                     else:
 
@@ -11804,49 +11455,51 @@ def consolidar_resultados():
 
                         nova_confianca = 0
 
-
-
                     if campo_atual is None:
 
                         resultado_consolidado["requisicoes"][0]["medico"][key] = value
 
                     elif isinstance(campo_atual, dict):
 
-                        valor_atual = campo_atual.get('valor')
+                        valor_atual = campo_atual.get("valor")
 
-                        confianca_atual = campo_atual.get('confianca', 0)
+                        confianca_atual = campo_atual.get("confianca", 0)
 
+                        if (
+                            valor_atual is None
+                            or valor_atual == ""
+                            or valor_atual == "null"
+                        ) and novo_valor:
 
-
-                        if (valor_atual is None or valor_atual == '' or valor_atual == 'null') and novo_valor:
-
-                            resultado_consolidado["requisicoes"][0]["medico"][key] = value
+                            resultado_consolidado["requisicoes"][0]["medico"][
+                                key
+                            ] = value
 
                         elif nova_confianca > confianca_atual and novo_valor:
 
-                            resultado_consolidado["requisicoes"][0]["medico"][key] = value
+                            resultado_consolidado["requisicoes"][0]["medico"][
+                                key
+                            ] = value
 
                     else:
 
                         resultado_consolidado["requisicoes"][0]["medico"][key] = value
-
-
 
             # Mesclar dados do convênio - ðŸ†• MESCLAGEM INTELIGENTE
 
-            if 'convenio' in dados_ocr and isinstance(dados_ocr['convenio'], dict):
+            if "convenio" in dados_ocr and isinstance(dados_ocr["convenio"], dict):
 
-                for key, value in dados_ocr['convenio'].items():
+                for key, value in dados_ocr["convenio"].items():
 
-                    campo_atual = resultado_consolidado["requisicoes"][0]["convenio"].get(key)
-
-
+                    campo_atual = resultado_consolidado["requisicoes"][0][
+                        "convenio"
+                    ].get(key)
 
                     if isinstance(value, dict):
 
-                        novo_valor = value.get('valor')
+                        novo_valor = value.get("valor")
 
-                        nova_confianca = value.get('confianca', 0)
+                        nova_confianca = value.get("confianca", 0)
 
                     else:
 
@@ -11854,107 +11507,136 @@ def consolidar_resultados():
 
                         nova_confianca = 0
 
-
-
                     if campo_atual is None:
 
                         resultado_consolidado["requisicoes"][0]["convenio"][key] = value
 
                     elif isinstance(campo_atual, dict):
 
-                        valor_atual = campo_atual.get('valor')
+                        valor_atual = campo_atual.get("valor")
 
-                        confianca_atual = campo_atual.get('confianca', 0)
+                        confianca_atual = campo_atual.get("confianca", 0)
 
+                        if (
+                            valor_atual is None
+                            or valor_atual == ""
+                            or valor_atual == "null"
+                        ) and novo_valor:
 
-
-                        if (valor_atual is None or valor_atual == '' or valor_atual == 'null') and novo_valor:
-
-                            resultado_consolidado["requisicoes"][0]["convenio"][key] = value
+                            resultado_consolidado["requisicoes"][0]["convenio"][
+                                key
+                            ] = value
 
                         elif nova_confianca > confianca_atual and novo_valor:
 
-                            resultado_consolidado["requisicoes"][0]["convenio"][key] = value
+                            resultado_consolidado["requisicoes"][0]["convenio"][
+                                key
+                            ] = value
 
                     else:
 
                         resultado_consolidado["requisicoes"][0]["convenio"][key] = value
 
-
-
             # Mesclar dados da requisição - INCLUIR TODOS OS CAMPOS (dict, list, str, etc)
 
-            if 'requisicao' in dados_ocr and isinstance(dados_ocr['requisicao'], dict):
+            if "requisicao" in dados_ocr and isinstance(dados_ocr["requisicao"], dict):
 
-                tipo_doc = dados_ocr.get('tipo_documento', '')
+                tipo_doc = dados_ocr.get("tipo_documento", "")
 
-                print(f"[CONSOLIDAR] ðŸ“‹ Processando requisição da imagem: {imagem_nome}")
+                print(
+                    f"[CONSOLIDAR] ðŸ“‹ Processando requisição da imagem: {imagem_nome}"
+                )
 
                 print(f"[CONSOLIDAR] ðŸ“‹ Tipo de documento: {tipo_doc}")
 
-                print(f"[CONSOLIDAR] ðŸ“‹ Campos em requisição: {list(dados_ocr['requisicao'].keys())}")
+                print(
+                    f"[CONSOLIDAR] ðŸ“‹ Campos em requisição: {list(dados_ocr['requisicao'].keys())}"
+                )
 
+                for key, value in dados_ocr["requisicao"].items():
 
-
-                for key, value in dados_ocr['requisicao'].items():
-
-                    print(f"[CONSOLIDAR]   Processando campo: {key}, tipo: {type(value)}")
-
-
+                    print(
+                        f"[CONSOLIDAR]   Processando campo: {key}, tipo: {type(value)}"
+                    )
 
                     # Para itens_exame, adicionar de pedido_medico OU laudo_medico
 
-                    if key == 'itens_exame' and isinstance(value, list):
+                    if key == "itens_exame" and isinstance(value, list):
 
-                        print(f"[CONSOLIDAR]   ðŸ”¬ Campo itens_exame encontrado! Tipo doc: {tipo_doc}, Qtd exames: {len(value)}")
-
-
+                        print(
+                            f"[CONSOLIDAR]   ðŸ”¬ Campo itens_exame encontrado! Tipo doc: {tipo_doc}, Qtd exames: {len(value)}"
+                        )
 
                         # Adicionar exames de documentos tipo "pedido_medico" ou "laudo_medico"
 
-                        if tipo_doc in ['pedido_medico', 'laudo_medico'] and len(value) > 0:
+                        if (
+                            tipo_doc in ["pedido_medico", "laudo_medico"]
+                            and len(value) > 0
+                        ):
 
-                            print(f"[CONSOLIDAR]   âœ“ Tipo de documento aceito: {tipo_doc}")
+                            print(
+                                f"[CONSOLIDAR]   âœ“ Tipo de documento aceito: {tipo_doc}"
+                            )
 
+                            if (
+                                key
+                                not in resultado_consolidado["requisicoes"][0][
+                                    "requisicao"
+                                ]
+                            ):
 
+                                resultado_consolidado["requisicoes"][0]["requisicao"][
+                                    key
+                                ] = []
 
-                            if key not in resultado_consolidado["requisicoes"][0]["requisicao"]:
-
-                                resultado_consolidado["requisicoes"][0]["requisicao"][key] = []
-
-                                print(f"[CONSOLIDAR]   âœ“ Criado array vazio para itens_exame")
-
-
+                                print(
+                                    f"[CONSOLIDAR]   âœ“ Criado array vazio para itens_exame"
+                                )
 
                             # Adicionar apenas se ainda não tiver exames (evitar duplicatas)
 
-                            if len(resultado_consolidado["requisicoes"][0]["requisicao"][key]) == 0:
+                            if (
+                                len(
+                                    resultado_consolidado["requisicoes"][0][
+                                        "requisicao"
+                                    ][key]
+                                )
+                                == 0
+                            ):
 
-                                resultado_consolidado["requisicoes"][0]["requisicao"][key].extend(value)
+                                resultado_consolidado["requisicoes"][0]["requisicao"][
+                                    key
+                                ].extend(value)
 
-                                print(f"[CONSOLIDAR]  âœ… Adicionados {len(value)} exames do {tipo_doc}: {imagem_nome}")
+                                print(
+                                    f"[CONSOLIDAR]  âœ… Adicionados {len(value)} exames do {tipo_doc}: {imagem_nome}"
+                                )
 
                             else:
 
-                                print(f"[CONSOLIDAR]  âš ️ Ignorando exames duplicados da imagem: {imagem_nome}")
+                                print(
+                                    f"[CONSOLIDAR]  âš ️ Ignorando exames duplicados da imagem: {imagem_nome}"
+                                )
 
                         else:
 
-                            print(f"[CONSOLIDAR]   âŒ Tipo de documento NÃƒO aceito ou array vazio: {tipo_doc}, len={len(value)}")
+                            print(
+                                f"[CONSOLIDAR]   âŒ Tipo de documento NÃƒO aceito ou array vazio: {tipo_doc}, len={len(value)}"
+                            )
 
                     else:
 
                         # ðŸ†• MESCLAGEM INTELIGENTE para campos não-exame
 
-                        campo_atual = resultado_consolidado["requisicoes"][0]["requisicao"].get(key)
-
-
+                        campo_atual = resultado_consolidado["requisicoes"][0][
+                            "requisicao"
+                        ].get(key)
 
                         if isinstance(value, dict):
 
-                            novo_valor = value.get('valor')
+                            novo_valor = value.get("valor")
 
-                            nova_confianca = value.get('confianca', 0)
+                            nova_confianca = value.get("confianca", 0)
 
                         else:
 
@@ -11962,49 +11644,55 @@ def consolidar_resultados():
 
                             nova_confianca = 0
 
-
-
                         if campo_atual is None:
 
-                            resultado_consolidado["requisicoes"][0]["requisicao"][key] = value
+                            resultado_consolidado["requisicoes"][0]["requisicao"][
+                                key
+                            ] = value
 
                         elif isinstance(campo_atual, dict):
 
-                            valor_atual = campo_atual.get('valor')
+                            valor_atual = campo_atual.get("valor")
 
-                            confianca_atual = campo_atual.get('confianca', 0)
+                            confianca_atual = campo_atual.get("confianca", 0)
 
+                            if (
+                                valor_atual is None
+                                or valor_atual == ""
+                                or valor_atual == "null"
+                            ) and novo_valor:
 
-
-                            if (valor_atual is None or valor_atual == '' or valor_atual == 'null') and novo_valor:
-
-                                resultado_consolidado["requisicoes"][0]["requisicao"][key] = value
+                                resultado_consolidado["requisicoes"][0]["requisicao"][
+                                    key
+                                ] = value
 
                             elif nova_confianca > confianca_atual and novo_valor:
 
-                                resultado_consolidado["requisicoes"][0]["requisicao"][key] = value
+                                resultado_consolidado["requisicoes"][0]["requisicao"][
+                                    key
+                                ] = value
 
                         else:
 
-                            resultado_consolidado["requisicoes"][0]["requisicao"][key] = value
-
-
+                            resultado_consolidado["requisicoes"][0]["requisicao"][
+                                key
+                            ] = value
 
         # ENRIQUECER ITENS_EXAME COM IDs DO BANCO DE DADOS
 
-        if 'itens_exame' in resultado_consolidado["requisicoes"][0]["requisicao"]:
+        if "itens_exame" in resultado_consolidado["requisicoes"][0]["requisicao"]:
 
-            itens_exame = resultado_consolidado["requisicoes"][0]["requisicao"]["itens_exame"]
+            itens_exame = resultado_consolidado["requisicoes"][0]["requisicao"][
+                "itens_exame"
+            ]
 
             print(f"[CONSOLIDAR]  itens_exame encontrado: {itens_exame}")
 
-
-
             if isinstance(itens_exame, list) and len(itens_exame) > 0:
 
-                print(f"[CONSOLIDAR] Enriquecendo {len(itens_exame)} exames com IDs do banco de dados...")
-
-
+                print(
+                    f"[CONSOLIDAR] Enriquecendo {len(itens_exame)} exames com IDs do banco de dados..."
+                )
 
                 # Extrair nomes dos exames
 
@@ -12014,7 +11702,7 @@ def consolidar_resultados():
 
                     if isinstance(exame, dict):
 
-                        nome = exame.get('descricao_ocr') or exame.get('descricao')
+                        nome = exame.get("descricao_ocr") or exame.get("descricao")
 
                         if nome:
 
@@ -12023,8 +11711,6 @@ def consolidar_resultados():
                     elif isinstance(exame, str):
 
                         nomes_exames.append(exame)
-
-
 
                 if nomes_exames:
 
@@ -12036,23 +11722,16 @@ def consolidar_resultados():
 
                         nome_limpo = nome_exame.strip().upper()
 
-
-
                         # Identificar tipo de exame automaticamente POR CATEGORIA
 
-                        tipo_identificado, cod_automatico = identificar_tipo_exame_backend(nome_limpo)
-
-
+                        tipo_identificado, cod_automatico = (
+                            identificar_tipo_exame_backend(nome_limpo)
+                        )
 
                         exame_enriquecido = {
-
                             "descricao_ocr": nome_exame,
-
-                            "tipo_identificado": tipo_identificado
-
+                            "tipo_identificado": tipo_identificado,
                         }
-
-
 
                         if cod_automatico:
 
@@ -12066,15 +11745,15 @@ def consolidar_resultados():
 
                             exame_enriquecido["mapeamento_automatico"] = True
 
-                            print(f"[CONSOLIDAR]  {nome_exame} â†’ ID: {cod_automatico} ({tipo_identificado})")
+                            print(
+                                f"[CONSOLIDAR]  {nome_exame} â†’ ID: {cod_automatico} ({tipo_identificado})"
+                            )
 
                         else:
 
                             exame_enriquecido["encontrado"] = False
 
                             print(f"[CONSOLIDAR]  {nome_exame} não identificado")
-
-
 
                         # Manter campos originais do OCR
 
@@ -12086,133 +11765,116 @@ def consolidar_resultados():
 
                                     exame_enriquecido[k] = v
 
-
-
                         exames_enriquecidos.append(exame_enriquecido)
-
-
 
                     # Substituir lista original pela enriquecida
 
-                    resultado_consolidado["requisicoes"][0]["requisicao"]["itens_exame"] = exames_enriquecidos
+                    resultado_consolidado["requisicoes"][0]["requisicao"][
+                        "itens_exame"
+                    ] = exames_enriquecidos
 
-                    print(f"[CONSOLIDAR]  Exames enriquecidos com mapeamento automático (sem banco de dados)")
+                    print(
+                        f"[CONSOLIDAR]  Exames enriquecidos com mapeamento automático (sem banco de dados)"
+                    )
 
             else:
 
-                print(f"[CONSOLIDAR]  AVISO: itens_exame está vazio ou não é uma lista válida!")
+                print(
+                    f"[CONSOLIDAR]  AVISO: itens_exame está vazio ou não é uma lista válida!"
+                )
 
         else:
 
             print(f"[CONSOLIDAR]  AVISO: Campo itens_exame não existe em requisicao!")
 
-
-
         # ADICIONAR DADOS DA API (BANCO DE DADOS) - com menor prioridade que OCR
 
         if dados_api:
 
-            logger.info("[CONSOLIDAR] Adicionando dados da API ao resultado consolidado...")
+            logger.info(
+                "[CONSOLIDAR] Adicionando dados da API ao resultado consolidado..."
+            )
 
             logger.debug(f"[CONSOLIDAR] Tipo de dados_api: {type(dados_api)}")
 
             logger.debug(f"[CONSOLIDAR] Conteúdo de dados_api: {dados_api}")
 
-
-
             # Verificar se dados_api é um dicionário válido
 
             if not isinstance(dados_api, dict):
 
-                logger.error(f"[CONSOLIDAR] ERRO: dados_api não é um dicionário, é {type(dados_api)}")
+                logger.error(
+                    f"[CONSOLIDAR] ERRO: dados_api não é um dicionário, é {type(dados_api)}"
+                )
 
                 dados_api = {}  # Usar dicionário vazio para evitar erro
-
-
 
             # Se não há resultados OCR, adicionar alerta
 
             if len(resultados_ocr) == 0:
 
-                resultado_consolidado["requisicoes"][0]["comentarios_gerais"]["alertas_processamento"] = "Dados extraídos apenas da API - Sem imagens para processar OCR"
+                resultado_consolidado["requisicoes"][0]["comentarios_gerais"][
+                    "alertas_processamento"
+                ] = "Dados extraídos apenas da API - Sem imagens para processar OCR"
 
-                resultado_consolidado["requisicoes"][0]["comentarios_gerais"]["arquivos_analisados"] = ["Nenhuma imagem processada"]
+                resultado_consolidado["requisicoes"][0]["comentarios_gerais"][
+                    "arquivos_analisados"
+                ] = ["Nenhuma imagem processada"]
 
-                resultado_consolidado["requisicoes"][0]["comentarios_gerais"]["documentos_identificados"] = [{
-
-                    "id_documento": "api_db",
-
-                    "tipo_documento": "aplis",
-
-                    "descricao": "Dados carregados do apLIS (sem OCR)"
-
-                }]
-
-
+                resultado_consolidado["requisicoes"][0]["comentarios_gerais"][
+                    "documentos_identificados"
+                ] = [
+                    {
+                        "id_documento": "api_db",
+                        "tipo_documento": "aplis",
+                        "descricao": "Dados carregados do apLIS (sem OCR)",
+                    }
+                ]
 
             # Dados do Paciente da API
 
-            if 'paciente' in dados_api and isinstance(dados_api['paciente'], dict):
+            if "paciente" in dados_api and isinstance(dados_api["paciente"], dict):
 
-                pac_api = dados_api['paciente']
+                pac_api = dados_api["paciente"]
 
-                logger.debug(f"[CONSOLIDAR] Processando dados do paciente da API: {pac_api}")
-
-
+                logger.debug(
+                    f"[CONSOLIDAR] Processando dados do paciente da API: {pac_api}"
+                )
 
                 # ðŸ†• TODOS OS 16 CAMPOS DO PACIENTE (expandido para incluir todos os campos do banco)
 
                 campos_paciente = {
-
-                    'NomPaciente': pac_api.get('nome'),
-
-                    'DtaNascimento': pac_api.get('dtaNasc'),
-
-                    'sexo': pac_api.get('sexo'),
-
-                    'cpf': pac_api.get('cpf'),
-
-                    'RGNumero': pac_api.get('rg'),
-
-                    'RGOrgao': pac_api.get('rgOrgao'),
-
-                    'RGUF': pac_api.get('rgUF'),
-
-                    'NomMae': pac_api.get('nomeMae'),
-
-                    'EstadoCivil': pac_api.get('estadoCivil'),
-
-                    'Passaporte': pac_api.get('passaporte'),
-
-                    'MatConvenio': pac_api.get('matriculaConvenio'),
-
-                    'ValidadeMatricula': pac_api.get('validadeMatricula'),
-
-                    'telCelular': pac_api.get('telCelular'),
-
-                    'telFixo': pac_api.get('telFixo'),
-
-                    'email': pac_api.get('email')
-
+                    "NomPaciente": pac_api.get("nome"),
+                    "DtaNascimento": pac_api.get("dtaNasc"),
+                    "sexo": pac_api.get("sexo"),
+                    "cpf": pac_api.get("cpf"),
+                    "RGNumero": pac_api.get("rg"),
+                    "RGOrgao": pac_api.get("rgOrgao"),
+                    "RGUF": pac_api.get("rgUF"),
+                    "NomMae": pac_api.get("nomeMae"),
+                    "EstadoCivil": pac_api.get("estadoCivil"),
+                    "Passaporte": pac_api.get("passaporte"),
+                    "MatConvenio": pac_api.get("matriculaConvenio"),
+                    "ValidadeMatricula": pac_api.get("validadeMatricula"),
+                    "telCelular": pac_api.get("telCelular"),
+                    "telFixo": pac_api.get("telFixo"),
+                    "email": pac_api.get("email"),
                 }
-
-
 
                 for campo, valor in campos_paciente.items():
 
                     # ðŸ†• FALLBACK INTELIGENTE: Usar API se campo não existe OU se existe mas está vazio
 
-                    pac_ocr = resultado_consolidado["requisicoes"][0]["paciente"].get(campo)
+                    pac_ocr = resultado_consolidado["requisicoes"][0]["paciente"].get(
+                        campo
+                    )
 
-                    campo_vazio_no_ocr = (pac_ocr is None or
-
-                                         pac_ocr.get("valor") is None or
-
-                                         pac_ocr.get("valor") == '' or
-
-                                         pac_ocr.get("valor") == 'null')
-
-
+                    campo_vazio_no_ocr = (
+                        pac_ocr is None
+                        or pac_ocr.get("valor") is None
+                        or pac_ocr.get("valor") == ""
+                        or pac_ocr.get("valor") == "null"
+                    )
 
                     # Só adicionar se:
 
@@ -12222,21 +11884,20 @@ def consolidar_resultados():
 
                     # E o valor da API não é None
 
-                    if (campo not in resultado_consolidado["requisicoes"][0]["paciente"] or campo_vazio_no_ocr) and valor:
+                    if (
+                        campo not in resultado_consolidado["requisicoes"][0]["paciente"]
+                        or campo_vazio_no_ocr
+                    ) and valor:
 
                         resultado_consolidado["requisicoes"][0]["paciente"][campo] = {
-
                             "valor": valor,
-
                             "fonte": "API/DB",
-
-                            "confianca": 1.0
-
+                            "confianca": 1.0,
                         }
 
-                        logger.debug(f"[CONSOLIDAR] âœ“ Adicionado (fallback): {campo} = {valor}")
-
-
+                        logger.debug(
+                            f"[CONSOLIDAR] âœ“ Adicionado (fallback): {campo} = {valor}"
+                        )
 
                 # ðŸ†• PROCESSAR DATA DE NASCIMENTO / IDADE FORMATADA
 
@@ -12244,391 +11905,384 @@ def consolidar_resultados():
 
                 # calcular a data de nascimento real
 
-                if 'DtaNascimento' in resultado_consolidado["requisicoes"][0]["paciente"]:
+                if (
+                    "DtaNascimento"
+                    in resultado_consolidado["requisicoes"][0]["paciente"]
+                ):
 
-                    dta_nasc_obj = resultado_consolidado["requisicoes"][0]["paciente"]['DtaNascimento']
+                    dta_nasc_obj = resultado_consolidado["requisicoes"][0]["paciente"][
+                        "DtaNascimento"
+                    ]
 
                     if isinstance(dta_nasc_obj, dict):
 
-                        dta_nasc_valor = dta_nasc_obj.get('valor')
-
-
+                        dta_nasc_valor = dta_nasc_obj.get("valor")
 
                         # Verificar se é idade formatada (contém "anos")
 
-                        if dta_nasc_valor and isinstance(dta_nasc_valor, str) and 'anos' in dta_nasc_valor.lower():
+                        if (
+                            dta_nasc_valor
+                            and isinstance(dta_nasc_valor, str)
+                            and "anos" in dta_nasc_valor.lower()
+                        ):
 
-                            logger.info(f"[CONSOLIDAR] ðŸŽ‚ Detectada idade formatada: {dta_nasc_valor}")
-
-
+                            logger.info(
+                                f"[CONSOLIDAR] ðŸŽ‚ Detectada idade formatada: {dta_nasc_valor}"
+                            )
 
                             # Calcular data de nascimento a partir da idade
 
-                            data_calculada = calcular_data_nascimento_por_idade(dta_nasc_valor)
-
-
+                            data_calculada = calcular_data_nascimento_por_idade(
+                                dta_nasc_valor
+                            )
 
                             if data_calculada:
 
                                 # Atualizar com a data calculada
 
-                                resultado_consolidado["requisicoes"][0]["paciente"]['DtaNascimento'] = {
-
+                                resultado_consolidado["requisicoes"][0]["paciente"][
+                                    "DtaNascimento"
+                                ] = {
                                     "valor": data_calculada,
-
                                     "fonte": f"Calculado de idade: {dta_nasc_valor}",
-
-                                    "confianca": 0.85  # Confiança um pouco menor pois é calculado
-
+                                    "confianca": 0.85,  # Confiança um pouco menor pois é calculado
                                 }
 
-                                logger.info(f"[CONSOLIDAR] âœ… Data de nascimento calculada: {data_calculada}")
+                                logger.info(
+                                    f"[CONSOLIDAR] âœ… Data de nascimento calculada: {data_calculada}"
+                                )
 
                             else:
 
-                                logger.warning(f"[CONSOLIDAR] âš ️ Não foi possível calcular data de '{dta_nasc_valor}'")
-
-
+                                logger.warning(
+                                    f"[CONSOLIDAR] âš ️ Não foi possível calcular data de '{dta_nasc_valor}'"
+                                )
 
                 # Endereço do paciente - ðŸ†• COM FALLBACK INTELIGENTE
 
-                if 'endereco' in pac_api and pac_api['endereco']:
+                if "endereco" in pac_api and pac_api["endereco"]:
 
-                    end = pac_api['endereco']
+                    end = pac_api["endereco"]
 
-                    if 'endereco' not in resultado_consolidado["requisicoes"][0]["paciente"]:
+                    if (
+                        "endereco"
+                        not in resultado_consolidado["requisicoes"][0]["paciente"]
+                    ):
 
-                        resultado_consolidado["requisicoes"][0]["paciente"]['endereco'] = {}
-
-
+                        resultado_consolidado["requisicoes"][0]["paciente"][
+                            "endereco"
+                        ] = {}
 
                     campos_endereco = {
-
-                        'cep': end.get('cep'),
-
-                        'logradouro': end.get('logradouro'),
-
-                        'numEndereco': end.get('numEndereco'),
-
-                        'complemento': end.get('complemento'),
-
-                        'bairro': end.get('bairro'),
-
-                        'cidade': end.get('cidade'),
-
-                        'uf': end.get('uf')
-
+                        "cep": end.get("cep"),
+                        "logradouro": end.get("logradouro"),
+                        "numEndereco": end.get("numEndereco"),
+                        "complemento": end.get("complemento"),
+                        "bairro": end.get("bairro"),
+                        "cidade": end.get("cidade"),
+                        "uf": end.get("uf"),
                     }
-
-
 
                     for campo, valor in campos_endereco.items():
 
                         # ðŸ†• FALLBACK: Usar API se campo não existe OU está vazio
 
-                        end_ocr = resultado_consolidado["requisicoes"][0]["paciente"]['endereco'].get(campo)
+                        end_ocr = resultado_consolidado["requisicoes"][0]["paciente"][
+                            "endereco"
+                        ].get(campo)
 
-                        campo_vazio_no_ocr = (end_ocr is None or
+                        campo_vazio_no_ocr = (
+                            end_ocr is None
+                            or end_ocr.get("valor") is None
+                            or end_ocr.get("valor") == ""
+                            or end_ocr.get("valor") == "null"
+                        )
 
-                                            end_ocr.get("valor") is None or
+                        if (
+                            campo
+                            not in resultado_consolidado["requisicoes"][0]["paciente"][
+                                "endereco"
+                            ]
+                            or campo_vazio_no_ocr
+                        ) and valor:
 
-                                            end_ocr.get("valor") == '' or
-
-                                            end_ocr.get("valor") == 'null')
-
-
-
-                        if (campo not in resultado_consolidado["requisicoes"][0]["paciente"]['endereco'] or campo_vazio_no_ocr) and valor:
-
-                            resultado_consolidado["requisicoes"][0]["paciente"]['endereco'][campo] = {
-
+                            resultado_consolidado["requisicoes"][0]["paciente"][
+                                "endereco"
+                            ][campo] = {
                                 "valor": valor,
-
                                 "fonte": "API/DB",
-
-                                "confianca": 1.0
-
+                                "confianca": 1.0,
                             }
 
             else:
 
                 logger.debug("[CONSOLIDAR] Nenhum dado de paciente na API")
 
-
-
             # Dados do Médico da API - ðŸ†• COM FALLBACK INTELIGENTE
 
-            if 'medico' in dados_api and isinstance(dados_api['medico'], dict):
+            if "medico" in dados_api and isinstance(dados_api["medico"], dict):
 
-                med_api = dados_api['medico']
+                med_api = dados_api["medico"]
 
-                logger.debug(f"[CONSOLIDAR] Processando dados do médico da API: {med_api}")
-
-
+                logger.debug(
+                    f"[CONSOLIDAR] Processando dados do médico da API: {med_api}"
+                )
 
                 campos_medico = {
-
-                    'NomMedico': med_api.get('nome'),
-
-                    'numConselho': med_api.get('crm'),
-
-                    'ufConselho': med_api.get('uf'),
-
-                    'tipoConselho': 'CRM'
-
+                    "NomMedico": med_api.get("nome"),
+                    "numConselho": med_api.get("crm"),
+                    "ufConselho": med_api.get("uf"),
+                    "tipoConselho": "CRM",
                 }
-
-
 
                 for campo, valor in campos_medico.items():
 
                     # ðŸ†• FALLBACK: Usar API se campo não existe OU está vazio
 
-                    med_ocr = resultado_consolidado["requisicoes"][0]["medico"].get(campo)
+                    med_ocr = resultado_consolidado["requisicoes"][0]["medico"].get(
+                        campo
+                    )
 
-                    campo_vazio_no_ocr = (med_ocr is None or
+                    campo_vazio_no_ocr = (
+                        med_ocr is None
+                        or med_ocr.get("valor") is None
+                        or med_ocr.get("valor") == ""
+                        or med_ocr.get("valor") == "null"
+                    )
 
-                                         med_ocr.get("valor") is None or
-
-                                         med_ocr.get("valor") == '' or
-
-                                         med_ocr.get("valor") == 'null')
-
-
-
-                    if (campo not in resultado_consolidado["requisicoes"][0]["medico"] or campo_vazio_no_ocr) and valor:
+                    if (
+                        campo not in resultado_consolidado["requisicoes"][0]["medico"]
+                        or campo_vazio_no_ocr
+                    ) and valor:
 
                         resultado_consolidado["requisicoes"][0]["medico"][campo] = {
-
                             "valor": valor,
-
                             "fonte": "API/DB",
-
-                            "confianca": 1.0
-
+                            "confianca": 1.0,
                         }
 
-                        logger.debug(f"[CONSOLIDAR] âœ“ Adicionado (fallback): {campo} = {valor}")
+                        logger.debug(
+                            f"[CONSOLIDAR] âœ“ Adicionado (fallback): {campo} = {valor}"
+                        )
 
             else:
 
                 logger.debug("[CONSOLIDAR] Nenhum dado de médico na API")
 
-
-
             # Dados da Requisição da API - ðŸ†• COM FALLBACK INTELIGENTE
 
-            if 'requisicao' in dados_api and isinstance(dados_api['requisicao'], dict):
+            if "requisicao" in dados_api and isinstance(dados_api["requisicao"], dict):
 
-                req_api = dados_api['requisicao']
+                req_api = dados_api["requisicao"]
 
-                logger.debug(f"[CONSOLIDAR] Processando dados da requisição da API: {req_api}")
-
-
+                logger.debug(
+                    f"[CONSOLIDAR] Processando dados da requisição da API: {req_api}"
+                )
 
                 campos_requisicao = {
-
-                    'dtaColeta': req_api.get('dtaColeta'),
-
-                    'dadosClinicos': req_api.get('dadosClinicos'),
-
-                    'numGuia': req_api.get('numGuia')
-
+                    "dtaColeta": req_api.get("dtaColeta"),
+                    "dadosClinicos": req_api.get("dadosClinicos"),
+                    "numGuia": req_api.get("numGuia"),
                 }
-
-
 
                 for campo, valor in campos_requisicao.items():
 
                     # ðŸ†• FALLBACK: Usar API se campo não existe OU está vazio
 
-                    req_ocr = resultado_consolidado["requisicoes"][0]["requisicao"].get(campo)
+                    req_ocr = resultado_consolidado["requisicoes"][0]["requisicao"].get(
+                        campo
+                    )
 
-                    campo_vazio_no_ocr = (req_ocr is None or
+                    campo_vazio_no_ocr = (
+                        req_ocr is None
+                        or req_ocr.get("valor") is None
+                        or req_ocr.get("valor") == ""
+                        or req_ocr.get("valor") == "null"
+                    )
 
-                                         req_ocr.get("valor") is None or
-
-                                         req_ocr.get("valor") == '' or
-
-                                         req_ocr.get("valor") == 'null')
-
-
-
-                    if (campo not in resultado_consolidado["requisicoes"][0]["requisicao"] or campo_vazio_no_ocr) and valor:
+                    if (
+                        campo
+                        not in resultado_consolidado["requisicoes"][0]["requisicao"]
+                        or campo_vazio_no_ocr
+                    ) and valor:
 
                         resultado_consolidado["requisicoes"][0]["requisicao"][campo] = {
-
                             "valor": valor,
-
                             "fonte": "API/DB",
-
-                            "confianca": 1.0
-
+                            "confianca": 1.0,
                         }
 
-                        logger.debug(f"[CONSOLIDAR] âœ“ Adicionado (fallback): {campo} = {valor}")
+                        logger.debug(
+                            f"[CONSOLIDAR] âœ“ Adicionado (fallback): {campo} = {valor}"
+                        )
 
             else:
 
                 logger.debug("[CONSOLIDAR] Nenhum dado de requisição na API")
 
-
-
             # ðŸ†• Dados do Convênio da API
 
-            if 'convenio' in dados_api and isinstance(dados_api['convenio'], dict):
+            if "convenio" in dados_api and isinstance(dados_api["convenio"], dict):
 
-                conv_api = dados_api['convenio']
+                conv_api = dados_api["convenio"]
 
-                logger.debug(f"[CONSOLIDAR] Processando dados do convênio da API: {conv_api}")
+                logger.debug(
+                    f"[CONSOLIDAR] Processando dados do convênio da API: {conv_api}"
+                )
 
-
-
-                nome_convenio = conv_api.get('nome')
+                nome_convenio = conv_api.get("nome")
 
                 # Só adicionar se tiver valor válido (não fallback com "Convênio ID")
 
-                if nome_convenio and not nome_convenio.startswith('Convênio ID'):
+                if nome_convenio and not nome_convenio.startswith("Convênio ID"):
 
-                    resultado_consolidado["requisicoes"][0]["convenio"]['nome'] = {
-
+                    resultado_consolidado["requisicoes"][0]["convenio"]["nome"] = {
                         "valor": nome_convenio,
-
                         "fonte": "API/apLIS/CSV",
-
-                        "confianca": 1.0
-
+                        "confianca": 1.0,
                     }
 
-                    logger.debug(f"[CONSOLIDAR] âœ“ Adicionado convênio: {nome_convenio}")
+                    logger.debug(
+                        f"[CONSOLIDAR] âœ“ Adicionado convênio: {nome_convenio}"
+                    )
 
                 else:
 
-                    logger.debug(f"[CONSOLIDAR] Convênio sem dados válidos: {nome_convenio}")
+                    logger.debug(
+                        f"[CONSOLIDAR] Convênio sem dados válidos: {nome_convenio}"
+                    )
 
             else:
 
                 logger.debug("[CONSOLIDAR] Nenhum dado de convênio na API")
 
-
-
             # ðŸ†• Dados da Fonte Pagadora da API
 
-            if 'fontePagadora' in dados_api and isinstance(dados_api['fontePagadora'], dict):
+            if "fontePagadora" in dados_api and isinstance(
+                dados_api["fontePagadora"], dict
+            ):
 
-                fonte_api = dados_api['fontePagadora']
+                fonte_api = dados_api["fontePagadora"]
 
-                logger.debug(f"[CONSOLIDAR] Processando dados da fonte pagadora da API: {fonte_api}")
+                logger.debug(
+                    f"[CONSOLIDAR] Processando dados da fonte pagadora da API: {fonte_api}"
+                )
 
-
-
-                nome_fonte = fonte_api.get('nome')
+                nome_fonte = fonte_api.get("nome")
 
                 # Só adicionar se tiver valor válido (não fallback com "Local ID" ou "Fonte Pagadora ID")
 
-                if nome_fonte and not nome_fonte.startswith('Local ID') and not nome_fonte.startswith('Fonte Pagadora ID'):
+                if (
+                    nome_fonte
+                    and not nome_fonte.startswith("Local ID")
+                    and not nome_fonte.startswith("Fonte Pagadora ID")
+                ):
 
                     resultado_consolidado["requisicoes"][0]["fontePagadora"] = {
-
-                        'nome': {
-
+                        "nome": {
                             "valor": nome_fonte,
-
                             "fonte": "API/apLIS/CSV",
-
-                            "confianca": 1.0
-
+                            "confianca": 1.0,
                         }
-
                     }
 
-                    logger.debug(f"[CONSOLIDAR] âœ“ Adicionado fonte pagadora: {nome_fonte}")
+                    logger.debug(
+                        f"[CONSOLIDAR] âœ“ Adicionado fonte pagadora: {nome_fonte}"
+                    )
 
                 else:
 
-                    logger.debug(f"[CONSOLIDAR] Fonte pagadora sem dados válidos: {nome_fonte}")
+                    logger.debug(
+                        f"[CONSOLIDAR] Fonte pagadora sem dados válidos: {nome_fonte}"
+                    )
 
             else:
 
                 logger.debug("[CONSOLIDAR] Nenhum dado de fonte pagadora na API")
 
-
-
             # ðŸ†• Dados do Local de Origem da API
 
-            if 'localOrigem' in dados_api and isinstance(dados_api['localOrigem'], dict):
+            if "localOrigem" in dados_api and isinstance(
+                dados_api["localOrigem"], dict
+            ):
 
-                local_api = dados_api['localOrigem']
+                local_api = dados_api["localOrigem"]
 
-                logger.debug(f"[CONSOLIDAR] Processando dados do local de origem da API: {local_api}")
+                logger.debug(
+                    f"[CONSOLIDAR] Processando dados do local de origem da API: {local_api}"
+                )
 
-
-
-                nome_local = local_api.get('nome')
+                nome_local = local_api.get("nome")
 
                 # Só adicionar se tiver valor válido (não fallback com "Local ID")
 
-                if nome_local and not nome_local.startswith('Local ID') and not nome_local.startswith('Local não'):
+                if (
+                    nome_local
+                    and not nome_local.startswith("Local ID")
+                    and not nome_local.startswith("Local não")
+                ):
 
                     resultado_consolidado["requisicoes"][0]["localOrigem"] = {
-
-                        'nome': {
-
+                        "nome": {
                             "valor": nome_local,
-
                             "fonte": "API/apLIS/CSV",
-
-                            "confianca": 1.0
-
+                            "confianca": 1.0,
                         }
-
                     }
 
-                    logger.debug(f"[CONSOLIDAR] âœ“ Adicionado local de origem: {nome_local}")
-
-
+                    logger.debug(
+                        f"[CONSOLIDAR] âœ“ Adicionado local de origem: {nome_local}"
+                    )
 
                     # Também adicionar em comentarios_gerais
 
-                    resultado_consolidado["requisicoes"][0]["comentarios_gerais"]["NomeLocalOrigem"] = nome_local
+                    resultado_consolidado["requisicoes"][0]["comentarios_gerais"][
+                        "NomeLocalOrigem"
+                    ] = nome_local
 
                 else:
 
-                    logger.debug(f"[CONSOLIDAR] Local de origem sem dados válidos: {nome_local}")
+                    logger.debug(
+                        f"[CONSOLIDAR] Local de origem sem dados válidos: {nome_local}"
+                    )
 
             else:
 
                 logger.debug("[CONSOLIDAR] Nenhum dado de local de origem na API")
 
-
-
             # ðŸ†• ADICIONAR STATUS APLIS (StatusExame)
 
             # Esse campo indica o status da requisição no apLIS: 0=Em andamento, 1=Concluído, 2=Cancelado
 
-            if 'requisicao' in dados_api and isinstance(dados_api['requisicao'], dict):
+            if "requisicao" in dados_api and isinstance(dados_api["requisicao"], dict):
 
-                status_exame = dados_api['requisicao'].get('StatusExame')
+                status_exame = dados_api["requisicao"].get("StatusExame")
 
                 if status_exame is not None:
 
-                    resultado_consolidado["requisicoes"][0]["StatusExame"] = status_exame
+                    resultado_consolidado["requisicoes"][0][
+                        "StatusExame"
+                    ] = status_exame
 
-                    logger.debug(f"[CONSOLIDAR] âœ“ Adicionado StatusExame: {status_exame}")
+                    logger.debug(
+                        f"[CONSOLIDAR] âœ“ Adicionado StatusExame: {status_exame}"
+                    )
 
             # Fallback: tentar diretamente do nível superior
 
-            elif 'StatusExame' in dados_api:
+            elif "StatusExame" in dados_api:
 
-                status_exame = dados_api.get('StatusExame')
+                status_exame = dados_api.get("StatusExame")
 
                 if status_exame is not None:
 
-                    resultado_consolidado["requisicoes"][0]["StatusExame"] = status_exame
+                    resultado_consolidado["requisicoes"][0][
+                        "StatusExame"
+                    ] = status_exame
 
-                    logger.debug(f"[CONSOLIDAR] âœ“ Adicionado StatusExame (nivel superior): {status_exame}")
-
-
+                    logger.debug(
+                        f"[CONSOLIDAR] âœ“ Adicionado StatusExame (nivel superior): {status_exame}"
+                    )
 
         # ðŸ†• SINCRONIZAÃ‡ÃƒO AUTOMÁTICA 0085 â†” 0200
 
@@ -12638,21 +12292,15 @@ def consolidar_resultados():
 
         print(f"[CONSOLIDAR] Códigos encontrados: {codigos_encontrados}")
 
-
-
         # Identificar pares 0085/0200
 
-        codigos_0085 = [c for c in codigos_encontrados if c.startswith('0085')]
+        codigos_0085 = [c for c in codigos_encontrados if c.startswith("0085")]
 
-        codigos_0200 = [c for c in codigos_encontrados if c.startswith('0200')]
-
-
+        codigos_0200 = [c for c in codigos_encontrados if c.startswith("0200")]
 
         print(f"[CONSOLIDAR] Requisições 0085: {codigos_0085}")
 
         print(f"[CONSOLIDAR] Requisições 0200: {codigos_0200}")
-
-
 
         # Se encontrou AMBOS os tipos (0085 E 0200), criar requisições duplicadas
 
@@ -12660,27 +12308,21 @@ def consolidar_resultados():
 
             print(f"[CONSOLIDAR] âœ… Detectado par 0085/0200 na mesma imagem!")
 
-            print(f"[CONSOLIDAR] �� Criando requisições sincronizadas com dados idênticos...")
-
-
+            print(
+                f"[CONSOLIDAR] �� Criando requisições sincronizadas com dados idênticos..."
+            )
 
             # Pegar a requisição consolidada como base
 
             requisicao_base = resultado_consolidado["requisicoes"][0].copy()
 
-
-
             # Criar lista de requisições (uma para cada código)
 
             requisicoes_sincronizadas = []
 
-
-
             # Combinar todos os códigos encontrados
 
             todos_codigos = sorted(list(codigos_encontrados))
-
-
 
             for idx, codigo in enumerate(todos_codigos):
 
@@ -12690,55 +12332,47 @@ def consolidar_resultados():
 
                 req_sincronizada = copy.deepcopy(requisicao_base)
 
-
-
                 # Atualizar o código da requisição
 
                 req_sincronizada["comentarios_gerais"]["requisicao_entrada"] = codigo
 
-
-
                 # Adicionar metadata de sincronização
 
                 req_sincronizada["comentarios_gerais"]["sincronizacao_0085_0200"] = {
-
                     "sincronizado": True,
-
-                    "tipo_requisicao": "0085" if codigo.startswith('0085') else "0200",
-
+                    "tipo_requisicao": "0085" if codigo.startswith("0085") else "0200",
                     "par_encontrado": todos_codigos,
-
                     "dados_identicos": True,
-
-                    "fonte_sincronizacao": "OCR - Mesma imagem"
-
+                    "fonte_sincronizacao": "OCR - Mesma imagem",
                 }
-
-
 
                 requisicoes_sincronizadas.append(req_sincronizada)
 
-                print(f"[CONSOLIDAR]   âœ“ Requisição {idx+1}/{len(todos_codigos)}: {codigo}")
-
-
+                print(
+                    f"[CONSOLIDAR]   âœ“ Requisição {idx+1}/{len(todos_codigos)}: {codigo}"
+                )
 
             # Substituir array de requisições
 
             resultado_consolidado["requisicoes"] = requisicoes_sincronizadas
 
-            resultado_consolidado["metadata"]["total_requisicoes"] = len(requisicoes_sincronizadas)
+            resultado_consolidado["metadata"]["total_requisicoes"] = len(
+                requisicoes_sincronizadas
+            )
 
+            print(
+                f"[CONSOLIDAR] âœ… Criadas {len(requisicoes_sincronizadas)} requisições sincronizadas"
+            )
 
-
-            print(f"[CONSOLIDAR] âœ… Criadas {len(requisicoes_sincronizadas)} requisições sincronizadas")
-
-            print(f"[CONSOLIDAR] ðŸŽ¯ Dados de paciente, médico e convênio são IDÃŠNTICOS em todas")
+            print(
+                f"[CONSOLIDAR] ðŸŽ¯ Dados de paciente, médico e convênio são IDÃŠNTICOS em todas"
+            )
 
         else:
 
-            print(f"[CONSOLIDAR] â„¹️ Apenas um tipo de requisição detectado (sem sincronização)")
-
-
+            print(
+                f"[CONSOLIDAR] â„¹️ Apenas um tipo de requisição detectado (sem sincronização)"
+            )
 
         # LOG FINAL - Mostrar resumo do que foi consolidado
 
@@ -12748,11 +12382,11 @@ def consolidar_resultados():
 
         print(f"[CONSOLIDAR] Dados da API incluídos: {bool(dados_api)}")
 
-        print(f"[CONSOLIDAR] Total de requisições geradas: {len(resultado_consolidado['requisicoes'])}")
+        print(
+            f"[CONSOLIDAR] Total de requisições geradas: {len(resultado_consolidado['requisicoes'])}"
+        )
 
-
-
-        for idx, req in enumerate(resultado_consolidado['requisicoes']):
+        for idx, req in enumerate(resultado_consolidado["requisicoes"]):
 
             cod_req = req["comentarios_gerais"].get("requisicao_entrada", "N/A")
 
@@ -12766,11 +12400,7 @@ def consolidar_resultados():
 
             print(f"[CONSOLIDAR]   Campos na requisicao: {len(req['requisicao'])}")
 
-
-
         print(f"[CONSOLIDAR] =====================================\n")
-
-
 
         # ðŸ†• SALVAR AUTOMATICAMENTE NO SUPABASE - TODAS AS REQUISIÃ‡Ã•ES SINCRONIZADAS
 
@@ -12778,57 +12408,53 @@ def consolidar_resultados():
 
         print(f"[CONSOLIDAR]   - SUPABASE_ENABLED: {SUPABASE_ENABLED}")
 
-        print(f"[CONSOLIDAR]   - Total de requisições para salvar: {len(resultado_consolidado['requisicoes'])}")
+        print(
+            f"[CONSOLIDAR]   - Total de requisições para salvar: {len(resultado_consolidado['requisicoes'])}"
+        )
 
         print(f"[CONSOLIDAR]   - supabase_manager: {supabase_manager is not None}")
 
-
-
-        if SUPABASE_ENABLED and len(resultado_consolidado['requisicoes']) > 0:
+        if SUPABASE_ENABLED and len(resultado_consolidado["requisicoes"]) > 0:
 
             try:
 
                 # Salvar TODAS as requisições (0085 e 0200 se houver sincronização)
 
-                for idx, req_dados in enumerate(resultado_consolidado['requisicoes']):
+                for idx, req_dados in enumerate(resultado_consolidado["requisicoes"]):
 
                     cod_req = req_dados["comentarios_gerais"].get("requisicao_entrada")
 
-
-
                     if not cod_req:
 
-                        print(f"[CONSOLIDAR] âš ️ Requisição {idx+1} sem código, pulando...")
+                        print(
+                            f"[CONSOLIDAR] âš ️ Requisição {idx+1} sem código, pulando..."
+                        )
 
                         continue
 
-
-
-                    print(f"[CONSOLIDAR] ðŸ’¾ Salvando requisição {idx+1}/{len(resultado_consolidado['requisicoes'])}: {cod_req}")
-
-
+                    print(
+                        f"[CONSOLIDAR] ðŸ’¾ Salvando requisição {idx+1}/{len(resultado_consolidado['requisicoes'])}: {cod_req}"
+                    )
 
                     # Dados do paciente (simplificados para campos indexados)
 
                     paciente_data = {}
 
-                    if 'paciente' in req_dados:
+                    if "paciente" in req_dados:
 
-                        pac = req_dados['paciente']
+                        pac = req_dados["paciente"]
 
                         # Extrair valores dos campos {valor, fonte, confianca}
 
                         for key, val in pac.items():
 
-                            if isinstance(val, dict) and 'valor' in val:
+                            if isinstance(val, dict) and "valor" in val:
 
-                                paciente_data[key] = val['valor']
+                                paciente_data[key] = val["valor"]
 
                             else:
 
                                 paciente_data[key] = val
-
-
 
                     # Extrair lista de exames
 
@@ -12836,83 +12462,72 @@ def consolidar_resultados():
 
                     exames_ids = []
 
-                    if 'requisicao' in req_dados and 'itens_exame' in req_dados['requisicao']:
+                    if (
+                        "requisicao" in req_dados
+                        and "itens_exame" in req_dados["requisicao"]
+                    ):
 
-                        for item in req_dados['requisicao']['itens_exame']:
+                        for item in req_dados["requisicao"]["itens_exame"]:
 
                             if isinstance(item, dict):
 
-                                desc = item.get('descricao_ocr') or item.get('descricao_original') or str(item)
+                                desc = (
+                                    item.get("descricao_ocr")
+                                    or item.get("descricao_original")
+                                    or str(item)
+                                )
 
                                 exames_list.append(desc)
 
-                                if 'idExame' in item:
+                                if "idExame" in item:
 
-                                    exames_ids.append(item['idExame'])
+                                    exames_ids.append(item["idExame"])
 
                             else:
 
                                 exames_list.append(str(item))
 
-
-
                     # Salvar no Supabase
 
                     resultado_save = supabase_manager.salvar_requisicao(
-
                         cod_requisicao=cod_req,
-
                         dados_paciente=paciente_data,
-
                         dados_ocr={"resultados": resultados_ocr},  # Salvar OCR bruto
-
                         dados_consolidados=req_dados,  # Salvar dados específicos desta requisição
-
                         exames=exames_list,
-
                         exames_ids=exames_ids,
-
-                        processado_por='sistema_ocr'
-
+                        processado_por="sistema_ocr",
                     )
 
+                    if resultado_save.get("sucesso") == 1:
 
-
-                    if resultado_save.get('sucesso') == 1:
-
-                        print(f"[CONSOLIDAR] âœ… Requisição {cod_req} salva no Supabase! (Ação: {resultado_save.get('acao')})")
+                        print(
+                            f"[CONSOLIDAR] âœ… Requisição {cod_req} salva no Supabase! (Ação: {resultado_save.get('acao')})"
+                        )
 
                     else:
 
-                        print(f"[CONSOLIDAR] âš ️ Erro ao salvar requisição {cod_req}: {resultado_save.get('erro')}")
+                        print(
+                            f"[CONSOLIDAR] âš ️ Erro ao salvar requisição {cod_req}: {resultado_save.get('erro')}"
+                        )
 
-
-
-                print(f"[CONSOLIDAR] âœ… Finalizado salvamento de {len(resultado_consolidado['requisicoes'])} requisições")
-
-
+                print(
+                    f"[CONSOLIDAR] âœ… Finalizado salvamento de {len(resultado_consolidado['requisicoes'])} requisições"
+                )
 
             except Exception as e:
 
                 # Não quebrar o fluxo se der erro no Supabase
 
-                print(f"[CONSOLIDAR] âš ️ Erro ao salvar no Supabase (continuando): {str(e)}")
+                print(
+                    f"[CONSOLIDAR] âš ️ Erro ao salvar no Supabase (continuando): {str(e)}"
+                )
 
                 import traceback
 
                 print(traceback.format_exc())
 
-
-
-        return jsonify({
-
-            "sucesso": 1,
-
-            "resultado": resultado_consolidado
-
-        }), 200
-
-
+        return jsonify({"sucesso": 1, "resultado": resultado_consolidado}), 200
 
     except Exception as e:
 
@@ -12922,22 +12537,14 @@ def consolidar_resultados():
 
         traceback.print_exc()
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": f"Erro ao consolidar resultados: {str(e)}"
-
-        }), 500
+        return (
+            jsonify({"sucesso": 0, "erro": f"Erro ao consolidar resultados: {str(e)}"}),
+            500,
+        )
 
 
-
-
-
-@app.route('/api/exames/buscar-por-nome', methods=['POST'])
-
+@app.route("/api/exames/buscar-por-nome", methods=["POST"])
 def buscar_exames_por_nome():
-
     """
 
     Busca IDs de exames no banco de dados a partir dos nomes extraídos pelo OCR
@@ -12948,29 +12555,20 @@ def buscar_exames_por_nome():
 
         dados = request.get_json()
 
-        nomes_exames = dados.get('nomes_exames', [])
-
-
+        nomes_exames = dados.get("nomes_exames", [])
 
         if not nomes_exames or not isinstance(nomes_exames, list):
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": "nomes_exames deve ser um array de strings"
-
-            }), 400
-
-
+            return (
+                jsonify(
+                    {"sucesso": 0, "erro": "nomes_exames deve ser um array de strings"}
+                ),
+                400,
+            )
 
         print(f"[BUSCAR EXAMES] Buscando IDs para {len(nomes_exames)} exames...")
 
-
-
         resultados = []
-
-
 
         for nome_exame in nomes_exames:
 
@@ -12978,107 +12576,88 @@ def buscar_exames_por_nome():
 
             print(f"[BUSCAR EXAMES] Procurando: {nome_limpo}")
 
-
-
             # Identificar tipo de exame usando a função global (baseado em categorias)
 
-            tipo_identificado, cod_automatico = identificar_tipo_exame_backend(nome_limpo)
+            tipo_identificado, cod_automatico = identificar_tipo_exame_backend(
+                nome_limpo
+            )
 
-            print(f"[BUSCAR EXAMES] Tipo identificado: {tipo_identificado} (CodExame: {cod_automatico})")
-
-
+            print(
+                f"[BUSCAR EXAMES] Tipo identificado: {tipo_identificado} (CodExame: {cod_automatico})"
+            )
 
             # Usar mapeamento automático por categoria
 
             if cod_automatico:
 
-                resultados.append({
+                resultados.append(
+                    {
+                        "nome_ocr": nome_exame,
+                        "idExame": cod_automatico,
+                        "NomExame": tipo_identificado,
+                        "categoria": tipo_identificado,
+                        "tipo_identificado": tipo_identificado,
+                        "encontrado": True,
+                        "mapeamento_automatico": True,
+                        "alternativas": [],
+                    }
+                )
 
-                    "nome_ocr": nome_exame,
-
-                    "idExame": cod_automatico,
-
-                    "NomExame": tipo_identificado,
-
-                    "categoria": tipo_identificado,
-
-                    "tipo_identificado": tipo_identificado,
-
-                    "encontrado": True,
-
-                    "mapeamento_automatico": True,
-
-                    "alternativas": []
-
-                })
-
-                print(f"[BUSCAR EXAMES]  Mapeado por categoria: {nome_exame} â†’ ID: {cod_automatico} ({tipo_identificado})")
+                print(
+                    f"[BUSCAR EXAMES]  Mapeado por categoria: {nome_exame} â†’ ID: {cod_automatico} ({tipo_identificado})"
+                )
 
             else:
 
-                resultados.append({
+                resultados.append(
+                    {
+                        "nome_ocr": nome_exame,
+                        "idExame": None,
+                        "tipo_identificado": tipo_identificado,
+                        "encontrado": False,
+                        "mensagem": f"Exame '{nome_exame}' não identificado por categoria",
+                    }
+                )
 
-                    "nome_ocr": nome_exame,
-
-                    "idExame": None,
-
-                    "tipo_identificado": tipo_identificado,
-
-                    "encontrado": False,
-
-                    "mensagem": f"Exame '{nome_exame}' não identificado por categoria"
-
-                })
-
-                print(f"[BUSCAR EXAMES]  Não identificado: {nome_exame} (categoria: {tipo_identificado})")
-
-
+                print(
+                    f"[BUSCAR EXAMES]  Não identificado: {nome_exame} (categoria: {tipo_identificado})"
+                )
 
         # Contar quantos foram encontrados
 
-        encontrados = sum(1 for r in resultados if r['encontrado'])
-
-
+        encontrados = sum(1 for r in resultados if r["encontrado"])
 
         # Gerar string de IDs para o campo EXAMES CONVÃŠNIO (separados por vírgula)
 
-        ids_encontrados = [str(r['idExame']) for r in resultados if r['encontrado'] and r['idExame']]
+        ids_encontrados = [
+            str(r["idExame"]) for r in resultados if r["encontrado"] and r["idExame"]
+        ]
 
         ids_string = ", ".join(ids_encontrados)
 
-
-
         # Gerar string de nomes para registro/visualização
 
-        nomes_encontrados = [r['nome_ocr'] for r in resultados if r['encontrado']]
+        nomes_encontrados = [r["nome_ocr"] for r in resultados if r["encontrado"]]
 
         nomes_string = ", ".join(nomes_encontrados)
-
-
 
         print(f"[BUSCAR EXAMES] IDs encontrados: {ids_string}")
 
         print(f"[BUSCAR EXAMES] Nomes dos exames: {nomes_string}")
 
-
-
-        return jsonify({
-
-            "sucesso": 1,
-
-            "total_solicitado": len(nomes_exames),
-
-            "total_encontrado": encontrados,
-
-            "ids_string": ids_string,  # String pronta para campo "EXAMES CONVÃŠNIO"
-
-            "nomes_string": nomes_string,  # String com nomes dos exames para registro
-
-            "resultados": resultados
-
-        }), 200
-
-
+        return (
+            jsonify(
+                {
+                    "sucesso": 1,
+                    "total_solicitado": len(nomes_exames),
+                    "total_encontrado": encontrados,
+                    "ids_string": ids_string,  # String pronta para campo "EXAMES CONVÃŠNIO"
+                    "nomes_string": nomes_string,  # String com nomes dos exames para registro
+                    "resultados": resultados,
+                }
+            ),
+            200,
+        )
 
     except Exception as e:
 
@@ -13088,20 +12667,10 @@ def buscar_exames_por_nome():
 
         traceback.print_exc()
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": f"Erro ao buscar exames: {str(e)}"
-
-        }), 500
-
-
-
+        return jsonify({"sucesso": 0, "erro": f"Erro ao buscar exames: {str(e)}"}), 500
 
 
 def limpar_imagens_temporarias():
-
     """
 
     Limpa todas as imagens temporárias ao iniciar o servidor
@@ -13125,9 +12694,6 @@ def limpar_imagens_temporarias():
         print(f"[AVISO] Erro ao limpar imagens temporarias: {e}")
 
 
-
-
-
 # ========================================
 
 # ENDPOINTS DE CONSULTA AOS CSVs
@@ -13135,26 +12701,20 @@ def limpar_imagens_temporarias():
 # ========================================
 
 
-
-@app.route('/api/medicos', methods=['GET'])
-
+@app.route("/api/medicos", methods=["GET"])
 def listar_medicos():
-
     """Lista todos os médicos do CSV"""
 
     try:
 
         medicos_lista = list(MEDICOS_CACHE.values())
 
-        return jsonify({
-
-            "sucesso": 1,
-
-            "total": len(medicos_lista),
-
-            "medicos": medicos_lista
-
-        }), 200
+        return (
+            jsonify(
+                {"sucesso": 1, "total": len(medicos_lista), "medicos": medicos_lista}
+            ),
+            200,
+        )
 
     except Exception as e:
 
@@ -13163,11 +12723,8 @@ def listar_medicos():
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
 
-
-@app.route('/api/medicos/<crm>/<uf>', methods=['GET'])
-
+@app.route("/api/medicos/<crm>/<uf>", methods=["GET"])
 def buscar_medico(crm, uf):
-
     """Busca médico por CRM e UF"""
 
     try:
@@ -13176,23 +12733,16 @@ def buscar_medico(crm, uf):
 
         if medico:
 
-            return jsonify({
-
-                "sucesso": 1,
-
-                "medico": medico
-
-            }), 200
+            return jsonify({"sucesso": 1, "medico": medico}), 200
 
         else:
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": f"Médico CRM {crm}/{uf} não encontrado"
-
-            }), 404
+            return (
+                jsonify(
+                    {"sucesso": 0, "erro": f"Médico CRM {crm}/{uf} não encontrado"}
+                ),
+                404,
+            )
 
     except Exception as e:
 
@@ -13201,26 +12751,24 @@ def buscar_medico(crm, uf):
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
 
-
-@app.route('/api/convenios', methods=['GET'])
-
+@app.route("/api/convenios", methods=["GET"])
 def listar_convenios():
-
     """Lista todos os convênios do CSV"""
 
     try:
 
         convenios_lista = list(CONVENIOS_CACHE.values())
 
-        return jsonify({
-
-            "sucesso": 1,
-
-            "total": len(convenios_lista),
-
-            "convenios": convenios_lista
-
-        }), 200
+        return (
+            jsonify(
+                {
+                    "sucesso": 1,
+                    "total": len(convenios_lista),
+                    "convenios": convenios_lista,
+                }
+            ),
+            200,
+        )
 
     except Exception as e:
 
@@ -13229,11 +12777,8 @@ def listar_convenios():
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
 
-
-@app.route('/api/convenios/<id_convenio>', methods=['GET'])
-
+@app.route("/api/convenios/<id_convenio>", methods=["GET"])
 def buscar_convenio_endpoint(id_convenio):
-
     """Busca convênio por ID"""
 
     try:
@@ -13242,23 +12787,16 @@ def buscar_convenio_endpoint(id_convenio):
 
         if convenio:
 
-            return jsonify({
-
-                "sucesso": 1,
-
-                "convenio": convenio
-
-            }), 200
+            return jsonify({"sucesso": 1, "convenio": convenio}), 200
 
         else:
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": f"Convênio ID {id_convenio} não encontrado"
-
-            }), 404
+            return (
+                jsonify(
+                    {"sucesso": 0, "erro": f"Convênio ID {id_convenio} não encontrado"}
+                ),
+                404,
+            )
 
     except Exception as e:
 
@@ -13267,11 +12805,8 @@ def buscar_convenio_endpoint(id_convenio):
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
 
-
-@app.route('/api/locais-origem', methods=['GET'])
-
+@app.route("/api/locais-origem", methods=["GET"])
 def listar_locais_origem():
-
     """
 
     Lista locais de origem: clinicas/hospitais que enviam exames.
@@ -13318,17 +12853,7 @@ def listar_locais_origem():
 
         connection.close()
 
-
-
-        return jsonify({
-
-            "sucesso": 1,
-
-            "total": len(locais),
-
-            "locais": locais
-
-        }), 200
+        return jsonify({"sucesso": 1, "total": len(locais), "locais": locais}), 200
 
     except Exception as e:
 
@@ -13337,11 +12862,8 @@ def listar_locais_origem():
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
 
-
-@app.route('/api/fontes-pagadoras', methods=['GET'])
-
+@app.route("/api/fontes-pagadoras", methods=["GET"])
 def listar_fontes_pagadoras():
-
     """
 
     Lista fontes pagadoras: entidades que PAGAM pelos exames.
@@ -13386,17 +12908,7 @@ def listar_fontes_pagadoras():
 
         connection.close()
 
-
-
-        return jsonify({
-
-            "sucesso": 1,
-
-            "total": len(fontes),
-
-            "fontes": fontes
-
-        }), 200
+        return jsonify({"sucesso": 1, "total": len(fontes), "fontes": fontes}), 200
 
     except Exception as e:
 
@@ -13405,26 +12917,24 @@ def listar_fontes_pagadoras():
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
 
-
-@app.route('/api/instituicoes', methods=['GET'])
-
+@app.route("/api/instituicoes", methods=["GET"])
 def listar_instituicoes():
-
     """Lista todas as instituições do CSV"""
 
     try:
 
         instituicoes_lista = list(INSTITUICOES_CACHE.values())
 
-        return jsonify({
-
-            "sucesso": 1,
-
-            "total": len(instituicoes_lista),
-
-            "instituicoes": instituicoes_lista
-
-        }), 200
+        return (
+            jsonify(
+                {
+                    "sucesso": 1,
+                    "total": len(instituicoes_lista),
+                    "instituicoes": instituicoes_lista,
+                }
+            ),
+            200,
+        )
 
     except Exception as e:
 
@@ -13433,11 +12943,8 @@ def listar_instituicoes():
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
 
-
-@app.route('/api/instituicoes/<id_instituicao>', methods=['GET'])
-
+@app.route("/api/instituicoes/<id_instituicao>", methods=["GET"])
 def buscar_instituicao_endpoint(id_instituicao):
-
     """Busca instituição por ID"""
 
     try:
@@ -13446,36 +12953,25 @@ def buscar_instituicao_endpoint(id_instituicao):
 
         if instituicao:
 
-            return jsonify({
-
-                "sucesso": 1,
-
-                "instituicao": instituicao
-
-            }), 200
+            return jsonify({"sucesso": 1, "instituicao": instituicao}), 200
 
         else:
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": f"Instituição ID {id_instituicao} não encontrada"
-
-            }), 404
+            return (
+                jsonify(
+                    {
+                        "sucesso": 0,
+                        "erro": f"Instituição ID {id_instituicao} não encontrada",
+                    }
+                ),
+                404,
+            )
 
     except Exception as e:
 
         logger.error(f"[API] Erro ao buscar instituição: {e}")
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
-
-
-
-
-
-
-
 
 
 # ============================================
@@ -13485,11 +12981,8 @@ def buscar_instituicao_endpoint(id_instituicao):
 # ============================================
 
 
-
-@app.route('/api/historico/salvar', methods=['POST'])
-
+@app.route("/api/historico/salvar", methods=["POST"])
 def salvar_requisicao_historico():
-
     """
 
     Salva uma requisição processada no histórico (Supabase)
@@ -13514,75 +13007,43 @@ def salvar_requisicao_historico():
 
     if not SUPABASE_ENABLED:
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": "Supabase não está configurado"
-
-        }), 503
-
-
+        return jsonify({"sucesso": 0, "erro": "Supabase não está configurado"}), 503
 
     try:
 
         dados = request.json
 
+        if not dados.get("cod_requisicao"):
 
+            return (
+                jsonify({"sucesso": 0, "erro": "Código da requisição é obrigatório"}),
+                400,
+            )
 
-        if not dados.get('cod_requisicao'):
+        if not dados.get("dados_paciente"):
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": "Código da requisição é obrigatório"
-
-            }), 400
-
-
-
-        if not dados.get('dados_paciente'):
-
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": "Dados do paciente são obrigatórios"
-
-            }), 400
-
-
+            return (
+                jsonify({"sucesso": 0, "erro": "Dados do paciente são obrigatórios"}),
+                400,
+            )
 
         resultado = supabase_manager.salvar_requisicao(
-
-            cod_requisicao=dados['cod_requisicao'],
-
-            dados_paciente=dados['dados_paciente'],
-
-            dados_ocr=dados.get('dados_ocr'),
-
-            dados_consolidados=dados.get('dados_consolidados'),
-
-            exames=dados.get('exames'),
-
-            exames_ids=dados.get('exames_ids'),
-
-            processado_por=dados.get('processado_por', 'sistema')
-
+            cod_requisicao=dados["cod_requisicao"],
+            dados_paciente=dados["dados_paciente"],
+            dados_ocr=dados.get("dados_ocr"),
+            dados_consolidados=dados.get("dados_consolidados"),
+            exames=dados.get("exames"),
+            exames_ids=dados.get("exames_ids"),
+            processado_por=dados.get("processado_por", "sistema"),
         )
 
-
-
-        if resultado['sucesso'] == 1:
+        if resultado["sucesso"] == 1:
 
             return jsonify(resultado), 200
 
         else:
 
             return jsonify(resultado), 500
-
-
 
     except Exception as e:
 
@@ -13592,41 +13053,22 @@ def salvar_requisicao_historico():
 
         logger.error(traceback.format_exc())
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": str(e)
-
-        }), 500
+        return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
 
-
-@app.route('/api/historico/<cod_requisicao>', methods=['GET'])
-
+@app.route("/api/historico/<cod_requisicao>", methods=["GET"])
 def buscar_requisicao_historico(cod_requisicao):
-
     """Busca uma requisição específica no histórico"""
 
     if not SUPABASE_ENABLED:
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": "Supabase não está configurado"
-
-        }), 503
-
-
+        return jsonify({"sucesso": 0, "erro": "Supabase não está configurado"}), 503
 
     try:
 
         resultado = supabase_manager.buscar_requisicao(cod_requisicao)
 
-
-
-        if resultado['sucesso'] == 1:
+        if resultado["sucesso"] == 1:
 
             return jsonify(resultado), 200
 
@@ -13634,99 +13076,55 @@ def buscar_requisicao_historico(cod_requisicao):
 
             return jsonify(resultado), 404
 
-
-
     except Exception as e:
 
         logger.error(f"[HISTORICO] Erro ao buscar: {e}")
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": str(e)
-
-        }), 500
+        return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
 
-
-@app.route('/api/historico/listar', methods=['GET'])
-
+@app.route("/api/historico/listar", methods=["GET"])
 def listar_requisicoes_historico():
-
     """Lista requisições recentes do histórico"""
 
     if not SUPABASE_ENABLED:
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": "Supabase não está configurado"
-
-        }), 503
-
-
+        return jsonify({"sucesso": 0, "erro": "Supabase não está configurado"}), 503
 
     try:
 
-        limite = request.args.get('limite', 50, type=int)
-
-
+        limite = request.args.get("limite", 50, type=int)
 
         resultado = supabase_manager.listar_requisicoes_recentes(limite)
 
-
-
-        if resultado['sucesso'] == 1:
+        if resultado["sucesso"] == 1:
 
             return jsonify(resultado), 200
 
         else:
 
             return jsonify(resultado), 500
-
-
 
     except Exception as e:
 
         logger.error(f"[HISTORICO] Erro ao listar: {e}")
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": str(e)
-
-        }), 500
+        return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
 
-
-@app.route('/api/historico/buscar-cpf/<cpf>', methods=['GET'])
-
+@app.route("/api/historico/buscar-cpf/<cpf>", methods=["GET"])
 def buscar_por_cpf_historico(cpf):
-
     """Busca requisições por CPF do paciente"""
 
     if not SUPABASE_ENABLED:
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": "Supabase não está configurado"
-
-        }), 503
-
-
+        return jsonify({"sucesso": 0, "erro": "Supabase não está configurado"}), 503
 
     try:
 
         resultado = supabase_manager.buscar_por_cpf(cpf)
 
-
-
-        if resultado['sucesso'] == 1:
+        if resultado["sucesso"] == 1:
 
             return jsonify(resultado), 200
 
@@ -13734,26 +13132,253 @@ def buscar_por_cpf_historico(cpf):
 
             return jsonify(resultado), 500
 
-
-
     except Exception as e:
 
         logger.error(f"[HISTORICO] Erro ao buscar por CPF: {e}")
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": str(e)
-
-        }), 500
+        return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
 
+@app.route("/api/historico/buscar-lote/<lote>", methods=["GET"])
+def buscar_por_lote_historico(lote):
+    """Busca requisições por lote no MySQL e tenta enriquecer com histórico do Supabase"""
 
-@app.route('/api/paciente/buscar-por-cpf', methods=['POST'])
+    try:
 
+        lote_limpo = "".join(filter(str.isdigit, str(lote or "").strip()))
+
+        if not lote_limpo:
+
+            return jsonify({"sucesso": 0, "erro": "Lote inválido"}), 400
+
+        limite = request.args.get("limite", 50, type=int)
+        ano = request.args.get("ano", datetime.now().year, type=int)
+        status = (request.args.get("status", "aguarda") or "aguarda").strip().lower()
+
+        if limite is None or limite <= 0:
+
+            limite = 50
+
+        limite = min(limite, 500)
+
+        if ano is None or ano < 2000 or ano > 2100:
+
+            ano = datetime.now().year
+
+        if status not in ("aguarda", "todos"):
+
+            status = "aguarda"
+
+        filtro_status_sql = "AND r.CodEvento = 50" if status == "aguarda" else ""
+
+        connection = pymysql.connect(**DB_CONFIG)
+
+        cursor = connection.cursor(pymysql.cursors.DictCursor)
+
+        query = f"""
+
+            SELECT r.CodRequisicao, r.IdRequisicao, r.DtaSolicitacao
+
+            FROM newdb.lotetriagemrequisicao ltr
+            INNER JOIN newdb.requisicao r ON r.IdRequisicao = ltr.IdRequisicao
+            LEFT JOIN newdb.lotetriagem lt ON lt.IdLote = ltr.IdLote
+
+            WHERE ltr.IdLote = %s
+              {filtro_status_sql}
+              AND YEAR(COALESCE(lt.DtaInicio, r.DtaSolicitacao)) = %s
+
+            ORDER BY r.DtaSolicitacao DESC
+
+            LIMIT %s
+
+        """
+
+        cursor.execute(query, (int(lote_limpo), int(ano), int(limite)))
+
+        rows = cursor.fetchall() or []
+
+        cursor.close()
+
+        connection.close()
+
+        requisicoes = []
+
+        for row in rows:
+
+            cod_requisicao = str(row.get("CodRequisicao") or "").strip()
+
+            if not cod_requisicao:
+
+                continue
+
+            dados_supabase = None
+
+            if SUPABASE_ENABLED:
+
+                try:
+
+                    resultado = supabase_manager.buscar_requisicao(cod_requisicao)
+
+                    if resultado.get("sucesso") == 1 and resultado.get("dados"):
+
+                        dados_supabase = resultado.get("dados")
+
+                except Exception as supabase_error:
+
+                    logger.warning(
+                        f"[HISTORICO] Falha ao enriquecer {cod_requisicao} no Supabase: {supabase_error}"
+                    )
+
+            if dados_supabase:
+
+                dados_supabase["lote"] = int(lote_limpo)
+
+                requisicoes.append(dados_supabase)
+
+            else:
+
+                dta_solicitacao = row.get("DtaSolicitacao")
+
+                if hasattr(dta_solicitacao, "strftime"):
+
+                    dta_solicitacao = dta_solicitacao.strftime("%Y-%m-%d %H:%M:%S")
+
+                requisicoes.append(
+                    {
+                        "cod_requisicao": cod_requisicao,
+                        "id_requisicao": row.get("IdRequisicao"),
+                        "data_coleta": dta_solicitacao,
+                        "lote": int(lote_limpo),
+                        "origem": "mysql_lote_triagem",
+                    }
+                )
+
+        return (
+            jsonify(
+                {
+                    "sucesso": 1,
+                    "lote": int(lote_limpo),
+                    "ano": int(ano),
+                    "status": status,
+                    "total": len(requisicoes),
+                    "requisicoes": requisicoes,
+                }
+            ),
+            200,
+        )
+
+    except Exception as e:
+
+        logger.error(f"[HISTORICO] Erro ao buscar por lote {lote}: {e}")
+
+        return jsonify({"sucesso": 0, "erro": str(e)}), 500
+
+
+@app.route("/api/historico/lotes-recentes", methods=["GET"])
+def listar_lotes_recentes_historico():
+    """Lista lotes mais recentes com data e quantidade para seleção na UI"""
+
+    try:
+
+        limite = request.args.get("limite", 20, type=int)
+        ano = request.args.get("ano", datetime.now().year, type=int)
+        status = (request.args.get("status", "aguarda") or "aguarda").strip().lower()
+
+        if limite is None or limite <= 0:
+
+            limite = 20
+
+        limite = min(limite, 100)
+
+        if ano is None or ano < 2000 or ano > 2100:
+
+            ano = datetime.now().year
+
+        if status not in ("aguarda", "todos"):
+
+            status = "aguarda"
+
+        filtro_status_sql = "AND r.CodEvento = 50" if status == "aguarda" else ""
+
+        connection = pymysql.connect(**DB_CONFIG)
+
+        cursor = connection.cursor(pymysql.cursors.DictCursor)
+
+        query = f"""
+
+            SELECT
+
+                ltr.IdLote AS Lote,
+
+                MAX(r.DtaSolicitacao) AS data_mais_recente,
+
+                COUNT(DISTINCT ltr.IdRequisicao) AS quantidade
+
+            FROM newdb.lotetriagemrequisicao ltr
+            INNER JOIN newdb.requisicao r ON r.IdRequisicao = ltr.IdRequisicao
+            LEFT JOIN newdb.lotetriagem lt ON lt.IdLote = ltr.IdLote
+
+            WHERE ltr.IdLote IS NOT NULL
+              AND r.DtaSolicitacao IS NOT NULL
+              {filtro_status_sql}
+              AND YEAR(COALESCE(lt.DtaInicio, r.DtaSolicitacao)) = %s
+
+            GROUP BY ltr.IdLote
+
+            ORDER BY data_mais_recente DESC
+
+            LIMIT %s
+
+        """
+
+        cursor.execute(query, (int(ano), int(limite)))
+
+        rows = cursor.fetchall() or []
+
+        cursor.close()
+
+        connection.close()
+
+        lotes = []
+
+        for row in rows:
+
+            data_lote = row.get("data_mais_recente")
+
+            if hasattr(data_lote, "strftime"):
+
+                data_lote = data_lote.strftime("%Y-%m-%d %H:%M:%S")
+
+            lotes.append(
+                {
+                    "lote": int(row.get("Lote")),
+                    "quantidade": int(row.get("quantidade") or 0),
+                    "data_mais_recente": data_lote,
+                }
+            )
+
+        return (
+            jsonify(
+                {
+                    "sucesso": 1,
+                    "ano": int(ano),
+                    "status": status,
+                    "total": len(lotes),
+                    "lotes": lotes,
+                }
+            ),
+            200,
+        )
+
+    except Exception as e:
+
+        logger.error(f"[HISTORICO] Erro ao listar lotes recentes: {e}")
+
+        return jsonify({"sucesso": 0, "erro": str(e)}), 500
+
+
+@app.route("/api/paciente/buscar-por-cpf", methods=["POST"])
 def buscar_paciente_por_cpf():
-
     """
 
     DEPRECATED: Use /api/buscar-paciente ao invés desta rota
@@ -13767,18 +13392,13 @@ def buscar_paciente_por_cpf():
     return buscar_paciente()  # Redireciona para a nova função
 
 
-
-
-
-@app.route('/api/buscar-paciente', methods=['POST'])
-
+@app.route("/api/buscar-paciente", methods=["POST"])
 def buscar_paciente():
-
     """
 
     Busca paciente no banco de dados MySQL e na API do apLIS pelo CPF ou Nome Completo
 
-    
+
 
     FLUXO DE BUSCA:
 
@@ -13786,7 +13406,7 @@ def buscar_paciente():
 
     2. Se não encontrar, busca na API do apLIS
 
-    
+
 
     Aceita: { "cpf": "12345678900" } OU { "nome": "Kaua Larsson Lopes de Sousa" }
 
@@ -13798,29 +13418,17 @@ def buscar_paciente():
 
         dados = request.get_json()
 
-        cpf = dados.get('cpf')
+        cpf = dados.get("cpf")
 
-        nome = dados.get('nome')
-
-
+        nome = dados.get("nome")
 
         if not cpf and not nome:
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": "CPF ou Nome não fornecido"
-
-            }), 400
-
-
+            return jsonify({"sucesso": 0, "erro": "CPF ou Nome não fornecido"}), 400
 
         # ETAPA 1: BUSCAR NO BANCO MYSQL LOCAL
 
         paciente_encontrado = False
-
-        
 
         try:
 
@@ -13828,7 +13436,9 @@ def buscar_paciente():
 
             if not connection:
 
-                logger.error(f"[BUSCAR_PACIENTE] âŒ Erro ao conectar no banco de dados")
+                logger.error(
+                    f"[BUSCAR_PACIENTE] âŒ Erro ao conectar no banco de dados"
+                )
 
             else:
 
@@ -13840,11 +13450,11 @@ def buscar_paciente():
 
                         if cpf:
 
-                            cpf_limpo = ''.join(filter(str.isdigit, cpf))
+                            cpf_limpo = "".join(filter(str.isdigit, cpf))
 
-                            logger.info(f"[BUSCAR_PACIENTE] ðŸ” Buscando no banco LOCAL com CPF: {cpf_limpo}")
-
-                            
+                            logger.info(
+                                f"[BUSCAR_PACIENTE] ðŸ” Buscando no banco LOCAL com CPF: {cpf_limpo}"
+                            )
 
                             query = """
 
@@ -13872,17 +13482,15 @@ def buscar_paciente():
 
                             cursor.execute(query, (cpf_limpo,))
 
-                        
-
                         # Buscar por Nome Completo
 
                         elif nome:
 
                             nome_limpo = nome.strip().lower()
 
-                            logger.info(f"[BUSCAR_PACIENTE] ðŸ” Buscando no banco LOCAL com Nome: {nome_limpo}")
-
-                            
+                            logger.info(
+                                f"[BUSCAR_PACIENTE] ðŸ” Buscando no banco LOCAL com Nome: {nome_limpo}"
+                            )
 
                             query = """
 
@@ -13910,11 +13518,7 @@ def buscar_paciente():
 
                             cursor.execute(query, (nome_limpo,))
 
-
-
                         resultado = cursor.fetchone()
-
-
 
                         if resultado:
 
@@ -13930,99 +13534,80 @@ def buscar_paciente():
 
                             sexo = resultado[5]
 
+                            logger.info(
+                                f"[BUSCAR_PACIENTE] âœ… Paciente encontrado no banco LOCAL!"
+                            )
 
-
-                            logger.info(f"[BUSCAR_PACIENTE] âœ… Paciente encontrado no banco LOCAL!")
-
-                            logger.info(f"[BUSCAR_PACIENTE]   CodPaciente: {cod_paciente}")
+                            logger.info(
+                                f"[BUSCAR_PACIENTE]   CodPaciente: {cod_paciente}"
+                            )
 
                             logger.info(f"[BUSCAR_PACIENTE]   Nome: {nome_paciente}")
 
                             logger.info(f"[BUSCAR_PACIENTE]   CPF: {cpf_db}")
 
-
-
                             # Buscar dados completos do paciente
 
-                            dados_completos = buscar_dados_completos_paciente(cod_paciente)
-
-
+                            dados_completos = buscar_dados_completos_paciente(
+                                cod_paciente
+                            )
 
                             paciente_encontrado = True
 
-                            
-
-                            return jsonify({
-
-                                "sucesso": 1,
-
-                                "fonte": "banco_local",
-
-                                "paciente": {
-
-                                    "idPaciente": cod_paciente,
-
-                                    "nome": nome_paciente,
-
-                                    "cpf": cpf_db if cpf_db else None,
-
-                                    "dataNascimento": dta_nasc.isoformat() if dta_nasc else None,
-
-                                    "rg": rg,
-
-                                    "sexo": sexo,
-
-                                    "dadosCompletos": dados_completos
-
-                                }
-
-                            }), 200
-
-
+                            return (
+                                jsonify(
+                                    {
+                                        "sucesso": 1,
+                                        "fonte": "banco_local",
+                                        "paciente": {
+                                            "idPaciente": cod_paciente,
+                                            "nome": nome_paciente,
+                                            "cpf": cpf_db if cpf_db else None,
+                                            "dataNascimento": (
+                                                dta_nasc.isoformat()
+                                                if dta_nasc
+                                                else None
+                                            ),
+                                            "rg": rg,
+                                            "sexo": sexo,
+                                            "dadosCompletos": dados_completos,
+                                        },
+                                    }
+                                ),
+                                200,
+                            )
 
                 finally:
 
                     connection.close()
 
-        
-
         except Exception as e:
 
-            logger.error(f"[BUSCAR_PACIENTE] âš ️ Erro ao buscar no banco local: {str(e)}")
-
-        
+            logger.error(
+                f"[BUSCAR_PACIENTE] âš ️ Erro ao buscar no banco local: {str(e)}"
+            )
 
         # ETAPA 2: SE NÃƒO ENCONTROU LOCAL, BUSCAR NA API DO apLIS
 
         if not paciente_encontrado and cpf:
 
-            cpf_limpo = ''.join(filter(str.isdigit, cpf))
+            cpf_limpo = "".join(filter(str.isdigit, cpf))
 
-            logger.info(f"[BUSCAR_PACIENTE] ðŸ” Paciente não encontrado localmente, buscando na API do apLIS...")
-
-            
+            logger.info(
+                f"[BUSCAR_PACIENTE] ðŸ” Paciente não encontrado localmente, buscando na API do apLIS..."
+            )
 
             try:
 
                 # Buscar paciente no apLIS usando pacienteListar
 
-                dat_busca = {
-
-                    "cpf": cpf_limpo
-
-                }
-
-                
+                dat_busca = {"cpf": cpf_limpo}
 
                 resposta_aplis = fazer_requisicao_aplis("pacienteListar", dat_busca)
-
-                
 
                 if resposta_aplis and resposta_aplis.get("dat", {}).get("sucesso") == 1:
 
                     lista_pacientes = resposta_aplis.get("dat", {}).get("lista", [])
-
-                    
 
                     if lista_pacientes and len(lista_pacientes) > 0:
 
@@ -14030,21 +13615,31 @@ def buscar_paciente():
 
                         paciente_aplis = lista_pacientes[0]
 
-                        id_paciente = paciente_aplis.get("CodPaciente") or paciente_aplis.get("IdPaciente") or paciente_aplis.get("idPaciente")
+                        id_paciente = (
+                            paciente_aplis.get("CodPaciente")
+                            or paciente_aplis.get("IdPaciente")
+                            or paciente_aplis.get("idPaciente")
+                        )
 
-                        nome_paciente = paciente_aplis.get("NomPaciente") or paciente_aplis.get("nomPaciente")
+                        nome_paciente = paciente_aplis.get(
+                            "NomPaciente"
+                        ) or paciente_aplis.get("nomPaciente")
 
-                        cpf_aplis = paciente_aplis.get("CPF") or paciente_aplis.get("cpf")
+                        cpf_aplis = paciente_aplis.get("CPF") or paciente_aplis.get(
+                            "cpf"
+                        )
 
-                        dta_nasc = paciente_aplis.get("DtaNascimento") or paciente_aplis.get("dtaNascimento")
+                        dta_nasc = paciente_aplis.get(
+                            "DtaNascimento"
+                        ) or paciente_aplis.get("dtaNascimento")
 
                         rg = paciente_aplis.get("RG") or paciente_aplis.get("rg")
 
                         sexo = paciente_aplis.get("Sexo") or paciente_aplis.get("sexo")
 
-                        
-
-                        logger.info(f"[BUSCAR_PACIENTE] âœ… Paciente encontrado na API do apLIS!")
+                        logger.info(
+                            f"[BUSCAR_PACIENTE] âœ… Paciente encontrado na API do apLIS!"
+                        )
 
                         logger.info(f"[BUSCAR_PACIENTE]   ID: {id_paciente}")
 
@@ -14052,59 +13647,50 @@ def buscar_paciente():
 
                         logger.info(f"[BUSCAR_PACIENTE]   CPF: {cpf_aplis}")
 
-                        
-
-                        return jsonify({
-
-                            "sucesso": 1,
-
-                            "fonte": "api_aplis",
-
-                            "paciente": {
-
-                                "idPaciente": id_paciente,
-
-                                "nome": nome_paciente,
-
-                                "cpf": cpf_aplis,
-
-                                "dataNascimento": dta_nasc,
-
-                                "rg": rg,
-
-                                "sexo": sexo,
-
-                                "dadosCompletos": paciente_aplis
-
-                            }
-
-                        }), 200
-
-            
+                        return (
+                            jsonify(
+                                {
+                                    "sucesso": 1,
+                                    "fonte": "api_aplis",
+                                    "paciente": {
+                                        "idPaciente": id_paciente,
+                                        "nome": nome_paciente,
+                                        "cpf": cpf_aplis,
+                                        "dataNascimento": dta_nasc,
+                                        "rg": rg,
+                                        "sexo": sexo,
+                                        "dadosCompletos": paciente_aplis,
+                                    },
+                                }
+                            ),
+                            200,
+                        )
 
             except Exception as e:
 
-                logger.error(f"[BUSCAR_PACIENTE] âš ️ Erro ao buscar no apLIS: {str(e)}")
+                logger.error(
+                    f"[BUSCAR_PACIENTE] âš ️ Erro ao buscar no apLIS: {str(e)}"
+                )
 
                 logger.error(traceback.format_exc())
-
-        
 
         # NÃƒO ENCONTROU EM NENHUM LUGAR
 
         criterio = f"CPF {cpf_limpo if cpf else ''}" if cpf else f"Nome '{nome}'"
 
-        logger.warning(f"[BUSCAR_PACIENTE] âš ️ Paciente com {criterio} não encontrado em nenhum sistema")
+        logger.warning(
+            f"[BUSCAR_PACIENTE] âš ️ Paciente com {criterio} não encontrado em nenhum sistema"
+        )
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": f"Paciente com {criterio} não encontrado no sistema"
-
-        }), 404
-
-
+        return (
+            jsonify(
+                {
+                    "sucesso": 0,
+                    "erro": f"Paciente com {criterio} não encontrado no sistema",
+                }
+            ),
+            404,
+        )
 
     except Exception as e:
 
@@ -14114,22 +13700,14 @@ def buscar_paciente():
 
         logger.error(f"[BUSCAR_PACIENTE] Traceback: {traceback.format_exc()}")
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": f"Erro ao buscar paciente: {str(e)}"
-
-        }), 500
+        return (
+            jsonify({"sucesso": 0, "erro": f"Erro ao buscar paciente: {str(e)}"}),
+            500,
+        )
 
 
-
-
-
-@app.route('/api/paciente/criar', methods=['POST'])
-
+@app.route("/api/paciente/criar", methods=["POST"])
 def criar_paciente():
-
     """
 
     Cria um novo paciente no sistema
@@ -14146,63 +13724,44 @@ def criar_paciente():
 
         logger.info(f"[CRIAR_PACIENTE] Dados recebidos: {dados}")
 
-
-
         # Validar campos obrigatórios
 
-        nome = dados.get('nome')
+        nome = dados.get("nome")
 
-        cpf = dados.get('cpf')
+        cpf = dados.get("cpf")
 
-        data_nascimento = dados.get('dataNascimento') or dados.get('dtaNasc')
-
-
+        data_nascimento = dados.get("dataNascimento") or dados.get("dtaNasc")
 
         if not nome:
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": "Nome do paciente é obrigatório"
-
-            }), 400
-
-
+            return (
+                jsonify({"sucesso": 0, "erro": "Nome do paciente é obrigatório"}),
+                400,
+            )
 
         if not cpf:
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": "CPF é obrigatório para criar novo paciente"
-
-            }), 400
-
-
+            return (
+                jsonify(
+                    {"sucesso": 0, "erro": "CPF é obrigatório para criar novo paciente"}
+                ),
+                400,
+            )
 
         # Limpar CPF
 
-        cpf_limpo = ''.join(filter(str.isdigit, cpf))
-
-        
+        cpf_limpo = "".join(filter(str.isdigit, cpf))
 
         if len(cpf_limpo) != 11:
 
-            return jsonify({
+            return (
+                jsonify({"sucesso": 0, "erro": "CPF inválido (deve ter 11 dígitos)"}),
+                400,
+            )
 
-                "sucesso": 0,
-
-                "erro": "CPF inválido (deve ter 11 dígitos)"
-
-            }), 400
-
-
-
-        logger.info(f"[CRIAR_PACIENTE] Verificando se CPF {cpf_limpo} já existe no banco...")
-
-
+        logger.info(
+            f"[CRIAR_PACIENTE] Verificando se CPF {cpf_limpo} já existe no banco..."
+        )
 
         # 1. VERIFICAR SE JÁ EXISTE PACIENTE COM ESTE CPF
 
@@ -14218,37 +13777,32 @@ def criar_paciente():
 
                 resultado = cursor.fetchone()
 
-
-
                 if resultado:
 
                     cod_paciente_existente = resultado[0]
 
                     nome_existente = resultado[1]
 
-                    logger.warning(f"[CRIAR_PACIENTE] âš ️ Paciente com CPF {cpf_limpo} já existe: ID {cod_paciente_existente} - {nome_existente}")
+                    logger.warning(
+                        f"[CRIAR_PACIENTE] âš ️ Paciente com CPF {cpf_limpo} já existe: ID {cod_paciente_existente} - {nome_existente}"
+                    )
 
                     connection.close()
 
-                    return jsonify({
-
-                        "sucesso": 0,
-
-                        "erro": f"Paciente com este CPF já cadastrado: {nome_existente} (ID: {cod_paciente_existente})",
-
-                        "paciente_existente": {
-
-                            "idPaciente": cod_paciente_existente,
-
-                            "nome": nome_existente,
-
-                            "cpf": cpf_limpo
-
-                        }
-
-                    }), 409  # 409 Conflict
-
-
+                    return (
+                        jsonify(
+                            {
+                                "sucesso": 0,
+                                "erro": f"Paciente com este CPF já cadastrado: {nome_existente} (ID: {cod_paciente_existente})",
+                                "paciente_existente": {
+                                    "idPaciente": cod_paciente_existente,
+                                    "nome": nome_existente,
+                                    "cpf": cpf_limpo,
+                                },
+                            }
+                        ),
+                        409,
+                    )  # 409 Conflict
 
             connection.close()
 
@@ -14256,33 +13810,35 @@ def criar_paciente():
 
             logger.error(f"[CRIAR_PACIENTE] Erro ao verificar duplicidade: {str(e)}")
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": f"Erro ao verificar duplicidade de CPF: {str(e)}"
-
-            }), 500
-
-
+            return (
+                jsonify(
+                    {
+                        "sucesso": 0,
+                        "erro": f"Erro ao verificar duplicidade de CPF: {str(e)}",
+                    }
+                ),
+                500,
+            )
 
         # 2. VALIDAR CPF NA RECEITA FEDERAL
 
-        logger.info(f"[CRIAR_PACIENTE] ðŸ” Validando CPF {cpf_limpo} na Receita Federal...")
+        logger.info(
+            f"[CRIAR_PACIENTE] ðŸ” Validando CPF {cpf_limpo} na Receita Federal..."
+        )
 
         dados_receita = consultar_cpf_receita_federal(cpf_limpo, data_nascimento)
 
-
-
         usa_metodo_sem_cpf = False
 
-        
+        if not dados_receita or not dados_receita.get("valido"):
 
-        if not dados_receita or not dados_receita.get('valido'):
+            logger.warning(
+                f"[CRIAR_PACIENTE] âš ️ CPF {cpf_limpo} não validado pela Receita Federal"
+            )
 
-            logger.warning(f"[CRIAR_PACIENTE] âš ️ CPF {cpf_limpo} não validado pela Receita Federal")
-
-            logger.info(f"[CRIAR_PACIENTE] ðŸ”„ Usando método alternativo: Paciente sem documento (CPF não validado)")
+            logger.info(
+                f"[CRIAR_PACIENTE] ðŸ”„ Usando método alternativo: Paciente sem documento (CPF não validado)"
+            )
 
             usa_metodo_sem_cpf = True
 
@@ -14292,35 +13848,29 @@ def criar_paciente():
 
             logger.info(f"[CRIAR_PACIENTE]   Nome na RF: {dados_receita.get('nome')}")
 
-            logger.info(f"[CRIAR_PACIENTE]   Data Nasc: {dados_receita.get('data_nascimento')}")
-
-
+            logger.info(
+                f"[CRIAR_PACIENTE]   Data Nasc: {dados_receita.get('data_nascimento')}"
+            )
 
         # 3. CRIAR PACIENTE NO apLIS
 
         if usa_metodo_sem_cpf:
 
-            logger.info(f"[CRIAR_PACIENTE] ðŸ“ Criando paciente com método 'Sem Documento'...")
+            logger.info(
+                f"[CRIAR_PACIENTE] ðŸ“ Criando paciente com método 'Sem Documento'..."
+            )
 
-            logger.warning(f"[CRIAR_PACIENTE] âš ️ ATENÃ‡ÃƒO: CPF {cpf_limpo} NÃƒO FOI VALIDADO na Receita Federal")
+            logger.warning(
+                f"[CRIAR_PACIENTE] âš ️ ATENÃ‡ÃƒO: CPF {cpf_limpo} NÃƒO FOI VALIDADO na Receita Federal"
+            )
 
         else:
 
             logger.info(f"[CRIAR_PACIENTE] ðŸ“ Criando paciente no apLIS...")
 
-
-
         # Montar estrutura para o apLIS
 
-        dat = {
-
-            "idEvento": "3",  # Evento de inclusão de paciente
-
-            "nome": nome
-
-        }
-
-        
+        dat = {"idEvento": "3", "nome": nome}  # Evento de inclusão de paciente
 
         # Se CPF foi validado, enviar CPF. Se não, usar cpfAusente
 
@@ -14328,13 +13878,13 @@ def criar_paciente():
 
             dat["cpfAusente"] = "1"  # Paciente sem documento
 
-            logger.warning(f"[CRIAR_PACIENTE] âš ️ CPF {cpf_limpo} não validado - usando cpfAusente")
+            logger.warning(
+                f"[CRIAR_PACIENTE] âš ️ CPF {cpf_limpo} não validado - usando cpfAusente"
+            )
 
         else:
 
             dat["cpf"] = cpf_limpo
-
-
 
         # Adicionar campos opcionais se fornecidos
 
@@ -14342,59 +13892,51 @@ def criar_paciente():
 
             # Converter para formato do apLIS se necessário
 
-            if 'T' in data_nascimento:
+            if "T" in data_nascimento:
 
-                data_nascimento = data_nascimento.split('T')[0]
+                data_nascimento = data_nascimento.split("T")[0]
 
-            dat['dtaNascimento'] = data_nascimento
+            dat["dtaNascimento"] = data_nascimento
 
-        elif dados_receita and dados_receita.get('data_nascimento'):
+        elif dados_receita and dados_receita.get("data_nascimento"):
 
             # Usar data da Receita Federal (só se validou)
 
-            dat['dtaNascimento'] = dados_receita['data_nascimento']
+            dat["dtaNascimento"] = dados_receita["data_nascimento"]
 
+        if dados.get("rg"):
 
+            dat["rg"] = dados["rg"]
 
-        if dados.get('rg'):
+        if dados.get("telefone") or dados.get("telCelular"):
 
-            dat['rg'] = dados['rg']
+            dat["telefone"] = dados.get("telefone") or dados.get("telCelular")
 
-        if dados.get('telefone') or dados.get('telCelular'):
+        if dados.get("email"):
 
-            dat['telefone'] = dados.get('telefone') or dados.get('telCelular')
+            dat["email"] = dados["email"]
 
-        if dados.get('email'):
+        if dados.get("sexo"):
 
-            dat['email'] = dados['email']
+            dat["sexo"] = dados["sexo"]
 
-        if dados.get('sexo'):
+        if dados.get("endereco"):
 
-            dat['sexo'] = dados['sexo']
-
-        if dados.get('endereco'):
-
-            dat['endereco'] = dados['endereco']
-
-
+            dat["endereco"] = dados["endereco"]
 
         logger.info(f"[CRIAR_PACIENTE] Chamando apLIS com dados: {dat}")
-
-
 
         # Chamar o apLIS para criar paciente
 
         resposta = fazer_requisicao_aplis("pacienteSalvar", dat)
 
-
-
         if resposta.get("dat", {}).get("sucesso") == 1:
 
             cod_paciente = resposta.get("dat", {}).get("codPaciente")
 
-            logger.info(f"[CRIAR_PACIENTE] âœ… Paciente criado com sucesso! CodPaciente: {cod_paciente}")
-
-
+            logger.info(
+                f"[CRIAR_PACIENTE] âœ… Paciente criado com sucesso! CodPaciente: {cod_paciente}"
+            )
 
             # ðŸ†• VERIFICAR SE NÃƒO HOUVE DUPLICAÃ‡ÃƒO (verificação adicional de segurança)
 
@@ -14402,65 +13944,84 @@ def criar_paciente():
 
                 try:
 
-                    logger.info(f"[CRIAR_PACIENTE] ðŸ” VERIFICANDO se houve duplicação do paciente (CPF: {cpf_limpo})...")
-
-
+                    logger.info(
+                        f"[CRIAR_PACIENTE] ðŸ” VERIFICANDO se houve duplicação do paciente (CPF: {cpf_limpo})..."
+                    )
 
                     # Buscar todos os pacientes com este CPF no apLIS
 
                     dat_verificacao = {"cpf": cpf_limpo}
 
-                    resposta_verificacao = fazer_requisicao_aplis("pacienteListar", dat_verificacao)
+                    resposta_verificacao = fazer_requisicao_aplis(
+                        "pacienteListar", dat_verificacao
+                    )
 
+                    if (
+                        resposta_verificacao
+                        and resposta_verificacao.get("dat", {}).get("sucesso") == 1
+                    ):
 
-
-                    if resposta_verificacao and resposta_verificacao.get("dat", {}).get("sucesso") == 1:
-
-                        lista_encontrada = resposta_verificacao.get("dat", {}).get("lista", [])
+                        lista_encontrada = resposta_verificacao.get("dat", {}).get(
+                            "lista", []
+                        )
 
                         quantidade = len(lista_encontrada)
 
-
-
                         if quantidade == 1:
 
-                            logger.info(f"[CRIAR_PACIENTE] âœ… VERIFICAÃ‡ÃƒO OK: Apenas 1 paciente com CPF {cpf_limpo}")
+                            logger.info(
+                                f"[CRIAR_PACIENTE] âœ… VERIFICAÃ‡ÃƒO OK: Apenas 1 paciente com CPF {cpf_limpo}"
+                            )
 
-                            logger.info(f"[CRIAR_PACIENTE]   ID confirmado: {lista_encontrada[0].get('CodPaciente')}")
+                            logger.info(
+                                f"[CRIAR_PACIENTE]   ID confirmado: {lista_encontrada[0].get('CodPaciente')}"
+                            )
 
                         elif quantidade > 1:
 
-                            logger.error(f"[CRIAR_PACIENTE] âŒâŒâŒ DUPLICAÃ‡ÃƒO DETECTADA! âŒâŒâŒ")
+                            logger.error(
+                                f"[CRIAR_PACIENTE] âŒâŒâŒ DUPLICAÃ‡ÃƒO DETECTADA! âŒâŒâŒ"
+                            )
 
                             logger.error(f"[CRIAR_PACIENTE]   CPF: {cpf_limpo}")
 
-                            logger.error(f"[CRIAR_PACIENTE]   Quantidade de pacientes encontrados: {quantidade}")
+                            logger.error(
+                                f"[CRIAR_PACIENTE]   Quantidade de pacientes encontrados: {quantidade}"
+                            )
 
-                            logger.error(f"[CRIAR_PACIENTE]   IDs duplicados: {[p.get('CodPaciente') for p in lista_encontrada]}")
+                            logger.error(
+                                f"[CRIAR_PACIENTE]   IDs duplicados: {[p.get('CodPaciente') for p in lista_encontrada]}"
+                            )
 
-                            logger.error(f"[CRIAR_PACIENTE]   âš ️ AÃ‡ÃƒO NECESSÁRIA: Verificar e remover duplicatas no sistema apLIS!")
-
-
+                            logger.error(
+                                f"[CRIAR_PACIENTE]   âš ️ AÃ‡ÃƒO NECESSÁRIA: Verificar e remover duplicatas no sistema apLIS!"
+                            )
 
                             # Logar detalhes de cada paciente duplicado
 
                             for idx, pac in enumerate(lista_encontrada, 1):
 
-                                logger.error(f"[CRIAR_PACIENTE]   Paciente {idx}: ID={pac.get('CodPaciente')}, Nome={pac.get('NomPaciente')}")
+                                logger.error(
+                                    f"[CRIAR_PACIENTE]   Paciente {idx}: ID={pac.get('CodPaciente')}, Nome={pac.get('NomPaciente')}"
+                                )
 
                         else:
 
-                            logger.warning(f"[CRIAR_PACIENTE] âš ️ ALERTA: Busca não retornou nenhum paciente (esperado 1)")
+                            logger.warning(
+                                f"[CRIAR_PACIENTE] âš ️ ALERTA: Busca não retornou nenhum paciente (esperado 1)"
+                            )
 
                     else:
 
-                        logger.warning(f"[CRIAR_PACIENTE] âš ️ Não foi possível verificar duplicação: {resposta_verificacao}")
-
-
+                        logger.warning(
+                            f"[CRIAR_PACIENTE] âš ️ Não foi possível verificar duplicação: {resposta_verificacao}"
+                        )
 
                 except Exception as e_verif:
 
-                    logger.error(f"[CRIAR_PACIENTE] âš ️ Erro ao verificar duplicação (não crítico): {str(e_verif)}")
+                    logger.error(
+                        f"[CRIAR_PACIENTE] âš ️ Erro ao verificar duplicação (não crítico): {str(e_verif)}"
+                    )
 
                     import traceback
 
@@ -14468,13 +14029,13 @@ def criar_paciente():
 
                     # Não interromper o fluxo
 
-
-
             # ðŸ†• SALVAR PACIENTE NO BANCO LOCAL para evitar duplicação futura
 
             try:
 
-                logger.info(f"[CRIAR_PACIENTE] ðŸ’¾ Salvando paciente no banco LOCAL para prevenir duplicação...")
+                logger.info(
+                    f"[CRIAR_PACIENTE] ðŸ’¾ Salvando paciente no banco LOCAL para prevenir duplicação..."
+                )
 
                 connection = pymysql.connect(**DB_CONFIG)
 
@@ -14506,104 +14067,91 @@ def criar_paciente():
 
                     """
 
-
-
-                    cursor.execute(query_insert, (
-
-                        cod_paciente,
-
-                        nome,
-
-                        cpf_limpo if not usa_metodo_sem_cpf else None,
-
-                        dat.get('dtaNascimento') or data_nascimento,
-
-                        dados.get('rg'),
-
-                        dados.get('telefone') or dados.get('telCelular'),
-
-                        dados.get('endereco'),
-
-                        dados.get('email')
-
-                    ))
+                    cursor.execute(
+                        query_insert,
+                        (
+                            cod_paciente,
+                            nome,
+                            cpf_limpo if not usa_metodo_sem_cpf else None,
+                            dat.get("dtaNascimento") or data_nascimento,
+                            dados.get("rg"),
+                            dados.get("telefone") or dados.get("telCelular"),
+                            dados.get("endereco"),
+                            dados.get("email"),
+                        ),
+                    )
 
                     connection.commit()
 
-                    logger.info(f"[CRIAR_PACIENTE] âœ… Paciente {cod_paciente} salvo no banco LOCAL com sucesso!")
+                    logger.info(
+                        f"[CRIAR_PACIENTE] âœ… Paciente {cod_paciente} salvo no banco LOCAL com sucesso!"
+                    )
 
                 connection.close()
 
             except Exception as e_local:
 
-                logger.error(f"[CRIAR_PACIENTE] âš ️ Erro ao salvar no banco local (não crítico): {str(e_local)}")
+                logger.error(
+                    f"[CRIAR_PACIENTE] âš ️ Erro ao salvar no banco local (não crítico): {str(e_local)}"
+                )
 
                 # Não interromper o fluxo se falhar ao salvar no local
 
-
-
             resposta_final = {
-
                 "sucesso": 1,
-
                 "mensagem": "Paciente criado com sucesso",
-
                 "paciente": {
-
                     "idPaciente": cod_paciente,
-
                     "nome": nome,
-
                     "cpf": cpf_limpo,
-
-                    "dataNascimento": dat.get('dtaNascimento'),
-
+                    "dataNascimento": dat.get("dtaNascimento"),
                     "validado_receita": not usa_metodo_sem_cpf,
-
-                    "nome_receita": dados_receita.get('nome') if dados_receita else None
-
-                }
-
+                    "nome_receita": (
+                        dados_receita.get("nome") if dados_receita else None
+                    ),
+                },
             }
-
-            
 
             # Adicionar aviso se usou método alternativo
 
             if usa_metodo_sem_cpf:
 
                 resposta_final["aviso"] = {
-
                     "tipo": "cpf_nao_validado",
-
                     "mensagem": f"âš ️ ATENÃ‡ÃƒO: Paciente cadastrado com método alternativo (CPF {cpf_limpo} não foi validado na Receita Federal). Verifique os dados do paciente.",
-
-                    "cpf": cpf_limpo
-
+                    "cpf": cpf_limpo,
                 }
 
-                logger.warning(f"[CRIAR_PACIENTE] âš ️ Retornando aviso de CPF não validado: {cpf_limpo}")
-
-            
+                logger.warning(
+                    f"[CRIAR_PACIENTE] âš ️ Retornando aviso de CPF não validado: {cpf_limpo}"
+                )
 
             return jsonify(resposta_final), 201
 
         else:
 
             dat_resp = resposta.get("dat", {})
-            erro_msg = dat_resp.get("msg") or dat_resp.get("msgErro") or dat_resp.get("erro") or dat_resp.get("mensagem") or resposta.get("msg") or resposta.get("erro") or "Erro desconhecido"
+            erro_msg = (
+                dat_resp.get("msg")
+                or dat_resp.get("msgErro")
+                or dat_resp.get("erro")
+                or dat_resp.get("mensagem")
+                or resposta.get("msg")
+                or resposta.get("erro")
+                or "Erro desconhecido"
+            )
 
             logger.error(f"[CRIAR_PACIENTE] âŒ Erro ao criar paciente: {erro_msg}")
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": f"Erro ao criar paciente no sistema: {erro_msg}"
-
-            }), 400
-
-
+            return (
+                jsonify(
+                    {
+                        "sucesso": 0,
+                        "erro": f"Erro ao criar paciente no sistema: {erro_msg}",
+                    }
+                ),
+                400,
+            )
 
     except Exception as e:
 
@@ -14613,22 +14161,11 @@ def criar_paciente():
 
         logger.error(f"[CRIAR_PACIENTE] Traceback: {traceback.format_exc()}")
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": str(e)
-
-        }), 500
+        return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
 
-
-
-
-@app.route('/api/paciente/<id_paciente>', methods=['PUT'])
-
+@app.route("/api/paciente/<id_paciente>", methods=["PUT"])
 def atualizar_paciente(id_paciente):
-
     """Atualiza dados de um paciente"""
 
     try:
@@ -14637,134 +14174,120 @@ def atualizar_paciente(id_paciente):
 
         logger.info(f"[ATUALIZAR_PACIENTE] ID: {id_paciente}, Dados: {dados}")
 
-
-
         # Montar estrutura para o apLIS
 
         dat = {
-
             "idEvento": "4",  # Evento de alteração de paciente
-
-            "codPaciente": id_paciente
-
+            "codPaciente": id_paciente,
         }
-
-
 
         # Adicionar campos que foram enviados
 
-        if dados.get('nome'):
+        if dados.get("nome"):
 
-            dat['nomePaciente'] = dados['nome']
+            dat["nomePaciente"] = dados["nome"]
 
-        if dados.get('dtaNasc'):
+        if dados.get("dtaNasc"):
 
-            dat['dtaNascimento'] = dados['dtaNasc']
+            dat["dtaNascimento"] = dados["dtaNasc"]
 
-        if dados.get('cpf'):
+        if dados.get("cpf"):
 
-            dat['cpf'] = dados['cpf']
+            dat["cpf"] = dados["cpf"]
 
-        if dados.get('rg'):
+        if dados.get("rg"):
 
-            dat['rg'] = dados['rg']
+            dat["rg"] = dados["rg"]
 
-        if dados.get('telCelular'):
+        if dados.get("telCelular"):
 
-            dat['telefone'] = dados['telCelular']
+            dat["telefone"] = dados["telCelular"]
 
-        if dados.get('email'):
+        if dados.get("email"):
 
-            dat['email'] = dados['email']
+            dat["email"] = dados["email"]
 
-        if dados.get('matriculaConvenio'):
+        if dados.get("matriculaConvenio"):
 
-            dat['matriculaConvenio'] = dados['matriculaConvenio']
+            dat["matriculaConvenio"] = dados["matriculaConvenio"]
 
-        if dados.get('numGuia'):
+        if dados.get("numGuia"):
 
             # Só envia se for válido: 8 ou 9 dígitos e não só zeros
 
-            num_guia = str(dados['numGuia']).strip()
+            num_guia = str(dados["numGuia"]).strip()
 
-            num_guia_limpo = ''.join(filter(str.isdigit, num_guia))
+            num_guia_limpo = "".join(filter(str.isdigit, num_guia))
 
-            
+            if (
+                num_guia_limpo
+                and len(num_guia_limpo) in (8, 9)
+                and num_guia_limpo not in ("00000000", "000000000")
+            ):
 
-            if num_guia_limpo and len(num_guia_limpo) in (8, 9) and num_guia_limpo not in ('00000000', '000000000'):
+                dat["numGuiaConvenio"] = num_guia_limpo
 
-                dat['numGuiaConvenio'] = num_guia_limpo
-
-                logger.info(f"[ATUALIZAR_PACIENTE] âœ… numGuia válido, será enviado: {num_guia_limpo}")
+                logger.info(
+                    f"[ATUALIZAR_PACIENTE] âœ… numGuia válido, será enviado: {num_guia_limpo}"
+                )
 
             else:
 
-                logger.info(f"[ATUALIZAR_PACIENTE] â„¹️ numGuia inválido ('{num_guia_limpo}'), não será enviado")
+                logger.info(
+                    f"[ATUALIZAR_PACIENTE] â„¹️ numGuia inválido ('{num_guia_limpo}'), não será enviado"
+                )
 
-        if dados.get('endereco'):
+        if dados.get("endereco"):
 
-            dat['endereco'] = dados['endereco']
-
-
+            dat["endereco"] = dados["endereco"]
 
         logger.info(f"[ATUALIZAR_PACIENTE] Chamando apLIS com dados: {dat}")
-
-
 
         # Chamar o apLIS para atualizar
 
         resposta = fazer_requisicao_aplis("pacienteAlterar", dat)
 
-
-
         if resposta.get("dat", {}).get("sucesso") == 1:
 
             logger.info(f"[ATUALIZAR_PACIENTE] âœ… Paciente atualizado com sucesso")
 
-            return jsonify({
-
-                "sucesso": 1,
-
-                "mensagem": "Dados do paciente atualizados com sucesso"
-
-            }), 200
+            return (
+                jsonify(
+                    {
+                        "sucesso": 1,
+                        "mensagem": "Dados do paciente atualizados com sucesso",
+                    }
+                ),
+                200,
+            )
 
         else:
 
             dat_resp = resposta.get("dat", {})
-            erro_msg = dat_resp.get("msg") or dat_resp.get("msgErro") or dat_resp.get("erro") or dat_resp.get("mensagem") or resposta.get("msg") or resposta.get("erro") or "Erro desconhecido"
+            erro_msg = (
+                dat_resp.get("msg")
+                or dat_resp.get("msgErro")
+                or dat_resp.get("erro")
+                or dat_resp.get("mensagem")
+                or resposta.get("msg")
+                or resposta.get("erro")
+                or "Erro desconhecido"
+            )
 
             logger.error(f"[ATUALIZAR_PACIENTE] âŒ Erro: {erro_msg}")
             logger.error(f"[ATUALIZAR_PACIENTE] Resposta completa do apLIS: {resposta}")
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": erro_msg
-
-            }), 400
-
-
+            return jsonify({"sucesso": 0, "erro": erro_msg}), 400
 
     except Exception as e:
 
         logger.error(f"[ATUALIZAR_PACIENTE] Erro: {e}")
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": str(e)
-
-        }), 500
+        return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
 
-
-@app.route('/api/requisicao/<cod_requisicao>', methods=['PUT'])
-
+@app.route("/api/requisicao/<cod_requisicao>", methods=["PUT"])
 def atualizar_requisicao(cod_requisicao):
-
     """Atualiza dados de uma requisição"""
 
     try:
@@ -14773,125 +14296,111 @@ def atualizar_requisicao(cod_requisicao):
 
         logger.info(f"[ATUALIZAR_REQUISICAO] Código: {cod_requisicao}, Dados: {dados}")
 
-
-
         # Montar estrutura para o apLIS
 
         dat = {
-
             "idEvento": "51",  # Evento de alteração de requisição
-
-            "codRequisicao": cod_requisicao
-
+            "codRequisicao": cod_requisicao,
         }
-
-
 
         # Adicionar campos que foram enviados
 
-        if dados.get('dtaColeta'):
+        if dados.get("dtaColeta"):
 
-            dat['dtaColeta'] = dados['dtaColeta']
+            dat["dtaColeta"] = dados["dtaColeta"]
 
-        if dados.get('convenio'):
+        if dados.get("convenio"):
 
-            dat['nomeConvenio'] = dados['convenio']
+            dat["nomeConvenio"] = dados["convenio"]
 
-        if dados.get('origem'):
+        if dados.get("origem"):
 
-            dat['nomeOrigem'] = dados['origem']
+            dat["nomeOrigem"] = dados["origem"]
 
-        if dados.get('fontePagadora'):
+        if dados.get("fontePagadora"):
 
-            dat['nomeFontePagadora'] = dados['fontePagadora']
+            dat["nomeFontePagadora"] = dados["fontePagadora"]
 
-        if dados.get('medico'):
+        if dados.get("medico"):
 
-            dat['nomeMedico'] = dados['medico']
+            dat["nomeMedico"] = dados["medico"]
 
-        if dados.get('crm'):
+        if dados.get("crm"):
 
-            dat['crm'] = dados['crm']
+            dat["crm"] = dados["crm"]
 
-        if dados.get('numGuia'):
+        if dados.get("numGuia"):
 
             # Só envia se for válido: 8 ou 9 dígitos e não só zeros
 
-            num_guia = str(dados['numGuia']).strip()
+            num_guia = str(dados["numGuia"]).strip()
 
-            num_guia_limpo = ''.join(filter(str.isdigit, num_guia))
+            num_guia_limpo = "".join(filter(str.isdigit, num_guia))
 
-            
+            if (
+                num_guia_limpo
+                and len(num_guia_limpo) in (8, 9)
+                and num_guia_limpo not in ("00000000", "000000000")
+            ):
 
-            if num_guia_limpo and len(num_guia_limpo) in (8, 9) and num_guia_limpo not in ('00000000', '000000000'):
+                dat["numGuia"] = num_guia_limpo
 
-                dat['numGuia'] = num_guia_limpo
-
-                logger.info(f"[ATUALIZAR_REQUISICAO] âœ… numGuia válido, será enviado: {num_guia_limpo}")
+                logger.info(
+                    f"[ATUALIZAR_REQUISICAO] âœ… numGuia válido, será enviado: {num_guia_limpo}"
+                )
 
             else:
 
-                logger.info(f"[ATUALIZAR_REQUISICAO] â„¹️ numGuia inválido ('{num_guia_limpo}'), não será enviado")
+                logger.info(
+                    f"[ATUALIZAR_REQUISICAO] â„¹️ numGuia inválido ('{num_guia_limpo}'), não será enviado"
+                )
 
-        if dados.get('dadosClinicos'):
+        if dados.get("dadosClinicos"):
 
-            dat['dadosClinicos'] = dados['dadosClinicos']
-
-
+            dat["dadosClinicos"] = dados["dadosClinicos"]
 
         logger.info(f"[ATUALIZAR_REQUISICAO] Chamando apLIS com dados: {dat}")
-
-
 
         # Chamar o apLIS para atualizar
 
         resposta = fazer_requisicao_aplis("requisicaoAlterar", dat)
 
-
-
         if resposta.get("dat", {}).get("sucesso") == 1:
 
             logger.info(f"[ATUALIZAR_REQUISICAO] âœ… Requisição atualizada com sucesso")
 
-            return jsonify({
-
-                "sucesso": 1,
-
-                "mensagem": "Dados da requisição atualizados com sucesso"
-
-            }), 200
+            return (
+                jsonify(
+                    {
+                        "sucesso": 1,
+                        "mensagem": "Dados da requisição atualizados com sucesso",
+                    }
+                ),
+                200,
+            )
 
         else:
 
             dat_resp = resposta.get("dat", {})
-            erro_msg = dat_resp.get("msg") or dat_resp.get("msgErro") or dat_resp.get("erro") or dat_resp.get("mensagem") or resposta.get("msg") or resposta.get("erro") or "Erro desconhecido"
+            erro_msg = (
+                dat_resp.get("msg")
+                or dat_resp.get("msgErro")
+                or dat_resp.get("erro")
+                or dat_resp.get("mensagem")
+                or resposta.get("msg")
+                or resposta.get("erro")
+                or "Erro desconhecido"
+            )
 
             logger.error(f"[ATUALIZAR_REQUISICAO] âŒ Erro: {erro_msg}")
 
-            return jsonify({
-
-                "sucesso": 0,
-
-                "erro": erro_msg
-
-            }), 400
-
-
+            return jsonify({"sucesso": 0, "erro": erro_msg}), 400
 
     except Exception as e:
 
         logger.error(f"[ATUALIZAR_REQUISICAO] Erro: {e}")
 
-        return jsonify({
-
-            "sucesso": 0,
-
-            "erro": str(e)
-
-        }), 500
-
-
-
+        return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
 
 # ============================================================================
@@ -14901,11 +14410,8 @@ def atualizar_requisicao(cod_requisicao):
 # ============================================================================
 
 
-
-@app.route('/webhook', methods=['POST', 'GET'])
-
+@app.route("/webhook", methods=["POST", "GET"])
 def webhook_principal():
-
     """
 
     Endpoint principal de webhook para integração com WhatsApp/WAHA.
@@ -14916,13 +14422,11 @@ def webhook_principal():
 
     try:
 
-        if request.method == 'GET':
+        if request.method == "GET":
 
             # Responder a verificações de webhook (challenge)
 
             return jsonify({"status": "ok", "message": "Webhook ativo"}), 200
-
-        
 
         # POST - processar evento do webhook
 
@@ -14930,15 +14434,11 @@ def webhook_principal():
 
         logger.info(f"[WEBHOOK] Evento recebido: {dados.get('event', 'desconhecido')}")
 
-        
-
         # Por enquanto apenas confirma recebimento
 
         # TODO: Implementar lógica de processamento de mensagens WhatsApp
 
         return jsonify({"status": "ok", "message": "Evento recebido"}), 200
-
-        
 
     except Exception as e:
 
@@ -14947,13 +14447,8 @@ def webhook_principal():
         return jsonify({"error": str(e)}), 500
 
 
-
-
-
-@app.route('/webhook/<path:subpath>', methods=['POST', 'GET'])
-
+@app.route("/webhook/<path:subpath>", methods=["POST", "GET"])
 def webhook_subpath(subpath):
-
     """
 
     Endpoint genérico para webhooks com subpaths (ex: /webhook/LabWahaPlus).
@@ -14964,32 +14459,28 @@ def webhook_subpath(subpath):
 
     try:
 
-        if request.method == 'GET':
+        if request.method == "GET":
 
-            return jsonify({"status": "ok", "message": f"Webhook ativo: {subpath}"}), 200
-
-        
+            return (
+                jsonify({"status": "ok", "message": f"Webhook ativo: {subpath}"}),
+                200,
+            )
 
         dados = request.get_json()
 
-        logger.info(f"[WEBHOOK/{subpath}] Evento recebido: {dados.get('event', 'desconhecido')}")
-
-        
+        logger.info(
+            f"[WEBHOOK/{subpath}] Evento recebido: {dados.get('event', 'desconhecido')}"
+        )
 
         # Por enquanto apenas confirma recebimento
 
         return jsonify({"status": "ok", "message": "Evento recebido"}), 200
-
-        
 
     except Exception as e:
 
         logger.error(f"[WEBHOOK/{subpath}] Erro: {e}")
 
         return jsonify({"error": str(e)}), 500
-
-
-
 
 
 # ========================================
@@ -15009,97 +14500,116 @@ except Exception as e:
     logger.error(f"[ERRO] Falha ao registrar rotas de dropdowns: {e}")
 
 
-
-
 # ========================================
 # SCHEDULER - PROCESSAMENTO AUTOMATICO
 # ========================================
 
-@app.route('/api/scheduler/executar', methods=['POST'])
+
+@app.route("/api/scheduler/executar", methods=["POST"])
 def executar_scheduler_manual():
     """Trigger manual do processamento automatico (para testes)"""
     import threading
     from scheduler_job import executar_processamento_automatico, _job_running
 
     if _job_running:
-        logger.warning('[SCHEDULER] Disparo ignorado: job ja em execucao')
-        return jsonify({
-            'sucesso': 0,
-            'mensagem': 'Job ja em execucao. Aguarde o termino.'
-        }), 409
+        logger.warning("[SCHEDULER] Disparo ignorado: job ja em execucao")
+        return (
+            jsonify(
+                {"sucesso": 0, "mensagem": "Job ja em execucao. Aguarde o termino."}
+            ),
+            409,
+        )
 
     thread = threading.Thread(
-        target=executar_processamento_automatico,
-        name='scheduler-manual',
-        daemon=True
+        target=executar_processamento_automatico, name="scheduler-manual", daemon=True
     )
     thread.start()
 
-    logger.info('[SCHEDULER] Processamento manual iniciado via endpoint')
-    return jsonify({
-        'sucesso': 1,
-        'mensagem': 'Processamento automatico iniciado em background'
-    }), 200
+    logger.info("[SCHEDULER] Processamento manual iniciado via endpoint")
+    return (
+        jsonify(
+            {
+                "sucesso": 1,
+                "mensagem": "Processamento automatico iniciado em background",
+            }
+        ),
+        200,
+    )
 
 
-@app.route('/api/scheduler/status', methods=['GET'])
+@app.route("/api/scheduler/status", methods=["GET"])
 def scheduler_status():
     """Retorna status do scheduler e proxima execucao"""
     try:
-        job = _scheduler.get_job('processamento_4am') if _scheduler else None
-        return jsonify({
-            'sucesso': 1,
-            'ativo': job is not None,
-            'proximo_execucao': str(job.next_run_time) if job else None,
-            'scheduler_running': _scheduler.running if _scheduler else False,
-        }), 200
+        job = _scheduler.get_job("processamento_4am") if _scheduler else None
+        return (
+            jsonify(
+                {
+                    "sucesso": 1,
+                    "ativo": job is not None,
+                    "proximo_execucao": str(job.next_run_time) if job else None,
+                    "scheduler_running": _scheduler.running if _scheduler else False,
+                }
+            ),
+            200,
+        )
     except Exception as e:
-        return jsonify({
-            'sucesso': 0,
-            'erro': str(e),
-        }), 500
+        return (
+            jsonify(
+                {
+                    "sucesso": 0,
+                    "erro": str(e),
+                }
+            ),
+            500,
+        )
 
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
+
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
 def serve_react(path):
     """Serve o frontend React para qualquer rota que nao seja /api/"""
     # Rotas de API nunca chegam aqui (Flask prioriza rotas mais especificas)
     caminho_arquivo = os.path.join(REACT_BUILD_DIR, path)
     if path and os.path.exists(caminho_arquivo):
         return send_from_directory(REACT_BUILD_DIR, path)
-    return send_from_directory(REACT_BUILD_DIR, 'index.html')
+    return send_from_directory(REACT_BUILD_DIR, "index.html")
 
 
-@app.route('/api/tokens/status', methods=['GET'])
+@app.route("/api/tokens/status", methods=["GET"])
 def tokens_status():
     """Retorna consumo acumulado de tokens Vertex AI desde o inicio do processo."""
-    total_input  = sum(_token_stats[k]['input']  for k in ('ocr', 'correcao'))
-    total_output = sum(_token_stats[k]['output'] for k in ('ocr', 'correcao'))
-    return jsonify({
-        'sucesso': 1,
-        'iniciado_em': _token_stats['iniciado_em'],
-        'ocr': _token_stats['ocr'],
-        'correcao': _token_stats['correcao'],
-        'total': {
-            'input': total_input,
-            'output': total_output,
-            'total': total_input + total_output,
-            'chamadas': _token_stats['ocr']['chamadas'] + _token_stats['correcao']['chamadas'],
-        },
-    }), 200
+    total_input = sum(_token_stats[k]["input"] for k in ("ocr", "correcao"))
+    total_output = sum(_token_stats[k]["output"] for k in ("ocr", "correcao"))
+    return (
+        jsonify(
+            {
+                "sucesso": 1,
+                "iniciado_em": _token_stats["iniciado_em"],
+                "ocr": _token_stats["ocr"],
+                "correcao": _token_stats["correcao"],
+                "total": {
+                    "input": total_input,
+                    "output": total_output,
+                    "total": total_input + total_output,
+                    "chamadas": _token_stats["ocr"]["chamadas"]
+                    + _token_stats["correcao"]["chamadas"],
+                },
+            }
+        ),
+        200,
+    )
 
 
 # Referencia global ao scheduler (inicializado no __main__)
 _scheduler = None
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 
     # Limpar imagens temporárias ao iniciar
 
     limpar_imagens_temporarias()
-
-
 
     logger.info("=" * 80)
 
@@ -15133,9 +14643,13 @@ if __name__ == '__main__':
 
     logger.info("  GET  /api/admissao/teste         - Testar conexao com apLIS")
 
-    logger.info("  POST /api/requisicoes/listar     - Listar requisicoes (nova metodologia)")
+    logger.info(
+        "  POST /api/requisicoes/listar     - Listar requisicoes (nova metodologia)"
+    )
 
-    logger.info("  GET  /api/requisicao/<cod>       - Buscar requisicao com dados e imagens")
+    logger.info(
+        "  GET  /api/requisicao/<cod>       - Buscar requisicao com dados e imagens"
+    )
 
     logger.info("  GET  /api/imagem/<filename>      - Servir imagem temporaria")
 
@@ -15151,7 +14665,9 @@ if __name__ == '__main__':
 
     logger.info("  POST /api/buscar-paciente        - Buscar paciente por CPF ou nome")
 
-    logger.info("  POST /api/paciente/criar         - Criar novo paciente (valida CPF na Receita)")
+    logger.info(
+        "  POST /api/paciente/criar         - Criar novo paciente (valida CPF na Receita)"
+    )
 
     logger.info("  PUT  /api/paciente/<id>          - Atualizar dados de paciente")
 
@@ -15163,7 +14679,9 @@ if __name__ == '__main__':
 
     logger.info("  GET  /api/convenios/<id>         - Buscar convênio por ID")
 
-    logger.info("  GET  /api/instituicoes           - Listar todas as instituições (CSV)")
+    logger.info(
+        "  GET  /api/instituicoes           - Listar todas as instituições (CSV)"
+    )
 
     logger.info("  GET  /api/instituicoes/<id>      - Buscar instituição por ID")
 
@@ -15177,7 +14695,9 @@ if __name__ == '__main__':
 
     logger.info("  - Logging detalhado de todas as requisições e respostas")
 
-    logger.info("  - Criação automática de pacientes com validação CPF na Receita Federal")
+    logger.info(
+        "  - Criação automática de pacientes com validação CPF na Receita Federal"
+    )
 
     logger.info("")
 
@@ -15199,7 +14719,9 @@ if __name__ == '__main__':
 
         logger.info("  - Status atualizado após salvar admissão")
 
-        logger.info("  - Endpoints: /api/historico/listar, /api/historico/<cod>, /api/historico/buscar-cpf/<cpf>")
+        logger.info(
+            "  - Endpoints: /api/historico/listar, /api/historico/<cod>, /api/historico/buscar-cpf/<cpf>"
+        )
 
     else:
 
@@ -15217,8 +14739,6 @@ if __name__ == '__main__':
 
     logger.info("")
 
-    
-
     # ========================================
     # Inicializar APScheduler (4h30 da manha)
     # ========================================
@@ -15229,40 +14749,30 @@ if __name__ == '__main__':
         _scheduler = BackgroundScheduler(daemon=True)
         _scheduler.add_job(
             executar_processamento_automatico,
-            trigger='cron',
-            day_of_week='mon-fri',  # Seg a sex; segunda pega requisicoes de sexta
+            trigger="cron",
+            day_of_week="mon-fri",  # Seg a sex; segunda pega requisicoes de sexta
             hour=4,
             minute=30,
-            id='processamento_4am',
-            name='Processamento automatico 4h30',
+            id="processamento_4am",
+            name="Processamento automatico 4h30",
             misfire_grace_time=3600,
             max_instances=1,
         )
         _scheduler.start()
-        logger.info('[SCHEDULER] Agendamento 4h30 configurado com sucesso')
-        logger.info('[SCHEDULER] Proxima execucao: %s', _scheduler.get_job('processamento_4am').next_run_time)
-        logger.info('[SCHEDULER] Endpoint manual: POST /api/scheduler/executar')
-        logger.info('[SCHEDULER] Status: GET /api/scheduler/status')
+        logger.info("[SCHEDULER] Agendamento 4h30 configurado com sucesso")
+        logger.info(
+            "[SCHEDULER] Proxima execucao: %s",
+            _scheduler.get_job("processamento_4am").next_run_time,
+        )
+        logger.info("[SCHEDULER] Endpoint manual: POST /api/scheduler/executar")
+        logger.info("[SCHEDULER] Status: GET /api/scheduler/status")
     except ImportError:
-        logger.warning('[SCHEDULER] APScheduler nao instalado. Execute: pip install APScheduler')
+        logger.warning(
+            "[SCHEDULER] APScheduler nao instalado. Execute: pip install APScheduler"
+        )
     except Exception as e:
-        logger.error(f'[SCHEDULER] Erro ao inicializar: {e}')
+        logger.error(f"[SCHEDULER] Erro ao inicializar: {e}")
 
     # Iniciar servidor Flask
 
-    app.run(
-
-        host='0.0.0.0',
-
-        port=5000,
-
-        debug=False,
-
-        threaded=True
-
-    )
-
-
-
-
-
+    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)

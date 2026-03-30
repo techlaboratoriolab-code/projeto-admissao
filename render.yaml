@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: automacao-admissao-backend
+    runtime: python
+    rootDir: backend
+    plan: starter
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn api_admissao:app --bind 0.0.0.0:$PORT --workers 2 --timeout 180
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: FLASK_ENV
+        value: production
+
+  - type: web
+    name: automacao-admissao-frontend
+    runtime: static
+    rootDir: .
+    plan: free
+    autoDeploy: true
+    buildCommand: npm install && npm run build
+    staticPublishPath: build
+    pullRequestPreviewsEnabled: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: REACT_APP_API_URL
+        value: https://automacao-admissao-backend.onrender.com
