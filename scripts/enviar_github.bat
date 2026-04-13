@@ -97,17 +97,23 @@ echo ═════════════════════════
 for /f "delims=" %%b in ('git branch --show-current') do set "BRANCH=%%b"
 if "%BRANCH%"=="" set "BRANCH=main"
 
+echo Tentando push normal...
 git push -u origin %BRANCH%
 if errorlevel 1 (
     echo.
-    echo [ERRO] Falha no push.
-    echo Dicas:
-    echo  - Verifique login/autenticacao no GitHub
-    echo  - Verifique permissao de escrita no repositorio
-    echo  - Se a branch remota for outra, ajuste manualmente
-    echo.
-    pause
-    exit /b 1
+    echo [AVISO] Push normal falhou, tentando com --force-with-lease...
+    git push --force-with-lease -u origin %BRANCH%
+    if errorlevel 1 (
+        echo.
+        echo [ERRO] Falha no push mesmo com --force-with-lease.
+        echo Dicas:
+        echo  - Verifique login/autenticacao no GitHub
+        echo  - Verifique permissao de escrita no repositorio
+        echo  - Se a branch remota for outra, ajuste manualmente
+        echo.
+        pause
+        exit /b 1
+    )
 )
 
 echo.
