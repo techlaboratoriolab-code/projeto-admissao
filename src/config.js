@@ -21,7 +21,15 @@ export const API_BASE_URL =
 
 // Wrapper do fetch que adiciona headers necessários para o ngrok
 export const apiFetch = (url, options = {}) => {
-  return fetch(url, options);
+  const mergedHeaders = {
+    'ngrok-skip-browser-warning': 'true',
+    ...(options.headers || {}),
+  };
+
+  return fetch(url, {
+    ...options,
+    headers: mergedHeaders,
+  });
 };
 
 export default {
