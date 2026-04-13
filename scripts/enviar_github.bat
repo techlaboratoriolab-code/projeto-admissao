@@ -11,7 +11,7 @@ echo.
 REM Ir para a raiz do projeto (script está em scripts\)
 cd /d "%~dp0.."
 
-set "REPO_URL=https://github.com/laboratoriolab/projeto-admissao"
+set "REPO_URL=https://github.com/techlaboratoriolab-code/projeto-admissao"
 
 echo 📁 Pasta atual: %CD%
 echo 🔗 Repositório: %REPO_URL%
