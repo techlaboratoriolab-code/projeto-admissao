@@ -1,9 +1,15 @@
 {
   "version": 2,
-  "name": "sistema-admissao",
   "buildCommand": "npm run build",
+  "installCommand": "npm install --legacy-peer-deps",
   "outputDirectory": "build",
   "framework": null,
+  "build": {
+    "env": {
+      "NODE_OPTIONS": "--openssl-legacy-provider",
+      "REACT_APP_API_URL": "https://automacaolab.ngrok.dev"
+    }
+  },
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ],
