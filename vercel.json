@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "npm run build",
+  "buildCommand": "CI=false npm run build",
   "installCommand": "npm install --legacy-peer-deps",
   "outputDirectory": "build",
   "framework": null,
