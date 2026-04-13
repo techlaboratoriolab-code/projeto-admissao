@@ -4458,9 +4458,11 @@ def buscar_requisicao(cod_requisicao):
                                             f"[BuscarIntegrado][S3] Já em cache: {filename}"
                                         )
 
-                                    base_url = request.host_url.rstrip("/")
-
-                                    url_local = f"{base_url}/api/imagem/{filename}"
+                                    url_local = s3_client.generate_presigned_url(
+                                        "get_object",
+                                        Params={"Bucket": S3_BUCKET, "Key": key},
+                                        ExpiresIn=3600,
+                                    )
 
                                     imagens.append(
                                         {
@@ -5402,8 +5404,11 @@ def buscar_requisicao(cod_requisicao):
                                                 f"[BuscarIntegrado][S3-PAR] Ja em cache: {filename}"
                                             )
 
-                                        base_url = request.host_url.rstrip("/")
-                                        url_local = f"{base_url}/api/imagem/{filename}"
+                                        url_local = s3_client.generate_presigned_url(
+                                            "get_object",
+                                            Params={"Bucket": S3_BUCKET, "Key": key},
+                                            ExpiresIn=3600,
+                                        )
 
                                         imagens.append(
                                             {
@@ -5892,9 +5897,11 @@ def buscar_requisicao(cod_requisicao):
                                     f"[BuscarIntegrado][S3] Já em cache: {filename}"
                                 )
 
-                            base_url = request.host_url.rstrip("/")
-
-                            url_local = f"{base_url}/api/imagem/{filename}"
+                            url_local = s3_client.generate_presigned_url(
+                                "get_object",
+                                Params={"Bucket": S3_BUCKET, "Key": key},
+                                ExpiresIn=3600,
+                            )
 
                             imagens.append(
                                 {
