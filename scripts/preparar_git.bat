@@ -1,126 +1,135 @@
 @echo off
 chcp 65001 >nul
+setlocal EnableDelayedExpansion
+
 echo.
 echo ╔════════════════════════════════════════════════════════╗
-echo ║     🚀 PREPARAR PROJETO PARA O GIT                     ║
+echo ║      🚀 PREPARAR E ENVIAR PROJETO PARA O GITHUB       ║
 echo ╚════════════════════════════════════════════════════════╝
 echo.
 
-echo 📋 Este script irá preparar o projeto para o primeiro commit no Git
-echo.
-pause
+REM Ir para a raiz do projeto (script está em scripts\)
+cd /d "%~dp0.."
 
+echo 📁 Pasta atual: %CD%
 echo.
+
+where git >nul 2>nul
+if errorlevel 1 (
+    echo [ERRO] Git não encontrado no PATH.
+    echo Instale o Git e tente novamente.
+    echo.
+    pause
+    exit /b 1
+)
+
+git rev-parse --is-inside-work-tree >nul 2>nul
+if errorlevel 1 (
+    echo [ERRO] Esta pasta não é um repositório Git.
+    echo Execute primeiro: git init
+    echo.
+    pause
+    exit /b 1
+)
+
 echo ════════════════════════════════════════════════════════
 echo 🔍 PASSO 1: Verificando status atual...
 echo ════════════════════════════════════════════════════════
 git status
 echo.
 
+echo ⚠️  Revise arquivos sensíveis antes de enviar.
 echo.
-echo ════════════════════════════════════════════════════════
-echo ⚠️  ATENÇÃO: Verifique se há arquivos sensíveis acima!
-echo ════════════════════════════════════════════════════════
-echo.
-echo Arquivos que NÃO devem ser commitados:
-echo   - .env (variáveis de ambiente)
-echo   - node_modules/ (dependências)
-echo   - __pycache__/ (cache Python)
-echo   - .venv/ (ambiente virtual)
-echo   - build/ (build de produção)
-echo   - logs/ (arquivos de log)
-echo.
-
-set /p continuar="Tudo certo? Deseja continuar? (s/n): "
+set /p continuar="Deseja continuar? (s/n): "
 if /i not "%continuar%"=="s" (
     echo.
-    echo ❌ Operação cancelada!
+    echo Operação cancelada.
     pause
-    exit /b
+    exit /b 0
 )
 
 echo.
 echo ════════════════════════════════════════════════════════
-echo 📦 PASSO 2: Adicionando arquivos ao Git...
+echo 📦 PASSO 2: Adicionando alterações...
 echo ════════════════════════════════════════════════════════
 git add .
-echo ✅ Arquivos adicionados!
+if errorlevel 1 (
+    echo [ERRO] Falha no git add.
+    pause
+    exit /b 1
+)
+echo ✅ Alterações adicionadas.
 echo.
 
-echo.
 echo ════════════════════════════════════════════════════════
-echo 💾 PASSO 3: Criando commit inicial...
+echo 💾 PASSO 3: Criando commit...
 echo ════════════════════════════════════════════════════════
-git commit -m "feat: initial commit with complete documentation
+set "MSG="
+set /p MSG="Mensagem do commit (vazio = update): "
+if "%MSG%"=="" set "MSG=update"
 
-- Complete React frontend with Tailwind CSS
-- Flask backend with Supabase authentication
-- Integration with apLIS system
-- AWS S3 for documents
-- Google Vertex AI for OCR
-- Complete documentation (10 MD files)
-- Installation, API, Deploy and Architecture guides
-- Ready for production deployment"
-echo.
-echo ✅ Commit criado!
+git diff --cached --quiet
+if errorlevel 1 (
+    git commit -m "%MSG%"
+    if errorlevel 1 (
+        echo [ERRO] Falha ao criar commit.
+        pause
+        exit /b 1
+    )
+    echo ✅ Commit criado.
+) else (
+    echo ℹ️ Nenhuma alteração para commit.
+)
 echo.
 
-echo.
 echo ════════════════════════════════════════════════════════
-echo 🌐 PASSO 4: Conectando ao repositório remoto...
+echo 🌐 PASSO 4: Configurando remote origin...
 echo ════════════════════════════════════════════════════════
-echo.
-set /p repo_url="Digite a URL do repositório Git (ex: https://github.com/usuario/repo.git): "
+set "repo_url="
+for /f "delims=" %%r in ('git remote get-url origin 2^>nul') do set "repo_url=%%r"
 
 if "%repo_url%"=="" (
-    echo.
-    echo ⚠️  URL não fornecida. Você pode adicionar depois com:
-    echo    git remote add origin [URL]
-    echo.
-) else (
-    git remote add origin %repo_url%
-    echo ✅ Remote adicionado!
-    echo.
-    
-    echo ════════════════════════════════════════════════════════
-    echo 🚀 PASSO 5: Enviando para o GitHub...
-    echo ════════════════════════════════════════════════════════
-    git push -u origin main
-    
-    if errorlevel 1 (
-        echo.
-        echo ⚠️  Se der erro, pode ser porque a branch principal é 'master':
-        echo    git push -u origin master
-        echo.
-    ) else (
-        echo.
-        echo ✅ Código enviado com sucesso!
-        echo.
+    set /p repo_url="URL do repositório GitHub (https://github.com/usuario/repo.git): "
+    if "%repo_url%"=="" (
+        echo [ERRO] URL não informada.
+        pause
+        exit /b 1
     )
+    git remote add origin "%repo_url%"
+    if errorlevel 1 (
+        echo [ERRO] Falha ao adicionar remote origin.
+        pause
+        exit /b 1
+    )
+    echo ✅ Origin adicionado: %repo_url%
+) else (
+    echo ✅ Origin já configurado: %repo_url%
+)
+echo.
+
+echo ════════════════════════════════════════════════════════
+echo 🚀 PASSO 5: Enviando para o GitHub...
+echo ════════════════════════════════════════════════════════
+set "BRANCH="
+for /f "delims=" %%b in ('git branch --show-current') do set "BRANCH=%%b"
+if "%BRANCH%"=="" set "BRANCH=main"
+
+git push -u origin %BRANCH%
+if errorlevel 1 (
+    echo.
+    echo [ERRO] Falha no push.
+    echo Dicas:
+    echo  - Verifique autenticação do GitHub
+    echo  - Verifique permissão de escrita
+    echo  - Confirme se a branch remota correta é %BRANCH%
+    echo.
+    pause
+    exit /b 1
 )
 
 echo.
-echo ════════════════════════════════════════════════════════
-echo ✅ PROCESSO CONCLUÍDO!
-echo ════════════════════════════════════════════════════════
+echo ✅ Envio concluído com sucesso!
+echo 🌿 Branch enviada: %BRANCH%
+echo 🔗 Repositório: %repo_url%
 echo.
-echo 📚 Documentação criada:
-echo   - README.md (visão geral)
-echo   - INSTALACAO.md (guia de instalação)
-echo   - API.md (documentação da API)
-echo   - DEPLOY.md (guia de deploy)
-echo   - CONTRIBUTING.md (guia de contribuição)
-echo   - ARCHITECTURE.md (arquitetura do sistema)
-echo   - E mais 4 documentos!
-echo.
-echo 🎯 Próximos passos:
-echo   1. Acesse o repositório no GitHub
-echo   2. Configure as GitHub Actions (se necessário)
-echo   3. Adicione colaboradores
-echo   4. Configure proteções de branch
-echo   5. Comece a desenvolver!
-echo.
-echo 🔗 URL do repositório: %repo_url%
-echo.
-
 pause

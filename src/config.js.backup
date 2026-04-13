@@ -38,6 +38,15 @@ export const API_BASE_URL = USE_NGROK
   ? NGROK_API_URL
   : (USE_NETWORK ? NETWORK_API_URL : LOCAL_API_URL);
 
+// Wrapper do fetch que adiciona headers necessários para o ngrok
+export const apiFetch = (url, options = {}) => {
+  const headers = {
+    ...(options.headers || {}),
+    ...(USE_NGROK ? { 'ngrok-skip-browser-warning': 'true' } : {}),
+  };
+  return fetch(url, { ...options, headers });
+};
+
 // Logs para debug
 console.log('='.repeat(80));
 console.log('🔧 CONFIGURAÇÃO DA API');

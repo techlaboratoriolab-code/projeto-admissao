@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ConvenioSelect, LocalOrigemSelect, FontePagadoraSelect, MedicoSelect } from './DropdownsAdmissao';
+import React, { useState, forwardRef, useImperativeHandle } from 'react';
+import { ConvenioSelect, FontePagadoraSelect, MedicoSelect } from './DropdownsAdmissao';
 
 // Converte qualquer valor (objeto, array, primitivo) para string legível
 const safeStr = (val) => {
@@ -17,10 +17,32 @@ const safeStr = (val) => {
   return String(val);
 };
 
-const PatientCard = ({ patient, onPatientUpdate, onValidarCPF, validandoCPF = false }) => {
+const PatientCard = forwardRef(({
+  patient,
+  onPatientUpdate,
+  onValidarCPF,
+  validandoCPF = false,
+  sincronizacaoInfo = null,
+  codigoCorrespondente,
+  codigoCorrespondenteValido = false,
+  onCodigoCorrespondenteChange,
+  sincronizarCorrespondenteNoSalvar = null,
+  onToggleSincronizarCorrespondente,
+}, ref) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedData, setEditedData] = useState({});
   const [saveConfirmed, setSaveConfirmed] = useState(false);
+
+  // Expõe saveIfEditing para o pai via ref
+  useImperativeHandle(ref, () => ({
+    saveIfEditing: () => {
+      if (!isEditing) return;
+      if (onPatientUpdate) onPatientUpdate(editedData);
+      setIsEditing(false);
+      setSaveConfirmed(true);
+      setTimeout(() => setSaveConfirmed(false), 3000);
+    }
+  }));
 
   const handleEdit = () => {
     setEditedData({ ...patient });
@@ -235,6 +257,7 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF, validandoCPF = fa
                   {validandoCPF ? 'Validando CPF...' : 'Validar na Receita Federal'}
                 </button>
               )}
+
             </div>
           )}
         </div>
@@ -359,22 +382,63 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF, validandoCPF = fa
         ) : (
           <p className="text-2xl font-bold text-secondary dark:text-blue-400">{safeStr(patient?.recordNumber) || 'Não informado'}</p>
         )}
-      </section>
 
-      <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-4"></div>
-
-      {/* Local de origem */}
-      <section className="mb-4">
-        <h2 className="text-[10px] font-bold text-slate-400 dark:text-neutral-500 uppercase tracking-widest mb-3">Local de origem</h2>
-        {isEditing ? (
-          <LocalOrigemSelect
-            value={editedData.origin || ''}
-            onChange={(selectedOrigem) => handleChange('origin', selectedOrigem?.nome || '')}
-            className="w-full px-3.5 py-2.5 text-sm border-2 border-neutral-200 dark:border-neutral-600 rounded-md transition-all bg-neutral-50 dark:bg-neutral-700 dark:text-neutral-100 dark:placeholder:text-neutral-500 focus:outline-none focus:border-primary focus:bg-white dark:focus:bg-neutral-600 focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+        <div className="mt-3 p-2.5 rounded-lg border border-blue-200 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20">
+          <label className="block text-[11px] font-medium text-blue-700 dark:text-blue-300 mb-1">
+            Código correspondente (0085/0200)
+          </label>
+          <input
+            type="text"
+            value={codigoCorrespondente || ''}
+            onChange={(e) => onCodigoCorrespondenteChange?.(e.target.value)}
+            className="w-full px-2.5 py-2 text-[11px] border border-blue-300 dark:border-blue-600 rounded-lg bg-white dark:bg-neutral-800 text-slate-700 dark:text-neutral-100"
+            placeholder="Ex: 0200XXXXXXXXX ou 0085XXXXXXXXX"
           />
-        ) : (
-          <p className="text-sm text-[#333] dark:text-neutral-300">{safeStr(patient?.origin) || 'Não informado'}</p>
-        )}
+          {!codigoCorrespondenteValido && (
+            <p className="text-[10px] text-blue-700 dark:text-blue-300 mt-1">
+              Formato esperado: começa com 0085 ou 0200 e tem 13 dígitos.
+            </p>
+          )}
+
+          <div className="mt-2 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => onToggleSincronizarCorrespondente?.(null)}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${
+                sincronizarCorrespondenteNoSalvar === null
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-200 dark:bg-neutral-700 text-slate-700 dark:text-neutral-200 hover:bg-slate-300 dark:hover:bg-neutral-600'
+              }`}
+            >
+              Perguntar
+            </button>
+            <button
+              type="button"
+              onClick={() => onToggleSincronizarCorrespondente?.(true)}
+              disabled={!codigoCorrespondenteValido}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${
+                !codigoCorrespondenteValido
+                  ? 'bg-slate-100 dark:bg-neutral-800 text-slate-400 dark:text-neutral-500 cursor-not-allowed'
+                  : sincronizarCorrespondenteNoSalvar === true
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/60'
+              }`}
+            >
+              Sim
+            </button>
+            <button
+              type="button"
+              onClick={() => onToggleSincronizarCorrespondente?.(false)}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${
+                sincronizarCorrespondenteNoSalvar === false
+                  ? 'bg-rose-600 text-white'
+                  : 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 hover:bg-rose-200 dark:hover:bg-rose-900/60'
+              }`}
+            >
+              Não
+            </button>
+          </div>
+        </div>
       </section>
 
       <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-4"></div>
@@ -499,6 +563,6 @@ const PatientCard = ({ patient, onPatientUpdate, onValidarCPF, validandoCPF = fa
       </div>
     </div>
   );
-};
+});
 
 export default PatientCard;

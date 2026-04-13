@@ -12,6 +12,7 @@ import json
 import traceback
 import os
 import threading
+import re
 import requests as http_requests
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
@@ -28,6 +29,119 @@ FLASK_BASE_URL = "http://localhost:5000"
 # Lock global para evitar execucao dupla (APScheduler interno + disparar_4h.ps1)
 _job_lock = threading.Lock()
 _job_running = False
+
+
+def _normalizar_codigo_requisicao(codigo):
+    digitos = re.sub(r"\D", "", str(codigo or "").strip())
+    if not digitos:
+        return ""
+    if len(digitos) < 13:
+        digitos = digitos.zfill(13)
+    elif len(digitos) > 13:
+        digitos = digitos[-13:]
+    return digitos
+
+
+def _buscar_requisicoes_disponiveis(limite=15, max_tentativas=4):
+    """
+    Busca requisicoes disponiveis com retry e fallback de janela de datas.
+    Mitiga falhas transientes do apLIS (ex.: 403/timeout na madrugada).
+    """
+    hoje = datetime.now()
+    ontem = (hoje - timedelta(days=1)).strftime("%Y-%m-%d")
+    dois_dias = (hoje - timedelta(days=2)).strftime("%Y-%m-%d")
+    tres_dias = (hoje - timedelta(days=3)).strftime("%Y-%m-%d")
+
+    payloads = [
+        {"filtrarAguardaAdmissao": True, "limite": limite},
+        {
+            "filtrarAguardaAdmissao": True,
+            "limite": limite,
+            "periodoIni": ontem,
+            "periodoFim": ontem,
+        },
+        {
+            "filtrarAguardaAdmissao": True,
+            "limite": limite,
+            "periodoIni": dois_dias,
+            "periodoFim": ontem,
+        },
+        {
+            "filtrarAguardaAdmissao": True,
+            "limite": limite,
+            "periodoIni": tres_dias,
+            "periodoFim": ontem,
+        },
+    ]
+
+    ultimo_erro = "falha desconhecida"
+
+    for tentativa in range(1, max_tentativas + 1):
+        for idx, payload in enumerate(payloads, start=1):
+            try:
+                logger.info(
+                    "[SCHEDULER] Tentativa %d/%d para listar requisicoes (perfil %d/%d)",
+                    tentativa,
+                    max_tentativas,
+                    idx,
+                    len(payloads),
+                )
+
+                resp = http_requests.post(
+                    f"{FLASK_BASE_URL}/api/requisicoes/disponiveis",
+                    json=payload,
+                    timeout=60,
+                )
+
+                if resp.status_code != 200:
+                    ultimo_erro = f"HTTP {resp.status_code} - {resp.text[:300]}"
+                    logger.warning(
+                        "[SCHEDULER] Falha ao listar requisicoes (tentativa %d, perfil %d): %s",
+                        tentativa,
+                        idx,
+                        ultimo_erro,
+                    )
+                    continue
+
+                data = resp.json()
+                if not data.get("sucesso"):
+                    detalhe = data.get("detalhe") or data.get("erro") or "desconhecido"
+                    ultimo_erro = str(detalhe)
+                    logger.warning(
+                        "[SCHEDULER] API /disponiveis retornou sucesso=0 (tentativa %d, perfil %d): %s",
+                        tentativa,
+                        idx,
+                        detalhe,
+                    )
+                    continue
+
+                requisicoes = data.get("requisicoes", [])
+                logger.info(
+                    "[SCHEDULER] %d requisicoes encontradas (tentativa %d, perfil %d)",
+                    len(requisicoes),
+                    tentativa,
+                    idx,
+                )
+                return requisicoes
+
+            except Exception as e:
+                ultimo_erro = str(e)
+                logger.warning(
+                    "[SCHEDULER] Excecao ao listar requisicoes (tentativa %d, perfil %d): %s",
+                    tentativa,
+                    idx,
+                    e,
+                )
+
+        if tentativa < max_tentativas:
+            espera = 20 * tentativa
+            logger.info(
+                "[SCHEDULER] Aguardando %ds antes de nova tentativa de listagem...",
+                espera,
+            )
+            time.sleep(espera)
+
+    raise Exception(f"Falha ao buscar requisicoes disponiveis apos retries: {ultimo_erro}")
 
 
 def executar_processamento_automatico():
@@ -109,22 +223,7 @@ def _executar_processamento_interno():
         # =============================================
         logger.info("[SCHEDULER] Etapa 1: Buscando requisicoes disponiveis...")
 
-        resp = http_requests.post(f"{FLASK_BASE_URL}/api/requisicoes/disponiveis", json={
-            "filtrarAguardaAdmissao": True,
-            "limite": 15
-        }, timeout=60)
-
-        if resp.status_code != 200:
-            logger.error("[SCHEDULER] Erro ao buscar requisicoes: HTTP %s - %s", resp.status_code, resp.text[:500])
-            return
-
-        data = resp.json()
-        if not data.get('sucesso'):
-            logger.error("[SCHEDULER] API retornou erro: %s", data.get('erro', 'desconhecido'))
-            return
-
-        requisicoes = data.get('requisicoes', [])
-        logger.info("[SCHEDULER] %d requisicoes encontradas", len(requisicoes))
+        requisicoes = _buscar_requisicoes_disponiveis(limite=15, max_tentativas=4)
 
         if not requisicoes:
             logger.info("[SCHEDULER] Nenhuma requisicao pendente. Finalizando.")
@@ -139,7 +238,7 @@ def _executar_processamento_interno():
 
         # Primeiro ordena: 0085 antes de 0200 para preferir 0085 quando ambos presentes
         def _ordem_preferencia(req):
-            cod = str(req.get('CodRequisicao') or req.get('codRequisicao') or req.get('codigo') or req.get('cod', ''))
+            cod = _normalizar_codigo_requisicao(req.get('CodRequisicao') or req.get('codRequisicao') or req.get('codigo') or req.get('cod', ''))
             if len(cod) >= 4 and cod[:4] == '0085':
                 return 0  # 0085 tem prioridade
             if len(cod) >= 4 and cod[:4] == '0200':
@@ -151,7 +250,7 @@ def _executar_processamento_interno():
         requisicoes_dedup = []
         codigos_adicionados = set()
         for req in requisicoes_ordenadas:
-            cod = str(req.get('CodRequisicao') or req.get('codRequisicao') or req.get('codigo') or req.get('cod', ''))
+            cod = _normalizar_codigo_requisicao(req.get('CodRequisicao') or req.get('codRequisicao') or req.get('codigo') or req.get('cod', ''))
             # Calcular codigo do par correspondente
             cod_par = None
             if len(cod) >= 4:
@@ -191,7 +290,7 @@ def _executar_processamento_interno():
         # =============================================
         itens_para_inserir = []
         for idx, req in enumerate(requisicoes):
-            cod = req.get('CodRequisicao') or req.get('codRequisicao') or req.get('codigo') or req.get('cod', '')
+            cod = _normalizar_codigo_requisicao(req.get('CodRequisicao') or req.get('codRequisicao') or req.get('codigo') or req.get('cod', ''))
             itens_para_inserir.append({
                 'sessao_id': sessao_id,
                 'cod_requisicao': str(cod),
@@ -220,7 +319,10 @@ def _executar_processamento_interno():
 
         for i, item in enumerate(itens_inseridos):
             item_id = item['id']
-            cod = item['cod_requisicao']
+            cod = _normalizar_codigo_requisicao(item.get('cod_requisicao'))
+
+            if not cod:
+                raise Exception(f"Código de requisição inválido no item da fila: {item.get('cod_requisicao')}")
 
             logger.info("[SCHEDULER] [%d/%d] Processando requisicao %s...", i + 1, total, cod)
 

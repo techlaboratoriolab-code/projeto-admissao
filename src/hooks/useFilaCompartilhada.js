@@ -8,6 +8,14 @@ import { useAuth } from '../contexts/AuthContext';
  */
 export function useFilaCompartilhada() {
   const { usuario } = useAuth();
+  const roleNormalizada = String(usuario?.role || '').trim().toLowerCase();
+  const isAdmin = Boolean(
+    usuario?.is_admin
+    || usuario?.isAdmin
+    || roleNormalizada === 'admin'
+    || roleNormalizada === 'adm'
+    || roleNormalizada === 'administrador'
+  );
 
   const [sessaoAtiva, setSessaoAtiva] = useState(null);
   const [filaRequisicoes, setFilaRequisicoes] = useState([]);
@@ -50,7 +58,7 @@ export function useFilaCompartilhada() {
               console.log(`[FilaCompartilhada] Finalizando sessao antiga ${s.id} de ${dataSessao}`);
               await supabase
                 .from('fila_sessao')
-                .update({ status: 'finalizado' })
+                .update({ status: 'concluido' })
                 .eq('id', s.id);
             }
           }
@@ -246,7 +254,39 @@ export function useFilaCompartilhada() {
     if (dados.status) setFilaStatus(dados.status);
   }, []);
 
-  const adquirirLockRevisao = useCallback(async (itemId) => {
+  const adquirirLockRevisao = useCallback(async (itemId, opcoes = {}) => {
+    const forcar = !!opcoes?.forcar;
+
+    if (forcar && isAdmin) {
+      try {
+        // Admin pode assumir lock de qualquer item em revisão
+        const { error } = await supabase
+          .from('fila_admissao')
+          .update({
+            status: 'em_revisao',
+            revisado_por: usuario?.id || 'anon',
+            revisado_por_nome: usuario?.nome_completo || usuario?.username || 'Administrador',
+            lock_timestamp: new Date().toISOString(),
+          })
+          .eq('id', itemId);
+
+        if (error) {
+          console.error('[FilaCompartilhada] Erro ao forçar lock (admin):', error);
+          return false;
+        }
+
+        if (meuLockRef.current && meuLockRef.current !== itemId) {
+          await liberarLockRevisao(meuLockRef.current);
+        }
+
+        meuLockRef.current = itemId;
+        return true;
+      } catch (err) {
+        console.error('[FilaCompartilhada] Exceção ao forçar lock (admin):', err);
+        return false;
+      }
+    }
+
     try {
       const { data, error } = await supabase.rpc('acquire_review_lock', {
         p_item_id: itemId,
@@ -273,7 +313,7 @@ export function useFilaCompartilhada() {
       console.error('[FilaCompartilhada] Exceção ao adquirir lock:', err);
       return false;
     }
-  }, [usuario]);
+  }, [isAdmin, usuario]);
 
   const liberarLockRevisao = useCallback(async (itemId) => {
     const id = itemId || meuLockRef.current;
@@ -338,11 +378,32 @@ export function useFilaCompartilhada() {
     }
   }, []);
 
+  const reverterParaRevisao = useCallback(async (itemId) => {
+    if (!isAdmin) return false;
+    const { error } = await supabase
+      .from('fila_admissao')
+      .update({
+        status: 'processado',
+        salvo_por: null,
+        revisado_por: null,
+        revisado_por_nome: null,
+        lock_timestamp: null,
+        erro: null,
+      })
+      .eq('id', itemId);
+
+    if (error) {
+      console.error('[FilaCompartilhada] Erro ao reverter item:', error);
+      return false;
+    }
+    return true;
+  }, [isAdmin]);
+
   const resetarSessao = useCallback(async () => {
     try {
       // Finalizar sessão ativa no Supabase
       if (sessaoIdRef.current) {
-        await supabase.from('fila_sessao').update({ status: 'finalizado' }).eq('id', sessaoIdRef.current);
+        await supabase.from('fila_sessao').update({ status: 'concluido' }).eq('id', sessaoIdRef.current);
       } else {
         // Tentar finalizar qualquer sessão de hoje em estado processando/revisao
         const hoje = new Date().toISOString().split('T')[0];
@@ -353,7 +414,7 @@ export function useFilaCompartilhada() {
           .gte('created_at', hoje);
         if (sessoes?.length) {
           const ids = sessoes.map(s => s.id);
-          await supabase.from('fila_sessao').update({ status: 'finalizado' }).in('id', ids);
+          await supabase.from('fila_sessao').update({ status: 'concluido' }).in('id', ids);
         }
       }
     } catch (err) {
@@ -382,6 +443,7 @@ export function useFilaCompartilhada() {
     liberarLockRevisao,
     aprovarItem,
     pularItem,
+    reverterParaRevisao,
     resetarSessao,
   };
 }

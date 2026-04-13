@@ -181,13 +181,17 @@ const UserManagement = () => {
     }
 
     try {
+      const usernameLimpo = formData.username.trim();
+      const emailLimpo = formData.email.trim();
+      const nomeLimpo = formData.nome.trim();
+
       if (modoEdicao) {
         // ATUALIZAR USUÁRIO via Supabase Admin
         const updateData = {
-          email: formData.email,
+          email: emailLimpo,
           user_metadata: {
-            username: formData.username,
-            name: formData.nome,
+            username: usernameLimpo,
+            name: nomeLimpo,
             department: formData.department,
             role: formData.role,
             aplis_usuario: formData.aplis_usuario || null,
@@ -206,11 +210,11 @@ const UserManagement = () => {
       } else {
         // CRIAR NOVO USUÁRIO via REST Admin (supabase-js v2 bloqueia auth.admin no browser)
         await adminCreateUser({
-          email: formData.email,
+          email: emailLimpo,
           password: formData.senha,
           user_metadata: {
-            username: formData.username,
-            name: formData.nome,
+            username: usernameLimpo,
+            name: nomeLimpo,
             department: formData.department,
             role: formData.role,
             aplis_usuario: formData.aplis_usuario || null,
@@ -609,8 +613,8 @@ const UserManagement = () => {
                 <div>
                   <label htmlFor="username" className={labelCls}>Usuário *</label>
                   <input id="username" type="text" name="username" value={formData.username}
-                    onChange={handleInputChange} placeholder="ex: ana.lima" disabled={modoEdicao}
-                    className={`${inputCls} disabled:opacity-50 disabled:cursor-not-allowed`}/>
+                    onChange={handleInputChange} placeholder="ex: ana.lima"
+                    className={inputCls}/>
                 </div>
                 <div>
                   <label htmlFor="email" className={labelCls}>E-mail *</label>

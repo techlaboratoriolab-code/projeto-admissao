@@ -150,6 +150,8 @@ export function ConvenioSelect({ value, onChange, disabled = false, className = 
   const [convenios, setConvenios] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [query, setQuery] = useState(value || '');
+  const [aberto, setAberto] = useState(false);
 
   useEffect(() => {
     const carregarConvenios = async () => {
@@ -176,46 +178,105 @@ export function ConvenioSelect({ value, onChange, disabled = false, className = 
     carregarConvenios();
   }, []);
 
+  useEffect(() => {
+    setQuery(value || '');
+  }, [value]);
+
   if (loading) {
     return (
-      <select disabled className={className}>
-        <option>Carregando convênios...</option>
-      </select>
+      <input
+        type="text"
+        disabled
+        className={className}
+        value="Carregando convênios..."
+        readOnly
+      />
     );
   }
 
   if (error) {
     return (
-      <select disabled className={className}>
-        <option>{error}</option>
-      </select>
+      <input
+        type="text"
+        disabled
+        className={className}
+        value={error}
+        readOnly
+      />
     );
   }
 
-  // Encontrar o ID baseado no nome do valor
-  const getValueForSelect = () => {
-    if (!value) return '';
-    const convenio = convenios.find(c => c.nome === value);
-    return convenio?.id || '';
+  const normalizar = (texto) => String(texto || '').trim().toLowerCase();
+
+  const encontrarConvenio = (nomeDigitado) => {
+    const alvo = normalizar(nomeDigitado);
+    if (!alvo) return null;
+    return convenios.find((convenio) => normalizar(convenio?.nome) === alvo) || null;
+  };
+
+  const conveniosFiltrados = convenios
+    .filter((convenio) => {
+      const texto = normalizar(query);
+      if (!texto) return true;
+      const nome = normalizar(convenio?.nome);
+      return nome.includes(texto);
+    })
+    .slice(0, 80);
+
+  const selecionarConvenio = (convenio) => {
+    const nome = convenio?.nome || '';
+    setQuery(nome);
+    onChange(convenio || null, nome);
+    setAberto(false);
   };
 
   return (
-    <select
-      value={getValueForSelect()}
-      onChange={(e) => {
-        const convenioSelecionado = convenios.find(c => c.id.toString() === e.target.value);
-        onChange(convenioSelecionado || null);
-      }}
-      disabled={disabled}
-      className={className}
-    >
-      <option value="">Selecione um convênio...</option>
-      {convenios.map((convenio) => (
-        <option key={convenio.id} value={convenio.id}>
-          {convenio.nome}
-        </option>
-      ))}
-    </select>
+    <div className="relative">
+      <input
+        type="text"
+        value={query || ''}
+        onChange={(e) => {
+          const nomeDigitado = e.target.value;
+          setQuery(nomeDigitado);
+          setAberto(true);
+          const convenioSelecionado = encontrarConvenio(nomeDigitado);
+          onChange(convenioSelecionado, nomeDigitado);
+        }}
+        onFocus={() => setAberto(true)}
+        onClick={() => setAberto(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            setAberto(false);
+          }
+        }}
+        disabled={disabled}
+        className={className}
+        placeholder="Digite ou selecione um convênio..."
+        autoComplete="off"
+      />
+
+      {aberto && !disabled && (
+        <div className="mt-1 w-full max-h-64 overflow-y-auto rounded-md border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 shadow-lg">
+          {conveniosFiltrados.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-500 dark:text-neutral-400">
+              Nenhum convênio encontrado
+            </div>
+          ) : (
+            conveniosFiltrados.map((convenio) => (
+              <button
+                key={convenio.id}
+                type="button"
+                className="w-full text-left px-3 py-2 text-sm text-gray-900 dark:text-neutral-100 hover:bg-gray-100 dark:hover:bg-neutral-700"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => selecionarConvenio(convenio)}
+              >
+                <div className="font-medium">{convenio.nome}</div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -226,6 +287,8 @@ export function FontePagadoraSelect({ value, onChange, disabled = false, classNa
   const [instituicoes, setInstituicoes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [query, setQuery] = useState(value || '');
+  const [aberto, setAberto] = useState(false);
 
   useEffect(() => {
     const carregarInstituicoes = async () => {
@@ -252,6 +315,10 @@ export function FontePagadoraSelect({ value, onChange, disabled = false, classNa
     carregarInstituicoes();
   }, []);
 
+  useEffect(() => {
+    setQuery(value || '');
+  }, [value]);
+
   // Auto-selecionar "Particular" quando não há valor definido
   useEffect(() => {
     if (!loading && !error && instituicoes.length > 0 && (!value || value === 'Não informado') && onChange) {
@@ -264,119 +331,99 @@ export function FontePagadoraSelect({ value, onChange, disabled = false, classNa
 
   if (loading) {
     return (
-      <select disabled className={className}>
-        <option>Carregando fontes pagadoras...</option>
-      </select>
+      <input
+        type="text"
+        disabled
+        className={className}
+        value="Carregando fontes pagadoras..."
+        readOnly
+      />
     );
   }
 
   if (error) {
     return (
-      <select disabled className={className}>
-        <option>{error}</option>
-      </select>
+      <input
+        type="text"
+        disabled
+        className={className}
+        value={error}
+        readOnly
+      />
     );
   }
 
-  // Encontrar o ID baseado no nome do valor
-  const getValueForSelect = () => {
-    if (!value) return '';
-    const instituicao = instituicoes.find(i => i.nome === value);
-    return instituicao?.id || '';
+  const normalizar = (texto) => String(texto || '').trim().toLowerCase();
+
+  const encontrarInstituicao = (nomeDigitado) => {
+    const alvo = normalizar(nomeDigitado);
+    if (!alvo) return null;
+    return instituicoes.find((instituicao) => normalizar(instituicao?.nome) === alvo) || null;
+  };
+
+  const instituicoesFiltradas = instituicoes
+    .filter((instituicao) => {
+      const texto = normalizar(query);
+      if (!texto) return true;
+      const nome = normalizar(instituicao?.nome);
+      return nome.includes(texto);
+    })
+    .slice(0, 80);
+
+  const selecionarInstituicao = (instituicao) => {
+    const nome = instituicao?.nome || '';
+    setQuery(nome);
+    onChange(instituicao || null, nome);
+    setAberto(false);
   };
 
   return (
-    <select
-      value={getValueForSelect()}
-      onChange={(e) => {
-        const instituicaoSelecionada = instituicoes.find(i => i.id.toString() === e.target.value);
-        onChange(instituicaoSelecionada || null);
-      }}
-      disabled={disabled}
-      className={className}
-    >
-      <option value="">Selecione uma fonte pagadora...</option>
-      {instituicoes.map((inst) => (
-        <option key={inst.id} value={inst.id}>
-          {inst.nome}
-        </option>
-      ))}
-    </select>
+    <div className="relative">
+      <input
+        type="text"
+        value={query || ''}
+        onChange={(e) => {
+          const nomeDigitado = e.target.value;
+          setQuery(nomeDigitado);
+          setAberto(true);
+          const instituicaoSelecionada = encontrarInstituicao(nomeDigitado);
+          onChange(instituicaoSelecionada, nomeDigitado);
+        }}
+        onFocus={() => setAberto(true)}
+        onClick={() => setAberto(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            setAberto(false);
+          }
+        }}
+        disabled={disabled}
+        className={className}
+        placeholder="Digite ou selecione uma fonte pagadora..."
+        autoComplete="off"
+      />
+
+      {aberto && !disabled && (
+        <div className="mt-1 w-full max-h-64 overflow-y-auto rounded-md border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 shadow-lg">
+          {instituicoesFiltradas.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-500 dark:text-neutral-400">
+              Nenhuma fonte pagadora encontrada
+            </div>
+          ) : (
+            instituicoesFiltradas.map((instituicao) => (
+              <button
+                key={instituicao.id}
+                type="button"
+                className="w-full text-left px-3 py-2 text-sm text-gray-900 dark:text-neutral-100 hover:bg-gray-100 dark:hover:bg-neutral-700"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => selecionarInstituicao(instituicao)}
+              >
+                <div className="font-medium">{instituicao.nome}</div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
-/**
- * Dropdown para seleção de Local de Origem
- */
-export function LocalOrigemSelect({ value, onChange, disabled = false, className = "" }) {
-  const [locais, setLocais] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    const carregarLocais = async () => {
-      try {
-        setLoading(true);
-        const response = await axios.get(`${API_BASE_URL}/api/locais-origem`, { headers: ngrokHeaders });
-        
-        if (response.data.sucesso === 1) {
-          const locaisOrdenados = response.data.locais.sort((a, b) => 
-            a.nome.localeCompare(b.nome, 'pt-BR')
-          );
-          setLocais(locaisOrdenados);
-        } else {
-          setError('Erro ao carregar locais de origem');
-        }
-      } catch (err) {
-        console.error('[LocalOrigemSelect] Erro ao carregar locais:', err);
-        setError('Erro ao conectar com o servidor');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    carregarLocais();
-  }, []);
-
-  if (loading) {
-    return (
-      <select disabled className={className}>
-        <option>Carregando locais de origem...</option>
-      </select>
-    );
-  }
-
-  if (error) {
-    return (
-      <select disabled className={className}>
-        <option>{error}</option>
-      </select>
-    );
-  }
-
-  // Encontrar o ID baseado no nome do valor
-  const getValueForSelect = () => {
-    if (!value) return '';
-    const local = locais.find(l => l.nome === value);
-    return local?.id || '';
-  };
-
-  return (
-    <select
-      value={getValueForSelect()}
-      onChange={(e) => {
-        const localSelecionado = locais.find(l => l.id.toString() === e.target.value);
-        onChange(localSelecionado || null);
-      }}
-      disabled={disabled}
-      className={className}
-    >
-      <option value="">Selecione um local de origem...</option>
-      {locais.map((local) => (
-        <option key={local.id} value={local.id}>
-          {local.nome}
-        </option>
-      ))}
-    </select>
-  );
-}

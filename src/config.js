@@ -3,91 +3,27 @@
  *
  * MODOS DE ACESSO:
  *
- * 1. PRODUÇÃO (Vercel + Railway/Render):
- *    Defina REACT_APP_API_URL nas variáveis de ambiente do Vercel
- *    Ex: https://meu-backend.railway.app
- *
- * 2. LOCALHOST (apenas na sua máquina):
+ * 1. LOCALHOST (apenas na sua máquina):
  *    USE_NETWORK = false, USE_NGROK = false
  *
- * 3. REDE LOCAL (outras pessoas na mesma rede WiFi/LAN):
+ * 2. REDE LOCAL (outras pessoas na mesma rede WiFi/LAN):
  *    USE_NETWORK = true, USE_NGROK = false
  *    IMPORTANTE: Configure seu IP local em NETWORK_IP abaixo!
  *
- * 4. INTERNET (qualquer lugar do mundo via ngrok):
+ * 3. INTERNET (qualquer lugar do mundo via ngrok):
  *    USE_NGROK = true
  */
 
-// 🚀 PRODUÇÃO: variável de ambiente definida no Vercel (prioridade máxima)
-const ENV_API_URL = process.env.REACT_APP_API_URL;
+// URL do backend — prioriza variável de ambiente (Vercel/Render), depois fallback local
+export const API_BASE_URL =
+  process.env.REACT_APP_API_URL ||
+  'http://localhost:5000';
 
-// URL do ngrok para o backend (atualize quando o ngrok gerar uma nova URL)
-const NGROK_API_URL = 'https://automacaolab.ngrok.dev';
-
-// 🌐 CONFIGURAÇÃO DE REDE LOCAL
-// IMPORTANTE: Descubra seu IP local:
-// 1. Abra o CMD (Prompt de Comando)
-// 2. Digite: ipconfig
-// 3. Procure por "Endereço IPv4" (exemplo: 192.168.1.100)
-// 4. Cole o IP aqui embaixo:
-const NETWORK_IP = '192.168.160.155'; // ⚠️ ATUALIZE COM SEU IP LOCAL!
-
-// URLs disponíveis
-const NETWORK_API_URL = `http://${NETWORK_IP}:5000`; // Rede local
-const LOCAL_API_URL = 'http://localhost:5000'; // Apenas esta máquina
-
-// 🎯 CONFIGURAR MODO DE ACESSO (ignorado se REACT_APP_API_URL estiver definido)
-const USE_NGROK = true;  // true = Usar ngrok (internet)
-const USE_NETWORK = false; // true = Usar rede local (outras pessoas na mesma rede)
-
-// URL base da API (selecionada automaticamente)
-// Se REACT_APP_API_URL estiver definido (Vercel/produção), usa ele. Senão, usa o modo local.
-export const API_BASE_URL = ENV_API_URL
-  ? ENV_API_URL
-  : (USE_NGROK ? NGROK_API_URL : (USE_NETWORK ? NETWORK_API_URL : LOCAL_API_URL));
-
-// Logs para debug
-console.log('='.repeat(80));
-console.log('🔧 CONFIGURAÇÃO DA API');
-console.log('='.repeat(80));
-
-let modo = 'LOCALHOST (apenas esta máquina)';
-if (ENV_API_URL) {
-  modo = 'PRODUÇÃO (variável REACT_APP_API_URL - Vercel/Railway)';
-} else if (USE_NGROK) {
-  modo = 'NGROK (internet - qualquer lugar)';
-} else if (USE_NETWORK) {
-  modo = 'REDE LOCAL (outras pessoas na mesma rede WiFi/LAN)';
-}
-
-console.log(`📍 Modo: ${modo}`);
-console.log(`🌐 URL da API: ${API_BASE_URL}`);
-
-if (USE_NETWORK && NETWORK_IP === '192.168.1.100') {
-  console.warn('⚠️ ATENÇÃO: Você precisa configurar seu IP local!');
-  console.warn('⚠️ Abra o CMD, digite "ipconfig" e encontre seu "Endereço IPv4"');
-  console.warn('⚠️ Depois atualize NETWORK_IP em src/config.js');
-}
-
-console.log(`✅ Configuração carregada com sucesso!`);
-console.log('='.repeat(80));
-
-// Fetch wrapper que adiciona header para pular a tela de warning do ngrok
+// Wrapper do fetch que adiciona headers necessários para o ngrok
 export const apiFetch = (url, options = {}) => {
-  const headers = {
-    ...(options.headers || {}),
-    'ngrok-skip-browser-warning': 'true'
-  };
-  return fetch(url, { ...options, headers });
+  return fetch(url, options);
 };
 
 export default {
   API_BASE_URL,
-  USE_NGROK,
-  USE_NETWORK,
-  NGROK_API_URL,
-  NETWORK_API_URL,
-  LOCAL_API_URL,
-  NETWORK_IP,
-  apiFetch
 };

@@ -2,13 +2,21 @@ import React, { useState, useEffect, useRef } from 'react';
 import PatientCard from '../components/PatientCard';
 import { API_BASE_URL, apiFetch } from '../config';
 import { useAuth } from '../contexts/AuthContext';
-import { ConvenioSelect, FontePagadoraSelect, LocalOrigemSelect, MedicoSelect } from '../components/DropdownsAdmissao';
+import { ConvenioSelect, FontePagadoraSelect, MedicoSelect } from '../components/DropdownsAdmissao';
 import { useFilaCompartilhada } from '../hooks/useFilaCompartilhada';
 import { supabase as supabaseClient } from '../lib/supabase';
 import { adminListUsers } from '../lib/supabaseAdminApi';
 
 const AdmissionView = () => {
   const { usuario } = useAuth();
+  const roleNormalizada = String(usuario?.role || '').trim().toLowerCase();
+  const isAdmin = Boolean(
+    usuario?.is_admin
+    || usuario?.isAdmin
+    || roleNormalizada === 'admin'
+    || roleNormalizada === 'adm'
+    || roleNormalizada === 'administrador'
+  );
   const [loading, setLoading] = useState(false);
   const [loadingRequisicao, setLoadingRequisicao] = useState(false);
   const [loadingOCR, setLoadingOCR] = useState(false);
@@ -29,22 +37,26 @@ const AdmissionView = () => {
     idPaciente: '',
     dtaColeta: new Date().toISOString().split('T')[0],
     idConvenio: '',
-    idLocalOrigem: '1',
     idFontePagadora: '',
     idMedico: '',
     idExame: '',
     examesConvenio: '',
     numGuia: '',
     matConvenio: '',
+    validadeMatricula: '',
     fontePagadora: '',
     convenio: '',
-    localOrigem: '',
-    dadosClinicos: ''
+    dadosClinicos: '',
+    sexo: ''
   });
 
   const [patientData, setPatientData] = useState(null);
+  const [camposProtegidos, setCamposProtegidos] = useState(new Set()); // campos editados manualmente pelo usuário
+  const [transicionandoRequisicao, setTransicionandoRequisicao] = useState(false); // timer entre requisições
   const [requisicaoData, setRequisicaoData] = useState(null);
   const [sincronizacaoInfo, setSincronizacaoInfo] = useState(null);
+  const [sincronizarCorrespondenteNoSalvar, setSincronizarCorrespondenteNoSalvar] = useState(null); // null = perguntar, true/false = escolha manual
+  const [codigoCorrespondenteManual, setCodigoCorrespondenteManual] = useState('');
   const [receitaFederalStatus, setReceitaFederalStatus] = useState(null); // 🆕 Status da validação da Receita Federal
   const [validandoCPF, setValidandoCPF] = useState(false);
 
@@ -77,6 +89,7 @@ const AdmissionView = () => {
   // Ref para debounce da busca automática
   const debounceRef = useRef(null);
   const ultimaBuscaCodRef = useRef('');
+  const patientCardRef = useRef(null);
 
   const CODIGO_REQUISICAO_REGEX = /^(0085|0200)\d{9}$/;
 
@@ -103,6 +116,65 @@ const AdmissionView = () => {
 
   const valorTextoValido = (valor) => (ehTextoPlaceholder(valor) ? '' : String(valor).trim());
 
+  const executarComTimeout = async (fn, timeoutMs, mensagemErro) => {
+    let timerId;
+    try {
+      return await Promise.race([
+        Promise.resolve().then(fn),
+        new Promise((_, reject) => {
+          timerId = setTimeout(() => {
+            reject(new Error(mensagemErro || `Tempo limite excedido (${Math.round(timeoutMs / 1000)}s)`));
+          }, timeoutMs);
+        })
+      ]);
+    } finally {
+      if (timerId) clearTimeout(timerId);
+    }
+  };
+
+  const codigoCorrespondenteSelecionado = resolverCodigoCanonico(
+    codigoCorrespondenteManual,
+    sincronizacaoInfo?.tipo === 'OCR' ? sincronizacaoInfo?.codigoCorrespondente : ''
+  );
+  const codigoCorrespondenteSelecionadoValido = codigoRequisicaoValido(codigoCorrespondenteSelecionado);
+
+  const obterConfiguracaoSincronizacao = () => {
+    const codigoCorrespondenteDetectado = codigoCorrespondenteSelecionadoValido
+      ? codigoCorrespondenteSelecionado
+      : '';
+
+    let sincronizarCorrespondente = false;
+    if (codigoCorrespondenteDetectado) {
+      sincronizarCorrespondente = sincronizarCorrespondenteNoSalvar !== false;
+    }
+
+    return {
+      codigoCorrespondenteDetectado,
+      sincronizarCorrespondente,
+    };
+  };
+
+  const resetarEstadoCorrespondencia = () => {
+    setSincronizacaoInfo(null);
+    setCodigoCorrespondenteManual('');
+    setSincronizarCorrespondenteNoSalvar(null);
+  };
+
+  const detectarBiopsiaEImuno = (listaExames = []) => {
+    const textoBruto = (Array.isArray(listaExames) ? listaExames : [listaExames])
+      .map((item) => String(item || '').toLowerCase())
+      .join(' ');
+
+    const texto = textoBruto
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+    const temBiopsia = texto.includes('biopsia');
+    const temImuno = texto.includes('imuno') || texto.includes('himuno') || texto.includes('imunohisto');
+
+    return temBiopsia && temImuno;
+  };
+
   const buscarCodigoCanonicoNaApi = async (codigoInformado) => {
     const codigo = normalizarCodigoRequisicao(codigoInformado);
     if (!codigo) return '';
@@ -125,6 +197,7 @@ const AdmissionView = () => {
     filaRequisicoes, filaStatus, sessaoAtiva, euSouProcessador,
     iniciarSessao, atualizarItem, atualizarSessao,
     adquirirLockRevisao, liberarLockRevisao, aprovarItem: aprovarItemSupabase, pularItem: pularItemSupabase,
+    reverterParaRevisao,
     resetarSessao: resetarSessaoHook
   } = useFilaCompartilhada();
 
@@ -266,6 +339,7 @@ const AdmissionView = () => {
 
     setLoadingRequisicao(true);
     setMessage(null);
+    resetarEstadoCorrespondencia();
 
     // LIMPAR ESTADOS ANTERIORES (evitar herança entre requisições no modo automático)
     setResultadoConsolidadoFinal(null);
@@ -320,8 +394,6 @@ const AdmissionView = () => {
           console.log('[DEBUG] data.paciente.dtaNasc:', data.paciente.dtaNasc);
           console.log('[DEBUG] tipo:', typeof data.paciente.dtaNasc);
           console.log('[DEBUG] data completo:', JSON.stringify(data, null, 2));
-          console.log('[DEBUG] localOrigem:', data.localOrigem);
-          console.log('[DEBUG] localOrigem.nome:', data.localOrigem?.nome);
           console.log('[DEBUG] fontePagadora:', data.fontePagadora);
           console.log('[DEBUG] fontePagadora.nome:', data.fontePagadora?.nome);
           console.log('[DEBUG] convenio:', data.convenio);
@@ -381,7 +453,7 @@ const AdmissionView = () => {
             age: `${idade} anos`,
             birthDate: formatarData(data.paciente.dtaNasc),
             recordNumber: data.requisicao.codRequisicao,
-            origin: valorTextoValido(data.localOrigem?.nome),
+            origin: '',
             payingSource: valorTextoValido(data.fontePagadora?.nome),
             insurance: valorTextoValido(data.convenio?.nome),
             doctorName: data.medico?.nome || 'Não informado',
@@ -396,6 +468,7 @@ const AdmissionView = () => {
             phone: data.paciente.telCelular,
             email: data.paciente.email,
             insuranceCardNumber: data.paciente.matriculaConvenio,
+            insuranceCardValidity: data.paciente.validadeMatricula,
             numGuia: data.paciente.numGuia || data.requisicao?.numGuia || data.dados_primarios?.numGuia || 'Não informado',
             address: formatarEndereco(data.paciente.endereco),
             exams: data.requisicao?.examesNomes || 'Não informado'
@@ -426,13 +499,12 @@ const AdmissionView = () => {
             // Buscar IDs tanto do objeto requisicao quanto dos objetos específicos - NÃO usar prev para evitar herdar de requisição anterior
             idConvenio: data.requisicao.idConvenio?.toString() || data.convenio?.id?.toString() || '',
             convenio: data.requisicao.convenio || data.convenio?.nome || '',
-            idLocalOrigem: data.requisicao.idLocalOrigem?.toString() || data.localOrigem?.id?.toString() || '1',
-            localOrigem: data.requisicao.localOrigem || data.localOrigem?.nome || '',
             idFontePagadora: data.requisicao.idFontePagadora?.toString() || data.fontePagadora?.id?.toString() || '',
             fontePagadora: data.requisicao.fontePagadora || data.fontePagadora?.nome || '',
             idMedico: data.requisicao.idMedico?.toString() || '',
             numGuia: data.requisicao.numGuia || '',
-            dadosClinicos: data.requisicao.dadosClinicos || ''
+            dadosClinicos: data.requisicao.dadosClinicos || '',
+            sexo: data.paciente?.sexo || data.paciente?.DesSexo || ''
             // examesConvenio e idExame serão preenchidos pelo OCR depois
           };
         });
@@ -537,8 +609,12 @@ const AdmissionView = () => {
             tipo: data.sincronizacao.tipo_sincronizacao,
             camposSincronizados: data.sincronizacao.campos_sincronizados
           });
+          setCodigoCorrespondenteManual('');
+          setSincronizarCorrespondenteNoSalvar(null);
         } else {
           setSincronizacaoInfo(null);
+          setCodigoCorrespondenteManual('');
+          setSincronizarCorrespondenteNoSalvar(null);
         }
 
         // SEMPRE gerar JSON em topografia logo após carregar os dados
@@ -671,17 +747,21 @@ const AdmissionView = () => {
     }
 
     // Número da guia
-    if (req.convenio?.numGuia?.valor) {
+    if (req.convenio?.numGuia?.valor && !camposProtegidos.has('numGuia')) {
       atualizacoesOCR.numGuia = req.convenio.numGuia.valor;
       camposPreenchidos.push('Número da Guia');
       console.log('[PREENCHER] ✓ Número da guia:', req.convenio.numGuia.valor);
+    } else if (camposProtegidos.has('numGuia')) {
+      console.log('[PREENCHER] 🔒 numGuia protegido pelo usuário - OCR ignorado');
     }
 
     // Convênio - matricula do convênio
-    if (req.convenio?.matConvenio?.valor) {
+    if (req.convenio?.matConvenio?.valor && !camposProtegidos.has('insuranceCardNumber')) {
       atualizacoesOCR.matConvenio = req.convenio.matConvenio.valor;
       camposPreenchidos.push('Matrícula do Convênio');
       console.log('[PREENCHER] ✓ Matrícula do convênio:', req.convenio.matConvenio.valor);
+    } else if (camposProtegidos.has('insuranceCardNumber')) {
+      console.log('[PREENCHER] 🔒 matConvenio protegido pelo usuário - OCR ignorado');
     }
 
     // ✅ CONVÊNIO - Nome do plano de saúde (CORRIGIDO: usar nomeConvenio)
@@ -758,16 +838,20 @@ const AdmissionView = () => {
 
           // IMPORTANTE: Pegar TODOS os nomes dos exames do OCR (encontrados E não encontrados)
           // para preencher o campo "EXAMES CONVÊNIO"
-          atualizacoesOCR.examesConvenio = nomesExames.join(', ');
-          camposPreenchidos.push(`${nomesExames.length} exame(s) do OCR`);
-          console.log('[PREENCHER] ✓ TODOS os nomes dos exames para campo EXAMES CONVÊNIO:', nomesExames.join(', '));
+          if (!camposProtegidos.has('exams')) {
+            atualizacoesOCR.examesConvenio = nomesExames.join(', ');
+            camposPreenchidos.push(`${nomesExames.length} exame(s) do OCR`);
+            console.log('[PREENCHER] ✓ TODOS os nomes dos exames para campo EXAMES CONVÊNIO:', nomesExames.join(', '));
 
-          // Atualizar também no card lateral do paciente
-          setPatientData(prev => ({
-            ...prev,
-            exams: nomesExames.join('\n')
-          }));
-          console.log('[PREENCHER] ✓ Exames atualizados no card lateral do paciente');
+            // Atualizar também no card lateral do paciente
+            setPatientData(prev => ({
+              ...prev,
+              exams: nomesExames.join('\n')
+            }));
+            console.log('[PREENCHER] ✓ Exames atualizados no card lateral do paciente');
+          } else {
+            console.log('[PREENCHER] 🔒 exames protegidos pelo usuário - OCR ignorado');
+          }
 
           if (idsEncontrados.length > 0) {
             // Usar o primeiro exame como idExame principal
@@ -1137,63 +1221,66 @@ const AdmissionView = () => {
           if (valor !== null && valor !== undefined && valor !== '') {
             console.log(`[PREENCHER] ✓ Campo OCR ${key}:`, valor);
 
-            // 🆕 MAPEAMENTO EXPANDIDO - Suporta todos os formatos possíveis
+            // MAPEAMENTO EXPANDIDO - Suporta todos os formatos possíveis
+            // Campos protegidos pelo usuário não são sobrescritos pelo OCR
             // Nome do paciente
             if (key === 'NomPaciente' || key === 'nome' || key === 'NomePaciente' || key === 'Nome') {
-              if (!receitaFederalValidou || !prev.name) {
+              if (!camposProtegidos.has('name') && (!receitaFederalValidou || !prev.name)) {
                 novosDados.name = valor;
               } else {
-                console.log('[PREENCHER] ⚠️ Nome OCR ignorado - Receita Federal tem prioridade:', prev.name);
+                console.log('[PREENCHER] 🔒 Nome ignorado (protegido ou Receita Federal):', prev.name);
               }
             }
             // Data de nascimento
             else if (key === 'DtaNascimento' || key === 'DtaNasc' || key === 'dtaNasc' || key === 'dataNascimento') {
-              if (!receitaFederalValidou || !prev.birthDate) {
+              if (!camposProtegidos.has('birthDate') && (!receitaFederalValidou || !prev.birthDate)) {
                 novosDados.birthDate = formatarData(valor);
                 novosDados.age = `${calcularIdade(valor)} anos`;
               } else {
-                console.log('[PREENCHER] ⚠️ Data nascimento OCR ignorada - Receita Federal tem prioridade:', prev.birthDate);
+                console.log('[PREENCHER] 🔒 Data nascimento ignorada (protegida ou Receita Federal):', prev.birthDate);
               }
             }
             // CPF
             else if (key === 'NumCPF' || key === 'cpf' || key === 'CPF' || key === 'NumCpf') {
-              if (!receitaFederalValidou || !prev.cpf) {
+              if (!camposProtegidos.has('cpf') && (!receitaFederalValidou || !prev.cpf)) {
                 novosDados.cpf = valor;
               } else {
-                console.log('[PREENCHER] ⚠️ CPF OCR ignorado - Receita Federal tem prioridade:', prev.cpf);
+                console.log('[PREENCHER] 🔒 CPF ignorado (protegido ou Receita Federal):', prev.cpf);
               }
             }
-            // RG - SEMPRE sobrescrever se vier do OCR e o atual estiver vazio
+            // RG
             else if (key === 'NumRG' || key === 'rg' || key === 'RG' || key === 'RGNumero' || key === 'rgNumero') {
-              if (!prev.rg || prev.rg === 'Não informado' || prev.rg === 'null') {
+              if (!camposProtegidos.has('rg') && (!prev.rg || prev.rg === 'Não informado' || prev.rg === 'null')) {
                 novosDados.rg = valor;
                 console.log('[PREENCHER] ✓ RG preenchido:', valor);
               }
             }
-            // Telefone - SEMPRE sobrescrever se vier do OCR e o atual estiver vazio
+            // Telefone
             else if (key === 'TelCelular' || key === 'telCelular' || key === 'Telefone' || key === 'telefone' || key === 'celular') {
-              if (!prev.phone || prev.phone === 'Não informado' || prev.phone === 'null') {
+              if (!camposProtegidos.has('phone') && (!prev.phone || prev.phone === 'Não informado' || prev.phone === 'null')) {
                 novosDados.phone = valor;
                 console.log('[PREENCHER] ✓ Telefone preenchido:', valor);
               }
             }
-            // Email - SEMPRE sobrescrever se vier do OCR e o atual estiver vazio
+            // Email
             else if (key === 'email' || key === 'Email' || key === 'E-mail') {
-              if (!prev.email || prev.email === 'Não informado' || prev.email === 'null') {
+              if (!camposProtegidos.has('email') && (!prev.email || prev.email === 'Não informado' || prev.email === 'null')) {
                 novosDados.email = valor;
                 console.log('[PREENCHER] ✓ Email preenchido:', valor);
               }
             }
-            // Número da carteirinha - SEMPRE sobrescrever se vier do OCR e o atual estiver vazio
+            // Número da carteirinha
             else if (key === 'MatConvenio' || key === 'matriculaConvenio' || key === 'numeroCarteirinha') {
-              if (!prev.insuranceCardNumber || prev.insuranceCardNumber === 'Não informado' || prev.insuranceCardNumber === 'null') {
+              if (!camposProtegidos.has('insuranceCardNumber') && (!prev.insuranceCardNumber || prev.insuranceCardNumber === 'Não informado' || prev.insuranceCardNumber === 'null')) {
                 novosDados.insuranceCardNumber = valor;
                 console.log('[PREENCHER] ✓ Nº Carteirinha preenchido:', valor);
               }
             }
             // Sexo
             else if (key === 'sexo' || key === 'Sexo') {
-              novosDados.gender = valor;
+              if (!camposProtegidos.has('sexo')) {
+                novosDados.gender = valor;
+              }
             }
           }
         });
@@ -1226,20 +1313,20 @@ const AdmissionView = () => {
             else if (uf) enderecoPartes.push(uf);
             if (cep) enderecoPartes.push(`CEP: ${cep}`);
 
-            if (enderecoPartes.length > 0) {
+            if (enderecoPartes.length > 0 && !camposProtegidos.has('address')) {
               novosDados.address = enderecoPartes.join(', ');
               console.log('[PREENCHER] ✓ Endereço completo montado:', novosDados.address);
             }
           }
           // Se endereco for uma string direta (formato antigo)
-          else if (endereco.valor && typeof endereco.valor === 'string') {
+          else if (endereco.valor && typeof endereco.valor === 'string' && !camposProtegidos.has('address')) {
             novosDados.address = endereco.valor;
             console.log('[PREENCHER] ✓ Endereço direto:', novosDados.address);
           }
         }
 
-        // 🆕 BUSCAR MATRÍCULA DO CONVÊNIO (vem em req.convenio, NÃO em req.paciente!)
-        if (req.convenio?.matConvenio?.valor) {
+        // BUSCAR MATRÍCULA DO CONVÊNIO (vem em req.convenio, NÃO em req.paciente!)
+        if (req.convenio?.matConvenio?.valor && !camposProtegidos.has('insuranceCardNumber')) {
           const matriculaOCR = req.convenio.matConvenio.valor;
           // Só preencher se estiver vazio ou "Não informado"
           if (!prev.insuranceCardNumber || prev.insuranceCardNumber === 'Não informado') {
@@ -1283,8 +1370,8 @@ const AdmissionView = () => {
       });
     }
 
-    // Atualizar exames no patientData se foram preenchidos
-    if (atualizacoesOCR.examesConvenio) {
+    // Atualizar exames no patientData se foram preenchidos e não protegidos
+    if (atualizacoesOCR.examesConvenio && !camposProtegidos.has('exams')) {
       setPatientData(prev => ({
         ...prev,
         exams: atualizacoesOCR.examesConvenio
@@ -1386,10 +1473,59 @@ const AdmissionView = () => {
           console.log('[CONSOLIDAR] 🔄 Detectadas múltiplas requisições sincronizadas!');
           console.log(`[CONSOLIDAR] Total: ${totalRequisicoes} requisições`);
 
-          const codigosRequisicoes = result.resultado.requisicoes.map(r =>
-            r.comentarios_gerais?.requisicao_entrada
+          const codigosRequisicoes = result.resultado.requisicoes
+            .map(r => r.comentarios_gerais?.requisicao_entrada)
+            .filter(Boolean);
+
+          const codigosBarrasOCR = result.resultado.requisicoes
+            .flatMap((req) => {
+              const comentarios = req?.comentarios_gerais || {};
+              const codigosLista = Array.isArray(comentarios.codigos_barras)
+                ? comentarios.codigos_barras
+                : [];
+              const requisicaoEntrada = comentarios.requisicao_entrada ? [comentarios.requisicao_entrada] : [];
+              return [...codigosLista, ...requisicaoEntrada];
+            })
+            .map((codigo) => normalizarCodigoRequisicao(codigo))
+            .filter(Boolean);
+
+          const codigosValidos = [...new Set(codigosBarrasOCR)].filter(codigoRequisicaoValido);
+          const codigoPrincipal = resolverCodigoCanonico(
+            formData.codRequisicao,
+            requisicaoData?.requisicao?.codRequisicao,
+            codigosValidos[0]
           );
+
+          const encontrarCodigoCorrespondente = (codigoBase, listaCodigosValidos) => {
+            const codigos0200 = listaCodigosValidos.filter(codigo => codigo.startsWith('0200'));
+
+            if (codigoBase?.startsWith('0200')) {
+              return codigoBase;
+            }
+
+            return codigos0200[0] || '';
+          };
+
+          const codigoCorrespondenteOCR = encontrarCodigoCorrespondente(codigoPrincipal, codigosValidos);
+
+          setSincronizacaoInfo({
+            sincronizado: Boolean(codigoCorrespondenteOCR),
+            codigoCorrespondente: codigoCorrespondenteOCR || null,
+            tipo: 'OCR',
+            camposSincronizados: ['paciente', 'medico', 'convenio']
+          });
+          setCodigoCorrespondenteManual(codigoCorrespondenteOCR || '');
+
+          if (!codigoCorrespondenteOCR) {
+            setCodigoCorrespondenteManual('');
+            setSincronizarCorrespondenteNoSalvar(null);
+          }
+
           console.log('[CONSOLIDAR] Códigos sincronizados:', codigosRequisicoes);
+          console.log('[CONSOLIDAR] Códigos de barras OCR detectados:', codigosBarrasOCR);
+          console.log('[CONSOLIDAR] Códigos válidos (0085/0200):', codigosValidos);
+          console.log('[CONSOLIDAR] Código principal para sincronização:', codigoPrincipal || 'não identificado');
+          console.log('[CONSOLIDAR] Código correspondente detectado no OCR:', codigoCorrespondenteOCR || 'não detectado');
 
           // Verificar se há sincronização 0085/0200
           const tem0085 = codigosRequisicoes.some(c => c?.startsWith('0085'));
@@ -1975,6 +2111,27 @@ const AdmissionView = () => {
         .map(nome => nome.trim())
         .filter(nome => nome.length > 0);
 
+      const precisaCadastrarImuno = detectarBiopsiaEImuno(nomesExames);
+      if (precisaCadastrarImuno) {
+        const seguir = window.confirm(
+          'Atencao: pedido com BIOPSIA + IMUNO detectado.\n\nLembre de realizar tambem o cadastro de IMUNO.\n\nDeseja continuar o salvamento?'
+        );
+
+        if (!seguir) {
+          setMessage({
+            type: 'warning',
+            text: 'Salvamento interrompido. Realize o cadastro de IMUNO e tente novamente.'
+          });
+          setLoading(false);
+          return;
+        }
+
+        setMessage({
+          type: 'warning',
+          text: 'Alerta: pedido com BIOPSIA + IMUNO. Nao esquecer de cadastrar IMUNO tambem.'
+        });
+      }
+
       console.log('[SALVAR] Nomes dos exames:', nomesExames);
 
       // Buscar IDs dos exames pelo nome
@@ -2012,6 +2169,21 @@ const AdmissionView = () => {
         return;
       }
 
+      const {
+        codigoCorrespondenteDetectado,
+        sincronizarCorrespondente,
+      } = obterConfiguracaoSincronizacao();
+
+      if (codigoCorrespondenteDetectado) {
+
+        console.log('[SALVAR] Sincronização correspondente:', {
+          codigo: codigoCorrespondenteDetectado,
+          habilitada: sincronizarCorrespondente,
+          origem: sincronizarCorrespondenteNoSalvar === null ? 'auto-default' : 'patient-card',
+          edicaoManual: !!codigoCorrespondenteManual
+        });
+      }
+
       // 🆕 LOG DO ESTADO ATUAL DO FORMDATA ANTES DE MONTAR
       console.log('[SALVAR] 🔍 Estado atual do formData ANTES de montar objeto:');
       console.log('[SALVAR]   formData.idPaciente:', formData.idPaciente);
@@ -2039,16 +2211,17 @@ const AdmissionView = () => {
         dtaColeta: dtaColetaFinal, // Garantir que sempre tenha data
         idConvenio: safeParseInt(formData.idConvenio),
         convenio: valorTextoValido(formData.convenio) || valorTextoValido(patientData?.insurance) || '',
-        idLocalOrigem: safeParseInt(formData.idLocalOrigem) || 1,
-        localOrigem: valorTextoValido(formData.localOrigem) || valorTextoValido(patientData?.origin) || '',
         idFontePagadora: safeParseInt(formData.idFontePagadora),
         idMedico: safeParseInt(formData.idMedico), // Buscado pelo CRM durante OCR
         idExame: idsExames[0], // Primeiro exame como principal
         examesConvenio: idsExames, // Array com todos os IDs
-        numGuia: formData.numGuia || '', // 🆕 Incluir número da guia
-        matConvenio: matConvenioFinal, // 🆕 Incluir matrícula do convênio (SINCRONIZADO do patientData)
-        fontePagadora: valorTextoValido(formData.fontePagadora) || valorTextoValido(patientData?.payingSource) || '', // 🆕 Incluir fonte pagadora (nome)
-        // 🆕 CREDENCIAIS DO APLIS DO USUÁRIO LOGADO
+        numGuia: formData.numGuia || patientData?.numGuia || '',
+        matConvenio: matConvenioFinal,
+        fontePagadora: valorTextoValido(formData.fontePagadora) || valorTextoValido(patientData?.payingSource) || '',
+        sexo: formData.sexo || patientData?.gender || patientData?.sexo || '',
+        codRequisicaoCorrespondente: codigoCorrespondenteDetectado || null,
+        sincronizarCorrespondente,
+        alertaCadastroImuno: precisaCadastrarImuno,
         aplis_usuario: usuario?.aplis_usuario || null,
         aplis_senha: usuario?.aplis_senha || null
       };
@@ -2152,11 +2325,16 @@ const AdmissionView = () => {
 
       // 🆕 LOG DOS DADOS SENDO ENVIADOS
       console.log('[SALVAR] 📤 Enviando dados para o backend:');
+      if (!valorTextoValido(dados.validadeMatricula) && !valorTextoValido(dados.validade) && !valorTextoValido(dados.ValidadeMatricula)) {
+        delete dados.validade;
+        delete dados.validadeMatricula;
+        delete dados.ValidadeMatricula;
+      }
       console.log('[SALVAR] Dados:', JSON.stringify(dados, null, 2));
       console.log('[SALVAR] Campos presentes:', Object.keys(dados));
       console.log('[SALVAR] Exames:', dados.examesConvenio);
 
-      const response = await apiFetch(`${API_BASE_URL}/api/admissao/salvar`, {
+      let response = await apiFetch(`${API_BASE_URL}/api/admissao/salvar`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -2164,7 +2342,33 @@ const AdmissionView = () => {
         body: JSON.stringify(dados)
       });
 
-      const result = await response.json();
+      let result = await response.json();
+
+      const erroValidadeCarteirinha = String(result?.erro || '').toLowerCase();
+      if (
+        !response.ok &&
+        erroValidadeCarteirinha.includes('validade') &&
+        erroValidadeCarteirinha.includes('carteirinha')
+      ) {
+        console.warn('[SALVAR] ⚠️ Retry automático por validade da carteirinha inválida (sem campos de carteirinha)');
+        const dadosRetry = { ...dados };
+        delete dadosRetry.matConvenio;
+        delete dadosRetry.MatConvenio;
+        delete dadosRetry.matriculaConvenio;
+        delete dadosRetry.validadeMatricula;
+        delete dadosRetry.ValidadeMatricula;
+        dadosRetry._ignorar_carteirinha = true;
+
+        response = await apiFetch(`${API_BASE_URL}/api/admissao/salvar`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(dadosRetry)
+        });
+
+        result = await response.json();
+      }
 
       // 🆕 LOG DETALHADO DO ERRO
       if (!response.ok) {
@@ -2212,6 +2416,27 @@ const AdmissionView = () => {
           }
         }
 
+        if (result.aviso_sincronizacao_correspondente) {
+          const avisoSync = result.aviso_sincronizacao_correspondente;
+          mensagemSucesso += `\n\n⚠️ ${avisoSync.mensagem}`;
+          if (avisoSync.codigo_tentado) {
+            mensagemSucesso += `\nCódigo: ${avisoSync.codigo_tentado}`;
+          }
+          if (avisoSync.erro) {
+            mensagemSucesso += `\nDetalhe: ${avisoSync.erro}`;
+          }
+          if (tipoMensagem === 'success') {
+            tipoMensagem = 'warning';
+          }
+        }
+
+        if (precisaCadastrarImuno) {
+          mensagemSucesso += '\n\n⚠️ Lembrete: pedido com BIOPSIA + IMUNO. Realize o cadastro de IMUNO tambem.';
+          if (tipoMensagem === 'success') {
+            tipoMensagem = 'warning';
+          }
+        }
+
         setMessage({
           type: tipoMensagem,
           text: mensagemSucesso
@@ -2231,6 +2456,14 @@ const AdmissionView = () => {
         // Se o erro mencionar campos faltando, destacar
         if (mensagemErro.includes('faltando')) {
           mensagemErro = `❌ ${mensagemErro}\n\nVerifique se todos os campos obrigatórios foram preenchidos.`;
+        }
+
+        // Se o paciente foi criado mas a admissão falhou, injetar o idPaciente
+        // para que a próxima tentativa reutilize o cadastro já existente
+        if (result.idPacienteCriado) {
+          console.warn(`[SALVAR] ⚠️ Paciente criado (ID ${result.idPacienteCriado}) mas admissão falhou. Injetando idPaciente no formulário.`);
+          setFormData(prev => ({ ...prev, idPaciente: result.idPacienteCriado }));
+          mensagemErro += `\n\n💡 O paciente foi cadastrado (ID ${result.idPacienteCriado}). Preencha o Nº Carteirinha e tente salvar novamente — o cadastro já existente será reaproveitado.`;
         }
 
         setMessage({
@@ -2255,7 +2488,14 @@ const AdmissionView = () => {
     console.log('[AUTO-OCR] Iniciando processamento OCR para requisição:', codRequisicao);
 
     // 1. Buscar imagens da requisição
-    const response = await apiFetch(`${API_BASE_URL}/api/requisicao/${codRequisicao}`);
+    const reqController = new AbortController();
+    const reqTimeout = setTimeout(() => reqController.abort(), 90000);
+    let response;
+    try {
+      response = await apiFetch(`${API_BASE_URL}/api/requisicao/${codRequisicao}`, { signal: reqController.signal });
+    } finally {
+      clearTimeout(reqTimeout);
+    }
     const data = await response.json();
 
     if (!response.ok || !data.sucesso) {
@@ -2308,11 +2548,19 @@ const AdmissionView = () => {
           }
 
           try {
-            const ocrResponse = await apiFetch(`${API_BASE_URL}/api/ocr/processar`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ imagemUrl: img.url, imagemNome: img.nome })
-            });
+            const ocrController = new AbortController();
+            const ocrTimeout = setTimeout(() => ocrController.abort(), 180000);
+            let ocrResponse;
+            try {
+              ocrResponse = await apiFetch(`${API_BASE_URL}/api/ocr/processar`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imagemUrl: img.url, imagemNome: img.nome }),
+                signal: ocrController.signal
+              });
+            } finally {
+              clearTimeout(ocrTimeout);
+            }
 
             const ocrResult = await ocrResponse.json();
 
@@ -2419,6 +2667,12 @@ const AdmissionView = () => {
 
       // Converter nomes de exames para IDs
       const nomesExames = examesConvenioStr2.split(',').map(nome => nome.trim()).filter(nome => nome.length > 0);
+      const precisaCadastrarImuno = detectarBiopsiaEImuno(nomesExames);
+
+      if (precisaCadastrarImuno) {
+        console.warn('[AUTO-SAVE] ⚠️ Pedido com BIOPSIA + IMUNO detectado. Necessario cadastro de IMUNO.');
+      }
+
       const responseBusca = await apiFetch(`${API_BASE_URL}/api/exames/buscar-por-nome`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2428,6 +2682,20 @@ const AdmissionView = () => {
       const resultBusca = await responseBusca.json();
       if (!resultBusca.sucesso || !resultBusca.resultados) {
         throw new Error('Erro ao buscar IDs dos exames');
+      }
+
+      const {
+        codigoCorrespondenteDetectado,
+        sincronizarCorrespondente,
+      } = obterConfiguracaoSincronizacao();
+
+      if (codigoCorrespondenteDetectado) {
+        console.log('[AUTO-SAVE] Sincronização correspondente:', {
+          codigo: codigoCorrespondenteDetectado,
+          habilitada: sincronizarCorrespondente,
+          origem: sincronizarCorrespondenteNoSalvar === null ? 'auto-default' : 'patient-card',
+          edicaoManual: !!codigoCorrespondenteManual
+        });
       }
 
       const idsExames = resultBusca.resultados.filter(r => r.encontrado && r.idExame).map(r => r.idExame);
@@ -2449,15 +2717,17 @@ const AdmissionView = () => {
         dtaColeta: formData.dtaColeta || new Date().toISOString().split('T')[0],
         idConvenio: safeParseInt(formData.idConvenio),
         convenio: valorTextoValido(formData.convenio) || valorTextoValido(patientData?.insurance) || '',
-        idLocalOrigem: safeParseInt(formData.idLocalOrigem) || 1,
-        localOrigem: valorTextoValido(formData.localOrigem) || valorTextoValido(patientData?.origin) || '',
         idFontePagadora: safeParseInt(formData.idFontePagadora),
         idMedico: safeParseInt(formData.idMedico),
         idExame: idsExames[0],
         examesConvenio: idsExames,
-        numGuia: formData.numGuia || '',
+        numGuia: formData.numGuia || patientData?.numGuia || '',
         matConvenio: matConvenioFinal,
         fontePagadora: valorTextoValido(formData.fontePagadora) || valorTextoValido(patientData?.payingSource) || '',
+        sexo: formData.sexo || patientData?.gender || patientData?.sexo || '',
+        codRequisicaoCorrespondente: codigoCorrespondenteDetectado || null,
+        sincronizarCorrespondente,
+        alertaCadastroImuno: precisaCadastrarImuno,
         aplis_usuario: usuario?.aplis_usuario || null,
         aplis_senha: usuario?.aplis_senha || null
       };
@@ -2485,22 +2755,56 @@ const AdmissionView = () => {
         dados._fonte_dados = 'ocr';
       }
 
+      if (!valorTextoValido(dados.validadeMatricula) && !valorTextoValido(dados.validade) && !valorTextoValido(dados.ValidadeMatricula)) {
+        delete dados.validade;
+        delete dados.validadeMatricula;
+        delete dados.ValidadeMatricula;
+      }
+
       Object.keys(dados).forEach(key => dados[key] === undefined && delete dados[key]);
       if (!dados.codRequisicao) delete dados.codRequisicao;
 
       console.log('[AUTO-SAVE] Enviando dados:', Object.keys(dados));
 
-      const response = await apiFetch(`${API_BASE_URL}/api/admissao/salvar`, {
+      let response = await apiFetch(`${API_BASE_URL}/api/admissao/salvar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(dados)
       });
 
-      const result = await response.json();
+      let result = await response.json();
+
+      const erroValidadeCarteirinha = String(result?.erro || '').toLowerCase();
+      if (
+        !response.ok &&
+        erroValidadeCarteirinha.includes('validade') &&
+        erroValidadeCarteirinha.includes('carteirinha')
+      ) {
+        console.warn('[AUTO-SAVE] ⚠️ Retry automático por validade da carteirinha inválida (sem campos de carteirinha)');
+        const dadosRetry = { ...dados };
+        delete dadosRetry.matConvenio;
+        delete dadosRetry.MatConvenio;
+        delete dadosRetry.matriculaConvenio;
+        delete dadosRetry.validadeMatricula;
+        delete dadosRetry.ValidadeMatricula;
+        dadosRetry._ignorar_carteirinha = true;
+
+        response = await apiFetch(`${API_BASE_URL}/api/admissao/salvar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dadosRetry)
+        });
+
+        result = await response.json();
+      }
 
       if (result.sucesso === 1) {
         console.log('[AUTO-SAVE] Admissão salva com sucesso! Código:', result.codRequisicao);
-        return { sucesso: true, codRequisicao: result.codRequisicao };
+        return {
+          sucesso: true,
+          codRequisicao: result.codRequisicao,
+          alertaCadastroImuno: precisaCadastrarImuno,
+        };
       } else {
         throw new Error(result.erro || 'Erro ao salvar admissão');
       }
@@ -2512,6 +2816,7 @@ const AdmissionView = () => {
   // Limpar formulário entre requisições
   const limparFormulario = () => {
     console.log('[AUTO] Limpando formulário para próxima requisição...');
+    resetarEstadoCorrespondencia();
     setFormData({
       codRequisicao: '',
       idLaboratorio: '1',
@@ -2519,17 +2824,17 @@ const AdmissionView = () => {
       idPaciente: '',
       dtaColeta: new Date().toISOString().split('T')[0],
       idConvenio: '',
-      idLocalOrigem: '1',
       idFontePagadora: '',
       idMedico: '',
       idExame: '',
       examesConvenio: '',
       numGuia: '',
       matConvenio: '',
+      validadeMatricula: '',
       fontePagadora: '',
       convenio: '',
-      localOrigem: '',
-      dadosClinicos: ''
+      dadosClinicos: '',
+      sexo: ''
     });
     setPatientData(null);
     setRequisicaoData(null);
@@ -2539,6 +2844,7 @@ const AdmissionView = () => {
     setImagensProcessadas(new Set());
     setReceitaFederalStatus(null);
     setMessage(null);
+    setCamposProtegidos(new Set()); // nova requisição = proteções zeradas
   };
 
   // Iniciar modo automático: buscar requisições e processar OCR de TODAS
@@ -2553,11 +2859,12 @@ const AdmissionView = () => {
     console.log('[AUTO] Sessão resetada com sucesso.');
   };
 
+
   const iniciarModoAutomatico = async () => {
     console.log('[AUTO] Iniciando modo automático...');
 
     // Verificar se já existe sessão ativa de OUTRO usuário
-    if (sessaoAtiva && (filaStatus === 'processando' || filaStatus === 'revisao') && !euSouProcessador) {
+    if (sessaoAtiva && (filaStatus === 'processando' || filaStatus === 'revisao') && !euSouProcessador && !isAdmin) {
       setMessage({ type: 'error', text: `Já existe uma sessão ativa iniciada por ${sessaoAtiva.iniciado_por_nome}` });
       return;
     }
@@ -2568,6 +2875,13 @@ const AdmissionView = () => {
     autoStopRef.current = false;
 
     try {
+      // Retomar sessão ativa do próprio usuário/admin sem perder histórico já processado.
+      if (sessaoAtiva && (filaStatus === 'processando' || filaStatus === 'revisao') && (euSouProcessador || isAdmin)) {
+        setMessage({ type: 'info', text: `Retomando sessão atual (${sessaoAtiva.id}) sem perder histórico...` });
+        await processarTodasRequisicoes(sessaoAtiva.id, { somentePendentes: true });
+        return;
+      }
+
       setMessage({ type: 'info', text: 'Buscando requisições pendentes...' });
 
       const response = await apiFetch(`${API_BASE_URL}/api/requisicoes/disponiveis`, {
@@ -2576,14 +2890,15 @@ const AdmissionView = () => {
         body: JSON.stringify({
           aplis_usuario: usuario?.aplis_usuario || null,
           aplis_senha: usuario?.aplis_senha || null,
-          limite: 15
+          limite: 20
         })
       });
 
       const data = await response.json();
 
       if (!response.ok || !data.sucesso) {
-        throw new Error(data.erro || 'Erro ao buscar requisições disponíveis');
+        const detalhe = data?.detalhe || data?.erro || `HTTP ${response.status}`;
+        throw new Error(`Erro ao buscar requisições disponíveis: ${detalhe}`);
       }
 
       const requisicoes = data.requisicoes || [];
@@ -2618,14 +2933,22 @@ const AdmissionView = () => {
     }
   };
 
-  // Processar OCR de TODAS as requisições (AFK) — escreve resultados no Supabase
-  const processarTodasRequisicoes = async (sessaoId) => {
+  // Processar OCR da sessão (AFK) — escreve resultados no Supabase
+  const processarTodasRequisicoes = async (sessaoId, opcoes = {}) => {
+    const somentePendentes = !!opcoes?.somentePendentes;
+
     // Buscar items diretamente do Supabase (não depender do Realtime que pode não ter propagado ainda)
-    const { data: filaDoSupabase, error: filaError } = await supabaseClient
+    let filaQuery = supabaseClient
       .from('fila_admissao')
       .select('*')
       .eq('sessao_id', sessaoId)
       .order('ordem', { ascending: true });
+
+    if (somentePendentes) {
+      filaQuery = filaQuery.in('status', ['pendente', 'erro', 'processando']);
+    }
+
+    const { data: filaDoSupabase, error: filaError } = await filaQuery;
 
     if (filaError) {
       console.error('[AUTO] Erro ao buscar fila do Supabase:', filaError);
@@ -2635,7 +2958,7 @@ const AdmissionView = () => {
 
     const fila = filaDoSupabase || [];
     const total = fila.length;
-    console.log(`[AUTO] Fila carregada do Supabase: ${total} items`, fila);
+    console.log(`[AUTO] Fila carregada do Supabase (${somentePendentes ? 'pendentes' : 'completa'}): ${total} items`, fila);
 
     if (total === 0) {
       console.error('[AUTO] Fila vazia! sessaoId:', sessaoId);
@@ -2662,11 +2985,13 @@ const AdmissionView = () => {
       if (item.id) await atualizarItem(item.id, { status: 'processando' });
 
       // Atualizar progresso da sessão
-      await atualizarSessao({ itens_processados: i });
+      if (!somentePendentes) {
+        await atualizarSessao({ itens_processados: i });
+      }
 
-      // Limpar form antes
+      // Limpar form e aguardar estado propagar antes de iniciar próxima requisição
       limparFormulario();
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
       try {
         // Etapa 1: Buscar requisição
@@ -2678,7 +3003,11 @@ const AdmissionView = () => {
         // Etapa 2: OCR
         console.log(`[AUTO] [${i+1}/${total}] Processando OCR para ${codRequisicao}...`);
         setMessage({ type: 'info', text: `[${i + 1}/${total}] Analisando imagens: ${codRequisicao}...` });
-        const ocrResult = await processarOCRCompleto(codRequisicao);
+        const ocrResult = await executarComTimeout(
+          () => processarOCRCompleto(codRequisicao),
+          20 * 60 * 1000,
+          `Timeout no OCR da requisição ${codRequisicao}`
+        );
 
         if (!ocrResult) {
           console.warn(`[AUTO] [${i+1}/${total}] Sem imagens ou OCR falhou para ${codRequisicao} — salvando dados da API`);
@@ -2735,7 +3064,11 @@ const AdmissionView = () => {
 
     // Todas processadas — entrar em modo revisão
     console.log(`[AUTO] Processamento concluído! Entrando em modo revisão.`);
-    await atualizarSessao({ status: 'revisao', itens_processados: total });
+    if (somentePendentes) {
+      await atualizarSessao({ status: 'revisao' });
+    } else {
+      await atualizarSessao({ status: 'revisao', itens_processados: total });
+    }
     setFilaRevisaoIndice(-1);
     limparFormulario();
     setMessage({ type: 'success', text: `OCR concluído! Revise e aprove cada requisição.` });
@@ -2754,7 +3087,7 @@ const AdmissionView = () => {
       s.examesConvenio = String(s.examesConvenio);
     }
     // Garantir que campos de ID sejam strings
-    ['idConvenio', 'idLocalOrigem', 'idFontePagadora', 'idMedico', 'idExame', 'idPaciente', 'idLaboratorio', 'idUnidade'].forEach(campo => {
+    ['idConvenio', 'idFontePagadora', 'idMedico', 'idExame', 'idPaciente', 'idLaboratorio', 'idUnidade'].forEach(campo => {
       if (s[campo] != null && typeof s[campo] !== 'string') {
         s[campo] = String(s[campo]);
       } else if (s[campo] == null) {
@@ -2770,6 +3103,12 @@ const AdmissionView = () => {
   // Carregar uma requisição processada no formulário para revisão (com lock)
   const carregarRequisicaoDaFila = async (indice) => {
     try {
+    // Limpar estado anterior e aguardar propagação antes de carregar novo
+    setTransicionandoRequisicao(true);
+    limparFormulario();
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    resetarEstadoCorrespondencia();
     const item = filaRequisicoes[indice];
     if (!item) {
       console.warn('[AUTO] Item não encontrado:', indice);
@@ -2816,8 +3155,9 @@ const AdmissionView = () => {
     // Não adquirir lock para itens já finalizados (salvo/pulado)
     const jaFinalizado = item.status === 'salvo' || item.status === 'pulado';
 
-    // Adquirir lock no Supabase
-    if (item.id && !jaFinalizado) {
+    // Adquirir lock no Supabase apenas para usuários não-admin
+    // Admin visualiza/revisa sem travar o item para outros usuários
+    if (item.id && !jaFinalizado && !isAdmin) {
       const lockOk = await adquirirLockRevisao(item.id);
       if (!lockOk) {
         setMessage({ type: 'error', text: `Item sendo revisado por ${item.revisado_por_nome || 'outro usuário'}` });
@@ -2826,7 +3166,7 @@ const AdmissionView = () => {
     }
 
     // Liberar lock anterior se existia
-    if (!jaFinalizado && filaRevisaoIndice >= 0 && filaRevisaoIndice !== indice) {
+    if (!isAdmin && !jaFinalizado && filaRevisaoIndice >= 0 && filaRevisaoIndice !== indice) {
       const itemAnterior = filaRequisicoes[filaRevisaoIndice];
       if (itemAnterior?.id && itemAnterior.status === 'em_revisao') {
         await liberarLockRevisao(itemAnterior.id);
@@ -2847,9 +3187,9 @@ const AdmissionView = () => {
           const apiReq = imgData.requisicao || {};
           const apiPac = imgData.paciente || {};
           const apiConv = imgData.convenio || {};
-          const apiLocal = imgData.localOrigem || {};
           const apiFonteP = imgData.fontePagadora || {};
           const apiMed = imgData.medico || {};
+          const apiLocal = imgData.localOrigem || {};
 
           if (imgData.imagens) {
             setImagens(imgData.imagens);
@@ -2867,10 +3207,6 @@ const AdmissionView = () => {
             idConvenio: prev.idConvenio || apiReq.idConvenio?.toString() || apiConv.id?.toString() || '',
             convenio: valorTextoValido(prev.convenio) || valorTextoValido(apiReq.convenio) || valorTextoValido(apiConv.nome) || '',
             idMedico: prev.idMedico || apiReq.idMedico?.toString() || '',
-            idLocalOrigem: (prev.idLocalOrigem && prev.idLocalOrigem !== '1')
-              ? prev.idLocalOrigem
-              : (apiReq.idLocalOrigem?.toString() || apiLocal.id?.toString() || prev.idLocalOrigem || '1'),
-            localOrigem: valorTextoValido(prev.localOrigem) || valorTextoValido(apiReq.localOrigem) || valorTextoValido(apiLocal.nome) || '',
             idFontePagadora: prev.idFontePagadora || apiReq.idFontePagadora?.toString() || apiFonteP.id?.toString() || '',
             fontePagadora: valorTextoValido(prev.fontePagadora) || valorTextoValido(apiReq.fontePagadora) || valorTextoValido(apiFonteP.nome) || '',
             idPaciente: prev.idPaciente || (apiPac.idPaciente || apiPac.CodPaciente)?.toString() || '',
@@ -2919,6 +3255,8 @@ const AdmissionView = () => {
     } catch (error) {
       console.error('[AUTO] Erro ao carregar requisição da fila:', error);
       setMessage({ type: 'error', text: `Erro ao carregar requisição: ${error.message}` });
+    } finally {
+      setTransicionandoRequisicao(false);
     }
   };
 
@@ -2981,7 +3319,14 @@ const AdmissionView = () => {
         timestamp: new Date().toLocaleTimeString()
       }]);
 
-      setMessage({ type: 'success', text: `${codRequisicaoFinal} salvo com sucesso!` });
+      if (saveResult?.alertaCadastroImuno) {
+        setMessage({
+          type: 'warning',
+          text: `${codRequisicaoFinal} salvo com sucesso! Lembrete: pedido com BIOPSIA + IMUNO, realizar cadastro de IMUNO tambem.`
+        });
+      } else {
+        setMessage({ type: 'success', text: `${codRequisicaoFinal} salvo com sucesso!` });
+      }
       console.log(`[AUTO] ${codRequisicaoFinal} salvo!`);
 
       limparFormulario();
@@ -3027,7 +3372,6 @@ const AdmissionView = () => {
         idUnidade: parseInt(formData.idUnidade) || undefined,
         idPaciente: parseInt(formData.idPaciente) || undefined,
         idConvenio: parseInt(formData.idConvenio) || undefined,
-        idLocalOrigem: parseInt(formData.idLocalOrigem) || undefined,
         idFontePagadora: parseInt(formData.idFontePagadora) || undefined,
         idMedico: parseInt(formData.idMedico) || undefined,
         idExame: parseInt(formData.idExame) || undefined,
@@ -3396,6 +3740,8 @@ const AdmissionView = () => {
 
   // Abrir modal de imagem
   const abrirImagem = (imagem) => {
+    // Auto-salvar edições do PatientCard antes de abrir a imagem
+    patientCardRef.current?.saveIfEditing();
     setImagemSelecionada(imagem);
     setZoomLevel(1); // Resetar zoom ao abrir
     setRotacao(0); // Resetar rotação ao abrir
@@ -3434,8 +3780,6 @@ const AdmissionView = () => {
       dataColeta: patientData?.collectionDate || '',
       convenio: formData?.convenio || patientData?.insurance || '',
       idConvenio: formData?.idConvenio || '',
-      origem: formData?.localOrigem || patientData?.origin || '',
-      idLocalOrigem: formData?.idLocalOrigem || '',
       fontePagadora: formData?.fontePagadora || patientData?.payingSource || '',
       idFontePagadora: formData?.idFontePagadora || '',
       medico: patientData?.doctorName || '',
@@ -3485,11 +3829,9 @@ const AdmissionView = () => {
       ...prev,
       dtaColeta: converterDataParaISO(dadosRequisicaoEditaveis?.dataColeta) || prev.dtaColeta,
       idConvenio: dadosRequisicaoEditaveis?.idConvenio || prev.idConvenio,
-      idLocalOrigem: dadosRequisicaoEditaveis?.idLocalOrigem || prev.idLocalOrigem,
       idFontePagadora: dadosRequisicaoEditaveis?.idFontePagadora || prev.idFontePagadora,
       idMedico: dadosRequisicaoEditaveis?.idMedico || prev.idMedico,
       convenio: dadosRequisicaoEditaveis?.convenio || prev.convenio,
-      localOrigem: dadosRequisicaoEditaveis?.origem || prev.localOrigem,
       fontePagadora: dadosRequisicaoEditaveis?.fontePagadora || prev.fontePagadora,
       numGuia: dadosRequisicaoEditaveis?.numGuia || prev.numGuia,
       dadosClinicos: dadosRequisicaoEditaveis?.dadosClinicos || prev.dadosClinicos,
@@ -3553,21 +3895,43 @@ const AdmissionView = () => {
     setPatientData(updatedPatient);
     console.log('[PATIENT CARD] Dados do paciente atualizados:', updatedPatient);
 
-    // 🆕 SINCRONIZAR TODOS OS CAMPOS EDITÁVEIS COM O FORMULÁRIO
+    // Marcar como protegidos todos os campos não-vazios editados pelo usuário
+    setCamposProtegidos(prev => {
+      const novos = new Set(prev);
+      const vazio = (v) => !v || v === 'Não informado' || v === 'null';
+      if (!vazio(updatedPatient.name)) novos.add('name');
+      if (!vazio(updatedPatient.birthDate)) novos.add('birthDate');
+      if (!vazio(updatedPatient.cpf)) novos.add('cpf');
+      if (!vazio(updatedPatient.rg)) novos.add('rg');
+      if (!vazio(updatedPatient.phone)) novos.add('phone');
+      if (!vazio(updatedPatient.email)) novos.add('email');
+      if (!vazio(updatedPatient.insuranceCardNumber)) novos.add('insuranceCardNumber');
+      if (!vazio(updatedPatient.numGuia)) novos.add('numGuia');
+      if (!vazio(updatedPatient.address)) novos.add('address');
+      if (!vazio(updatedPatient.exams)) novos.add('exams');
+      if (!vazio(updatedPatient.gender) || !vazio(updatedPatient.sexo)) novos.add('sexo');
+      console.log('[PATIENT CARD] Campos protegidos:', [...novos]);
+      return novos;
+    });
+
+    // SINCRONIZAR TODOS OS CAMPOS EDITÁVEIS COM O FORMULÁRIO
     setFormData(prev => ({
       ...prev,
-      // Sincronizar idPaciente se foi editado
       idPaciente: updatedPatient.idPaciente !== undefined ? updatedPatient.idPaciente : prev.idPaciente,
-      // Sincronizar carteirinha do convênio
       matConvenio: updatedPatient.insuranceCardNumber !== undefined ? updatedPatient.insuranceCardNumber : prev.matConvenio,
-      // Sincronizar exames se foram editados
-      examesConvenio: updatedPatient.exams !== undefined ? updatedPatient.exams : prev.examesConvenio
+      validadeMatricula: updatedPatient.insuranceCardValidity !== undefined ? updatedPatient.insuranceCardValidity : prev.validadeMatricula,
+      examesConvenio: updatedPatient.exams !== undefined ? updatedPatient.exams : prev.examesConvenio,
+      numGuia: updatedPatient.numGuia !== undefined ? updatedPatient.numGuia : prev.numGuia,
+      sexo: updatedPatient.gender || updatedPatient.sexo || prev.sexo,
     }));
 
     console.log('[PATIENT CARD] ✓ Dados sincronizados com formData');
     console.log('[PATIENT CARD]   - idPaciente:', updatedPatient.idPaciente);
     console.log('[PATIENT CARD]   - matConvenio:', updatedPatient.insuranceCardNumber);
+    console.log('[PATIENT CARD]   - validadeMatricula:', updatedPatient.insuranceCardValidity);
     console.log('[PATIENT CARD]   - exames:', updatedPatient.exams);
+    console.log('[PATIENT CARD]   - numGuia:', updatedPatient.numGuia);
+    console.log('[PATIENT CARD]   - sexo:', updatedPatient.gender || updatedPatient.sexo);
 
     setMessage({
       type: 'success',
@@ -3783,6 +4147,7 @@ const AdmissionView = () => {
 
   const carregarRequisicaoDoHistorico = async (requisicao) => {
     try {
+      resetarEstadoCorrespondencia();
       // Extrair código da requisição e validar
       const codRequisicao = requisicao.cod_requisicao;
       
@@ -3844,10 +4209,17 @@ const AdmissionView = () => {
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-neutral-900 overflow-hidden">
       <PatientCard
+        ref={patientCardRef}
         patient={patientData}
         onPatientUpdate={handlePatientUpdate}
         onValidarCPF={validarCPFManualmente}
         validandoCPF={validandoCPF}
+        sincronizacaoInfo={sincronizacaoInfo}
+        codigoCorrespondente={codigoCorrespondenteSelecionado}
+        codigoCorrespondenteValido={codigoCorrespondenteSelecionadoValido}
+        onCodigoCorrespondenteChange={setCodigoCorrespondenteManual}
+        sincronizarCorrespondenteNoSalvar={sincronizarCorrespondenteNoSalvar}
+        onToggleSincronizarCorrespondente={setSincronizarCorrespondenteNoSalvar}
       />
 
       <div className="flex-1 p-6 bg-slate-50 dark:bg-neutral-900 overflow-y-auto" style={{ order: 1 }}>
@@ -3886,7 +4258,24 @@ const AdmissionView = () => {
 
         {/* Conteúdo da aba de Admissão */}
         {abaPrincipal === 'admissao' && (
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', position: 'relative' }}>
+
+          {/* Overlay de transição entre requisições */}
+          {transicionandoRequisicao && (
+            <div style={{
+              position: 'absolute', inset: 0, zIndex: 50,
+              backgroundColor: 'rgba(255,255,255,0.85)',
+              backdropFilter: 'blur(2px)',
+              display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center', gap: 12,
+              borderRadius: 12,
+            }} className="dark:bg-neutral-900/85">
+              <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+              <p style={{ fontSize: 14, fontWeight: 600, color: '#3b82f6', margin: 0 }}>Carregando próxima requisição...</p>
+              <p style={{ fontSize: 12, color: '#64748b', margin: 0 }}>Aguarde o estado anterior ser limpo</p>
+            </div>
+          )}
+
         <div className="mb-5">
         {/* Painel do Modo Automático — Compartilhado */}
         <div className={`rounded-xl shadow-sm p-4 ${
@@ -3984,13 +4373,13 @@ const AdmissionView = () => {
                 const cpfItem = item.patient_data_snapshot?.cpf || item.patientDataSnapshot?.cpf || item.cpf || '';
                 const salvoPorLabel = resolverNomeUsuarioPorId(item.salvo_por || item.salvoPor);
                 const isLockedByOther = item.status === 'em_revisao' && item.revisado_por !== usuario?.id;
-                const canClick = item.status === 'salvo' || item.status === 'pulado' ||
-                  ((item.status === 'processado' || (item.status === 'em_revisao' && item.revisado_por === usuario?.id)) && (filaStatus === 'revisao' || filaStatus === 'processando'));
+                const canClick = !transicionandoRequisicao && (item.status === 'salvo' || item.status === 'pulado' ||
+                  ((item.status === 'processado' || (item.status === 'em_revisao' && (item.revisado_por === usuario?.id || isAdmin))) && (filaStatus === 'revisao' || filaStatus === 'processando')));
                 const statusConfig = {
                   pendente:    { pill: 'bg-slate-100 dark:bg-neutral-700 text-slate-500 dark:text-neutral-400',        label: 'Pendente' },
                   processando: { pill: 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400',            label: 'Processando...' },
                   processado:  { pill: 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400',        label: 'Aguardando revisão' },
-                  em_revisao:  { pill: 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400',    label: isLockedByOther ? `Revisando: ${item.revisado_por_nome || '...'}` : 'Em revisão (você)' },
+                  em_revisao:  { pill: 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400',    label: isLockedByOther ? (isAdmin ? `Em revisão (admin sem bloquear)` : `Revisando: ${item.revisado_por_nome || '...'}`) : 'Em revisão (você)' },
                   erro:        { pill: 'bg-red-100 dark:bg-red-900/30 text-red-500 dark:text-red-400',                label: 'Erro' },
                   salvo:       { pill: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400', label: salvoPorLabel ? `Salvo no apLIS por ${salvoPorLabel}` : 'Salvo no apLIS' },
                   pulado:      { pill: 'bg-slate-100 dark:bg-neutral-700 text-slate-500 dark:text-neutral-400',        label: 'Pulado' },
@@ -4067,6 +4456,27 @@ const AdmissionView = () => {
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.18-4.96"/></svg>
                 Pular
               </button>
+              {isAdmin && filaRequisicoes[filaRevisaoIndice]?.status !== 'processado' && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const item = filaRequisicoes[filaRevisaoIndice];
+                    if (!item?.id) return;
+                    const ok = await reverterParaRevisao(item.id);
+                    if (ok) {
+                      setMessage({ type: 'info', text: `Requisição ${item.cod_requisicao} revertida para aguardar revisão.` });
+                      setFilaRevisaoIndice(-1);
+                    } else {
+                      setMessage({ type: 'error', text: 'Erro ao reverter requisição.' });
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-950/30 text-orange-700 dark:text-orange-300 hover:bg-orange-100 dark:hover:bg-orange-900/40 text-sm font-semibold transition-colors shadow-sm"
+                  title="Admin: reverter item para aguardar revisão"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                  Reverter para Revisão
+                </button>
+              )}
             </div>
           )}
 
@@ -5220,6 +5630,22 @@ const AdmissionView = () => {
                     </div>
 
                     <div className="mb-3.5">
+                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">CÓDIGO CORRESPONDENTE (0085/0200)</label>
+                      <input
+                        type="text"
+                        className="w-full p-2.5 px-3 border-2 border-gray-300 dark:border-neutral-600 rounded-md text-sm font-medium text-gray-900 dark:text-neutral-100 transition-all bg-white dark:bg-neutral-800 focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
+                        value={codigoCorrespondenteSelecionado || ''}
+                        onChange={(e) => setCodigoCorrespondenteManual(e.target.value)}
+                        placeholder="Ex: 0200XXXXXXXXX ou 0085XXXXXXXXX"
+                      />
+                      {!codigoCorrespondenteSelecionadoValido && (
+                        <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                          Formato esperado: começa com 0085 ou 0200 e tem 13 dígitos.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="mb-3.5">
                       <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">DATA DA COLETA</label>
                       {modoEdicaoModal ? (
                         <input
@@ -5261,32 +5687,6 @@ const AdmissionView = () => {
                         />
                       ) : (
                         <span className="text-gray-900 dark:text-neutral-200">{patientData.insurance || 'Não informado'}</span>
-                      )}
-                    </div>
-
-                    <div className="mb-3.5">
-                      <label className="block text-[11px] font-medium text-gray-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">ORIGEM</label>
-                      {modoEdicaoModal ? (
-                        <LocalOrigemSelect
-                          value={dadosRequisicaoEditaveis?.origem || ''}
-                          onChange={(selectedOrigem) => {
-                            setDadosRequisicaoEditaveis(prev => ({
-                              ...prev,
-                              origem: selectedOrigem?.nome || '',
-                              idLocalOrigem: selectedOrigem?.id ? selectedOrigem.id.toString() : ''
-                            }));
-                            if (selectedOrigem?.id) {
-                              setFormData(prev => ({
-                                ...prev,
-                                idLocalOrigem: selectedOrigem.id.toString(),
-                                localOrigem: selectedOrigem?.nome || prev.localOrigem
-                              }));
-                            }
-                          }}
-                          className="w-full p-2.5 px-3 border-2 border-gray-300 dark:border-neutral-600 rounded-md text-sm font-medium text-gray-900 dark:text-neutral-100 transition-all bg-white dark:bg-neutral-800 focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(102,126,234,0.1)]"
-                        />
-                      ) : (
-                        <span className="text-gray-900 dark:text-neutral-200">{patientData.origin || 'Não informado'}</span>
                       )}
                     </div>
 

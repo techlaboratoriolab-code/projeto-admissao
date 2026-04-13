@@ -9,12 +9,24 @@ import AdmissionView from './pages/AdmissionView';
 import UserManagement from './pages/UserManagement';
 import ErrorBoundary from './components/ErrorBoundary';
 
+const IS_HOMOLOG = process.env.REACT_APP_ENVIRONMENT === 'homolog';
+
 function App() {
   return (
     <Router>
       <ThemeProvider>
         <AuthProvider>
           <div className="App">
+          {IS_HOMOLOG && (
+            <div style={{
+              position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
+              background: '#f59e0b', color: '#1c1917',
+              textAlign: 'center', fontSize: '12px', fontWeight: 700,
+              padding: '3px 0', letterSpacing: '0.05em'
+            }}>
+              ⚠️ AMBIENTE DE HOMOLOGAÇÃO — dados de teste, não use em produção
+            </div>
+          )}
           <Routes>
             {/* Rota pública - Login */}
             <Route path="/login" element={<LoginNew />} />
