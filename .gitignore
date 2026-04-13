@@ -84,3 +84,4 @@ dados/locais_instituicao_*.csv
 # Ambientes Python
 .venv/
 .vercel
+.env*.local
