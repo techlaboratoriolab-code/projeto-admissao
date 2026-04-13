@@ -18,9 +18,9 @@
 const isVercelHost =
   typeof window !== 'undefined' && window.location.hostname.endsWith('vercel.app');
 
-// URL do backend — em Vercel força /api; local segue env/fallback localhost.
+// URL do backend — em Vercel usa base vazia (rotas ja incluem /api no codigo).
 export const API_BASE_URL = isVercelHost
-  ? '/api'
+  ? ''
   : (process.env.REACT_APP_API_URL || 'http://localhost:5000');
 
 // Wrapper do fetch que adiciona headers necessários para o ngrok
