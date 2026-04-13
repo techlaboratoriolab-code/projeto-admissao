@@ -17,6 +17,8 @@
 .env.test.local
 .env.production.local
 .env.production
+.env.homolog
+backend/.env.homolog
 
 npm-debug.log*
 yarn-debug.log*

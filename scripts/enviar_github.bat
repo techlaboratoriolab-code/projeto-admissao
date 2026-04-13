@@ -151,7 +151,7 @@ echo.
 echo Verificando resultado...
 git ls-remote origin %BRANCH%
 echo.
-echo⏳ Nota: O GitHub pode levar alguns segundos para atualizar
+echo ⏳ Nota: O GitHub pode levar alguns segundos para atualizar
 echo Pressione Ctrl+F5 no navegador para limpar cache
 echo.
 pause
