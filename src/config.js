@@ -14,10 +14,14 @@
  *    USE_NGROK = true
  */
 
-// URL do backend — prioriza variável de ambiente (Vercel/Render), depois fallback local
-export const API_BASE_URL =
-  process.env.REACT_APP_API_URL ||
-  'http://localhost:5000';
+// Em produção no Vercel, sempre usar proxy same-origin (/api) para evitar CORS com ngrok.
+const isVercelHost =
+  typeof window !== 'undefined' && window.location.hostname.endsWith('vercel.app');
+
+// URL do backend — em Vercel força /api; local segue env/fallback localhost.
+export const API_BASE_URL = isVercelHost
+  ? '/api'
+  : (process.env.REACT_APP_API_URL || 'http://localhost:5000');
 
 // Wrapper do fetch que adiciona headers necessários para o ngrok
 export const apiFetch = (url, options = {}) => {
