@@ -1,4 +1,4 @@
-@echo off
+xx'x    @echo off
 chcp 65001 >nul
 setlocal EnableDelayedExpansion
 
@@ -54,8 +54,11 @@ if errorlevel 1 (
     echo ✅ Origin adicionado.
 ) else (
     git remote set-url origin %REPO_URL%
-    echo ✅ Origin atualizado.
+    echo ✅ Origin verificado/atualizado.
 )
+
+REM Limpar cache de credenciais (força nova autenticação se necessário)
+REM git credential-manager delete https://github.com
 echo.
 
 echo ════════════════════════════════════════════════════════
@@ -71,7 +74,7 @@ echo ✅ Alteracoes adicionadas.
 echo.
 
 echo ════════════════════════════════════════════════════════
-echo 💾 PASSO 4: Criando commit...
+echo 💾 PASSO 4: Criando commit (se necessario)...
 echo ════════════════════════════════════════════════════════
 set "MSG="
 set /p MSG="Mensagem do commit (vazio = update): "
@@ -92,24 +95,45 @@ if errorlevel 1 (
 echo.
 
 echo ════════════════════════════════════════════════════════
-echo 🚀 PASSO 5: Enviando para o GitHub...
+echo 🚀 PASSO 5: Fazendo fetch do remoto...
+echo ════════════════════════════════════════════════════════
+git fetch origin main
+if errorlevel 1 (
+    echo [AVISO] Falha no fetch, continuando...
+)
+echo.
+
+echo ════════════════════════════════════════════════════════
+echo 📤 PASSO 6: Enviando para o GitHub (normal)...
 echo ════════════════════════════════════════════════════════
 for /f "delims=" %%b in ('git branch --show-current') do set "BRANCH=%%b"
 if "%BRANCH%"=="" set "BRANCH=main"
 
-echo Tentando push normal...
-git push -u origin %BRANCH%
+echo.
+echo [DEBUG] Branch local: %BRANCH%
+echo [DEBUG] Verificando commits locais vs remotos...
+echo.
+
+REM Tentativa 1: push normal
+git push origin %BRANCH% --verbose
 if errorlevel 1 (
     echo.
-    echo [AVISO] Push normal falhou, tentando com --force-with-lease...
-    git push --force-with-lease -u origin %BRANCH%
+    echo [AVISO] Push normal nao funcionou, tentando force-with-lease...
+    echo.
+    
+    REM Tentativa 2: force-with-lease
+    git push --force-with-lease origin %BRANCH% --verbose
     if errorlevel 1 (
         echo.
-        echo [ERRO] Falha no push mesmo com --force-with-lease.
+        echo [ERRO] Falha em ambas tentativas.
+        echo.
+        echo Debug: verificando remoto...
+        git ls-remote origin %BRANCH%
+        echo.
         echo Dicas:
-        echo  - Verifique login/autenticacao no GitHub
+        echo  - Verifique autenticacao no GitHub
         echo  - Verifique permissao de escrita no repositorio
-        echo  - Se a branch remota for outra, ajuste manualmente
+        echo  - Verifique se a branch remota existe
         echo.
         pause
         exit /b 1
@@ -117,8 +141,17 @@ if errorlevel 1 (
 )
 
 echo.
-echo ✅ Envio concluido com sucesso!
-echo 🌿 Branch enviada: %BRANCH%
-echo 🔗 %REPO_URL%
+echo ════════════════════════════════════════════════════════
+echo ✅ SUCESSO! Envio concluido
+echo ════════════════════════════════════════════════════════
+echo.
+echo 🔗 Repositorio: %REPO_URL%
+echo 🌿 Branch: %BRANCH%
+echo.
+echo Verificando resultado...
+git ls-remote origin %BRANCH%
+echo.
+echo⏳ Nota: O GitHub pode levar alguns segundos para atualizar
+echo Pressione Ctrl+F5 no navegador para limpar cache
 echo.
 pause
