@@ -239,19 +239,17 @@ def codigo_requisicao_valido(codigo):
 def buscar_ids_banco(cod_requisicao):
     """
 
-    Busca IdConvenio, IdFontePagadora e IdLocalOrigem direto do banco de dados MySQL
+    Busca somente o IdLocalOrigem direto do banco de dados MySQL.
 
-
+    Convênio e fonte pagadora não devem mais depender do banco neste fluxo.
 
     Args:
 
-        cod_requisicao: Código da requisição (ex: '0040000356004')
-
-
+        cod_requisicao: Código da requisição.
 
     Returns:
 
-        dict: {'IdConvenio': int, 'IdFontePagadora': int, 'IdLocalOrigem': int} ou None para cada campo
+        dict com IdLocalOrigem e os demais campos nulos por compatibilidade.
 
     """
 
@@ -263,7 +261,7 @@ def buscar_ids_banco(cod_requisicao):
 
         query = """
 
-            SELECT IdConvenio, IdFontePagadora
+            SELECT IdLocalOrigem
 
             FROM newdb.requisicao
 
@@ -283,38 +281,21 @@ def buscar_ids_banco(cod_requisicao):
 
         if resultado:
 
-            logger.info(f"[DB] âœ… Requisição {cod_requisicao} encontrada no banco!")
+            resultado = {
+                "IdConvenio": None,
+                "IdFontePagadora": None,
+                "IdLocalOrigem": resultado.get("IdLocalOrigem"),
+            }
 
+            logger.info(f"[DB] Requisição {cod_requisicao} encontrada no banco")
             logger.info(
-                f"[DB]   - IdConvenio: {resultado.get('IdConvenio')} {'âœ…' if resultado.get('IdConvenio') else 'âš ️ (None/vazio)'}"
+                f"[DB]   - IdLocalOrigem: {resultado.get('IdLocalOrigem')}"
             )
-
-            logger.info(
-                f"[DB]   - IdFontePagadora: {resultado.get('IdFontePagadora')} {'âœ…' if resultado.get('IdFontePagadora') else 'âš ️ (None/vazio)'}"
-            )
-
-            logger.info(
-                f"[DB]   - IdLocalOrigem: {resultado.get('IdLocalOrigem')} {'âœ…' if resultado.get('IdLocalOrigem') else 'âš ️ (None/vazio)'}"
-            )
-
-            # Avisos específicos para IDs que são None
-
-            if not resultado.get("IdConvenio"):
-
-                logger.warning(
-                    f"[DB] âš ️ IdConvenio está None! Convênio não foi salvo ao criar a requisição"
-                )
-
-            if not resultado.get("IdFontePagadora"):
-
-                logger.warning(
-                    f"[DB] âš ️ IdFontePagadora está None! Fonte pagadora não foi salva ao criar a requisição"
-                )
 
             if not resultado.get("IdLocalOrigem"):
 
                 logger.warning(
-                    f"[DB] âš ️ IdLocalOrigem está None! Local de origem não foi salvo ao criar a requisição"
+                    f"[DB] IdLocalOrigem está vazio para a requisição {cod_requisicao}"
                 )
 
             return resultado
@@ -329,13 +310,13 @@ def buscar_ids_banco(cod_requisicao):
                 f"[DB] ðŸ’¡ Verifique se o código da requisição está correto"
             )
 
-            return {"IdConvenio": None, "IdFontePagadora": None}
+            return {"IdConvenio": None, "IdFontePagadora": None, "IdLocalOrigem": None}
 
     except Exception as e:
 
         logger.error(f"[DB] Erro ao buscar IDs do banco para {cod_requisicao}: {e}")
 
-        return {"IdConvenio": None, "IdFontePagadora": None}
+        return {"IdConvenio": None, "IdFontePagadora": None, "IdLocalOrigem": None}
 
 
 def buscar_dados_paciente_via_api(cod_requisicao):
@@ -504,6 +485,7 @@ def buscar_dados_paciente_via_api(cod_requisicao):
                     # IDs obtidos via lookup reverso
                     "IdConvenio": id_convenio,
                     "IdFontePagadora": id_fonte_pagadora,
+                    "IdLocalOrigem": id_local_origem,
                 }
 
                 # Endereço pode vir como objeto
@@ -1634,6 +1616,7 @@ def carregar_instituicoes_csv():
     """Carrega instituições do CSV para cache em memória"""
 
     global INSTITUICOES_CACHE
+    INSTITUICOES_CACHE = {}
 
     # Buscar o arquivo CSV mais recente de instituições
 
@@ -1645,8 +1628,9 @@ def carregar_instituicoes_csv():
 
         for arquivo in os.listdir(pasta_dados):
 
-            if arquivo.startswith("instituicoes_extraidas_") and arquivo.endswith(
-                ".csv"
+            if arquivo.endswith(".csv") and (
+                arquivo.startswith("instituicoes_extraidas_")
+                or arquivo.startswith("locais_origem_extraidos_")
             ):
 
                 caminho_completo = os.path.join(pasta_dados, arquivo)
@@ -1691,6 +1675,23 @@ def carregar_instituicoes_csv():
     except Exception as e:
 
         logger.error(f"[CSV] Erro ao carregar instituições: {e}")
+
+
+def atualizar_cache_local_origem_do_banco():
+    """Atualiza diariamente o cache de local de origem a partir do banco."""
+
+    try:
+        from extrair_locais_origem import extrair_locais_origem
+
+        arquivo_gerado = extrair_locais_origem()
+        carregar_instituicoes_csv()
+        logger.info(
+            f"[LOCAL_ORIGEM] Cache atualizado com sucesso a partir do banco. Arquivo: {arquivo_gerado}"
+        )
+        return True
+    except Exception as e:
+        logger.error(f"[LOCAL_ORIGEM] Erro ao atualizar cache do banco: {e}")
+        return False
 
 
 def buscar_medico_por_crm(crm, uf):
@@ -2083,6 +2084,71 @@ def obter_id_instituicao_default():
     return int(primeiro_id)
 
 
+def inferir_id_local_origem_por_historico(id_fonte_pagadora=None, id_convenio=None):
+    """Infere o local de origem mais provável a partir do histórico real já salvo."""
+
+    if not id_fonte_pagadora and not id_convenio:
+        return None
+
+    try:
+        connection = pymysql.connect(**DB_CONFIG)
+        cursor = connection.cursor(pymysql.cursors.DictCursor)
+
+        filtros = ["r.IdLocalOrigem IS NOT NULL", "r.IdLocalOrigem > 0"]
+        params = []
+
+        if id_fonte_pagadora:
+            filtros.append("r.IdFontePagadora = %s")
+            params.append(int(id_fonte_pagadora))
+
+        if id_convenio:
+            filtros.append("r.IdConvenio = %s")
+            params.append(int(id_convenio))
+
+        query = f"""
+            SELECT
+                r.IdLocalOrigem AS id,
+                fi.NomFantasia AS nome,
+                COUNT(*) AS total,
+                MAX(r.IdRequisicao) AS ultimo_id
+            FROM newdb.requisicao r
+            LEFT JOIN newdb.fatinstituicao fi ON fi.IdInstituicao = r.IdLocalOrigem
+            WHERE {' AND '.join(filtros)}
+            GROUP BY r.IdLocalOrigem, fi.NomFantasia
+            ORDER BY total DESC, ultimo_id DESC
+            LIMIT 1
+        """
+
+        cursor.execute(query, params)
+        row = cursor.fetchone()
+
+        if not row and id_fonte_pagadora:
+            cursor.execute(
+                """
+                SELECT IdInstituicao AS id, NomFantasia AS nome
+                FROM newdb.fatinstituicao
+                WHERE IdInstituicao = %s
+                LIMIT 1
+                """,
+                (int(id_fonte_pagadora),),
+            )
+            row = cursor.fetchone()
+
+        cursor.close()
+        connection.close()
+
+        if row and row.get("id"):
+            logger.info(
+                f"[LocalOrigem] Histórico inferido: fonte={id_fonte_pagadora} convenio={id_convenio} → local={row.get('id')} ({row.get('nome')})"
+            )
+            return int(row["id"])
+
+    except Exception as e:
+        logger.warning(f"[LocalOrigem] Falha ao inferir por histórico: {e}")
+
+    return None
+
+
 def buscar_instituicao_por_nome(nome_busca):
     """
 
@@ -2301,6 +2367,13 @@ def _buscar_id_por_nome_instituicao(nome_instituicao):
     logger.warning(
         f"[LookupReverso] INFO Total de instituicoes no cache: {len(INSTITUICOES_CACHE)}"
     )
+
+    id_inst_db = _buscar_id_fonte_pagadora_por_nome_banco(nome_instituicao)
+    if id_inst_db:
+        logger.info(
+            f"[LookupReverso] ✅ Instituição encontrada no banco: ID={id_inst_db}"
+        )
+        return int(id_inst_db)
 
     return None
 
@@ -4438,30 +4511,10 @@ def buscar_requisicao(cod_requisicao):
 
                                 try:
 
-                                    arquivo_local = os.path.join(
-                                        TEMP_IMAGES_DIR, filename
-                                    )
-
-                                    if not os.path.exists(arquivo_local):
-
-                                        logger.info(
-                                            f"[BuscarIntegrado][S3] Baixando: {key}"
-                                        )
-
-                                        s3_client.download_file(
-                                            S3_BUCKET, key, arquivo_local
-                                        )
-
-                                    else:
-
-                                        logger.debug(
-                                            f"[BuscarIntegrado][S3] Já em cache: {filename}"
-                                        )
-
                                     url_local = s3_client.generate_presigned_url(
                                         "get_object",
                                         Params={"Bucket": S3_BUCKET, "Key": key},
-                                        ExpiresIn=3600,
+                                        ExpiresIn=43200,
                                     )
 
                                     imagens.append(
@@ -4482,7 +4535,7 @@ def buscar_requisicao(cod_requisicao):
                                     )
 
                             logger.info(
-                                f"[BuscarIntegrado][S3] âœ… Encontradas {len(imagens)} imagens"
+                                f"[BuscarIntegrado][S3] ✅ Encontradas {len(imagens)} imagens"
                             )
 
                         else:
@@ -4894,51 +4947,29 @@ def buscar_requisicao(cod_requisicao):
 
                     dados_sistema_antigo = None
 
-                # PASSO 4: ðŸ†• BUSCAR IDs DO BANCO DE DADOS
-
-                # IMPORTANTE: A API requisicaoListar NÃƒO retorna IdConvenio, IdFontePagadora
-
-                # quando StatusExame = 0 (Aguarda Admissão). Esses campos só aparecem após a admissão ser salva.
-
-                # Por isso, SEMPRE buscamos no banco MySQL, que é a fonte de verdade para esses IDs.
+                # PASSO 4: buscar somente o local de origem no banco
 
                 logger.info(
-                    f"[BuscarIntegrado] ðŸ—„️ Buscando IDs do banco de dados MySQL (fonte principal)..."
+                    f"[BuscarIntegrado] Buscando IdLocalOrigem no banco de dados..."
                 )
 
                 ids_banco = buscar_ids_banco(cod_requisicao)
 
-                # Atualizar dados_aplis com os IDs do banco
+                if ids_banco.get("IdLocalOrigem") is not None:
 
-                if ids_banco.get("IdConvenio") is not None:
-
-                    dados_aplis["IdConvenio"] = ids_banco["IdConvenio"]
+                    dados_aplis["IdLocalOrigem"] = ids_banco["IdLocalOrigem"]
 
                     logger.info(
-                        f"[BuscarIntegrado] âœ… IdConvenio do BANCO: {ids_banco['IdConvenio']}"
+                        f"[BuscarIntegrado] IdLocalOrigem do banco: {ids_banco['IdLocalOrigem']}"
                     )
 
                 else:
 
                     logger.warning(
-                        f"[BuscarIntegrado] âš ️ IdConvenio NÃƒO encontrado no banco (requisição sem convênio salvo)"
+                        f"[BuscarIntegrado] IdLocalOrigem não encontrado no banco para a requisição"
                     )
 
-                if ids_banco.get("IdFontePagadora") is not None:
-
-                    dados_aplis["IdFontePagadora"] = ids_banco["IdFontePagadora"]
-
-                    logger.info(
-                        f"[BuscarIntegrado] âœ… IdFontePagadora do BANCO: {ids_banco['IdFontePagadora']}"
-                    )
-
-                else:
-
-                    logger.warning(
-                        f"[BuscarIntegrado] âš ️ IdFontePagadora NÃƒO encontrada no banco (requisição sem fonte pagadora salva)"
-                    )
-
-                # PASSO 5: ðŸ†• ENRIQUECER COM DADOS DOS CSVs
+                # PASSO 5: enriquecer com dados dos CSVs
 
                 logger.info(
                     f"[BuscarIntegrado] ðŸ” Enriquecendo com dados dos CSVs..."
@@ -5030,6 +5061,11 @@ def buscar_requisicao(cod_requisicao):
 
                 id_fonte_pagadora = dados_aplis.get("IdFontePagadora")
 
+                if not id_fonte_pagadora:
+                    id_fonte_pagadora = obter_id_instituicao_default()
+                    if id_fonte_pagadora:
+                        dados_aplis["IdFontePagadora"] = id_fonte_pagadora
+
                 origem_fonte = None
 
                 if id_fonte_pagadora:
@@ -5082,16 +5118,24 @@ def buscar_requisicao(cod_requisicao):
 
                     id_local_origem = dados_aplis.get("IdLocalOrigem")
 
+                    if not id_local_origem:
+                        id_local_origem = inferir_id_local_origem_por_historico(
+                            id_fonte_pagadora=id_fonte_pagadora,
+                            id_convenio=id_convenio,
+                        )
+                        if id_local_origem:
+                            dados_aplis["IdLocalOrigem"] = id_local_origem
+
                     if id_local_origem:
 
                         nome_local_origem = _buscar_instituicao_nome(id_local_origem)
 
                         origem_local = (
-                            f"CSV via IdLocalOrigem={id_local_origem} (do banco MySQL)"
+                            f"CSV/histórico via IdLocalOrigem={id_local_origem}"
                         )
 
                         logger.info(
-                            f"[BuscarIntegrado] ðŸ” ðŸ¥ LOCAL DE ORIGEM do CSV (IdLocalOrigem {id_local_origem} do BANCO): '{nome_local_origem}'"
+                            f"[BuscarIntegrado] ðŸ” ðŸ¥ LOCAL DE ORIGEM identificado: '{nome_local_origem}' (ID {id_local_origem})"
                         )
 
                     else:
@@ -5099,7 +5143,7 @@ def buscar_requisicao(cod_requisicao):
                         nome_local_origem = "Não informado"
 
                         origem_local = (
-                            "FALLBACK - IdLocalOrigem não disponível no banco"
+                            "FALLBACK - IdLocalOrigem não disponível no banco nem no histórico"
                         )
 
                         logger.warning(
@@ -5388,22 +5432,6 @@ def buscar_requisicao(cod_requisicao):
                                         continue
 
                                     try:
-                                        arquivo_local = os.path.join(
-                                            TEMP_IMAGES_DIR, filename
-                                        )
-
-                                        if not os.path.exists(arquivo_local):
-                                            logger.info(
-                                                f"[BuscarIntegrado][S3-PAR] Baixando: {key}"
-                                            )
-                                            s3_client.download_file(
-                                                S3_BUCKET, key, arquivo_local
-                                            )
-                                        else:
-                                            logger.debug(
-                                                f"[BuscarIntegrado][S3-PAR] Ja em cache: {filename}"
-                                            )
-
                                         url_local = s3_client.generate_presigned_url(
                                             "get_object",
                                             Params={"Bucket": S3_BUCKET, "Key": key},
@@ -5624,6 +5652,7 @@ def buscar_requisicao(cod_requisicao):
                     "dados_complementares": {
                         "idConvenio": id_convenio,
                         "idFontePagadora": id_fonte_pagadora,
+                        "idLocalOrigem": id_local_origem,
                         "idMedico": id_medico,
                     },
                     # ===== DADOS DO MÃ‰DICO (enriquecido com CSV) =====
@@ -5661,6 +5690,7 @@ def buscar_requisicao(cod_requisicao):
                         or dados_aplis.get("NomExame"),
                         "idConvenio": id_convenio,  # âœ… Com default
                         "idFontePagadora": id_fonte_pagadora,  # âœ… Com default
+                        "idLocalOrigem": id_local_origem,
                         "idMedico": id_medico,  # âœ… Com default
                     },
                     # ===== METADATA =====
@@ -5883,24 +5913,10 @@ def buscar_requisicao(cod_requisicao):
 
                         try:
 
-                            arquivo_local = os.path.join(TEMP_IMAGES_DIR, filename)
-
-                            if not os.path.exists(arquivo_local):
-
-                                logger.info(f"[BuscarIntegrado][S3] Baixando: {key}")
-
-                                s3_client.download_file(S3_BUCKET, key, arquivo_local)
-
-                            else:
-
-                                logger.debug(
-                                    f"[BuscarIntegrado][S3] Já em cache: {filename}"
-                                )
-
                             url_local = s3_client.generate_presigned_url(
                                 "get_object",
                                 Params={"Bucket": S3_BUCKET, "Key": key},
-                                ExpiresIn=3600,
+                                ExpiresIn=43200,
                             )
 
                             imagens.append(
@@ -5999,6 +6015,7 @@ def buscar_requisicao(cod_requisicao):
                 # Dados complementares da integração (com defaults)
                 "idConvenio": id_convenio_fallback,
                 "idFontePagadora": id_fonte_pagadora_fallback,
+                "idLocalOrigem": id_local_origem_fallback,
                 "idMedico": id_medico_fallback,
                 # Status da requisição no apLIS: 0=Em andamento, 1=Concluído, 2=Cancelado
                 "StatusExame": status_exame,
@@ -6382,6 +6399,7 @@ def salvar_admissao():
             "idUnidade",
             "idConvenio",
             "idFontePagadora",
+            "idLocalOrigem",
             "idMedico",
             "idExame",
         ]
@@ -6570,6 +6588,49 @@ def salvar_admissao():
             # evitar enviar campo textual para a API downstream
             del dados["convenio"]
 
+        # 4.2 Local de origem: aceitar nome em `localOrigem`/`origem` quando o ID não vier preenchido
+        nome_local_origem_payload = dados.get("localOrigem") or dados.get("origem")
+        id_local_informado = dados.get("idLocalOrigem")
+        tem_id_local_valido = (
+            isinstance(id_local_informado, int) and id_local_informado > 0
+        )
+
+        if isinstance(nome_local_origem_payload, str) and nome_local_origem_payload.strip():
+            local_nome_informado = True
+
+            if tem_id_local_valido:
+                local_nome_resolvido = True
+                logger.info(
+                    f"[SalvarAdmissao] ✅ Mantendo idLocalOrigem informado no payload: {id_local_informado} (ignorando nome '{nome_local_origem_payload}')"
+                )
+            else:
+                logger.info(
+                    f"[SalvarAdmissao] 🔍 Recebido local de origem como nome: '{nome_local_origem_payload}'"
+                )
+
+                instituicao_local = buscar_instituicao_por_nome(nome_local_origem_payload)
+
+                if not instituicao_local:
+                    id_local_db = _buscar_id_fonte_pagadora_por_nome_banco(
+                        nome_local_origem_payload
+                    )
+                    if id_local_db:
+                        instituicao_local = {
+                            "id": int(id_local_db),
+                            "nome": nome_local_origem_payload,
+                        }
+
+                if instituicao_local:
+                    dados["idLocalOrigem"] = int(instituicao_local["id"])
+                    local_nome_resolvido = True
+                    logger.info(
+                        f"[SalvarAdmissao] ✅ Local de origem convertido: '{nome_local_origem_payload}' → ID {instituicao_local['id']}"
+                    )
+                else:
+                    logger.warning(
+                        f"[SalvarAdmissao] ⚠️ Local de origem '{nome_local_origem_payload}' não encontrado no cache nem no banco"
+                    )
+
         if "localOrigem" in dados:
             del dados["localOrigem"]
         if "origem" in dados:
@@ -6695,17 +6756,10 @@ def salvar_admissao():
             and not local_nome_resolvido
             and (not dados.get("idLocalOrigem") or dados.get("idLocalOrigem") == 1)
         ):
-            logger.error(
-                "[SalvarAdmissao] ❌ Local de origem informado não pôde ser resolvido para ID; abortando para evitar default indevido"
-            )
-            return (
-                jsonify(
-                    {
-                        "sucesso": 0,
-                        "erro": "Local de origem informado não encontrado. Selecione uma opção válida da lista e tente novamente.",
-                    }
-                ),
-                400,
+            if dados.get("idLocalOrigem") == 1:
+                dados.pop("idLocalOrigem", None)
+            logger.warning(
+                "[SalvarAdmissao] ⚠️ Local de origem textual não resolvido; seguindo sem alterar para preservar o valor já existente no apLIS"
             )
 
         # 5. Defaults e Limpeza (CAMPOS OBRIGATÃ“RIOS DO APLIS)
@@ -6766,6 +6820,21 @@ def salvar_admissao():
                         f"IdLocalOrigem={ids_banco.get('IdLocalOrigem')}"
                     )
 
+                    if not requisicao_existente.get("IdLocalOrigem"):
+                        logger.info(
+                            "[SalvarAdmissao] 🔍 IdLocalOrigem ausente no banco local. Tentando extrair direto do apLIS..."
+                        )
+                        dados_api_req = buscar_dados_paciente_via_api(
+                            dados["codRequisicao"]
+                        )
+                        if dados_api_req and dados_api_req.get("IdLocalOrigem"):
+                            requisicao_existente["IdLocalOrigem"] = dados_api_req.get(
+                                "IdLocalOrigem"
+                            )
+                            logger.info(
+                                f"[SalvarAdmissao] ✅ IdLocalOrigem recuperado direto do apLIS: {requisicao_existente['IdLocalOrigem']}"
+                            )
+
                     # ðŸ†• LÃ“GICA DE PRIORIZAÃ‡ÃƒO:
 
                     # - Se dados vieram do OCR: SEMPRE usar dados do OCR (mais atualizados/corretos)
@@ -6819,6 +6888,17 @@ def salvar_admissao():
                     logger.info(
                         f"[SalvarAdmissao] ℹ️ Requisição não encontrada ou sem IDs complementares no banco"
                     )
+
+                    dados_api_req = buscar_dados_paciente_via_api(dados["codRequisicao"])
+                    if dados_api_req:
+                        requisicao_existente = {
+                            "IdConvenio": dados_api_req.get("IdConvenio"),
+                            "IdFontePagadora": dados_api_req.get("IdFontePagadora"),
+                            "IdLocalOrigem": dados_api_req.get("IdLocalOrigem"),
+                        }
+                        logger.info(
+                            f"[SalvarAdmissao] ✅ IDs complementares recuperados do apLIS: convenio={requisicao_existente.get('IdConvenio')}, fonte={requisicao_existente.get('IdFontePagadora')}, local={requisicao_existente.get('IdLocalOrigem')}"
+                        )
 
             except Exception as e:
 
@@ -7015,54 +7095,41 @@ def salvar_admissao():
                     f"[SalvarAdmissao] ðŸ“¸ Fonte pagadora do OCR: {dados['idFontePagadora']}"
                 )
 
-        # Garantir local de origem no payload final do apLIS
+        # Garantir local de origem sem sobrescrever com padrão fixo
 
-        if "idLocalOrigem" not in dados or not dados.get("idLocalOrigem"):
+        id_local_origem_atual = dados.get("idLocalOrigem")
 
-            if (
-                requisicao_existente
-                and requisicao_existente.get("IdLocalOrigem")
-                and not fonte_do_ocr
-            ):
+        if not id_local_origem_atual or id_local_origem_atual == 1:
+
+            if requisicao_existente and requisicao_existente.get("IdLocalOrigem"):
 
                 dados["idLocalOrigem"] = requisicao_existente["IdLocalOrigem"]
 
                 logger.info(
-                    f"[SalvarAdmissao] 💾 Usando local de origem da requisição existente (banco): {dados['idLocalOrigem']}"
+                    f"[SalvarAdmissao] 💾 Preservando local de origem já cadastrado na requisição: {dados['idLocalOrigem']}"
                 )
 
             else:
 
-                # Fallback: primeiro local ativo (Local=1)
+                id_local_origem_inferido = inferir_id_local_origem_por_historico(
+                    id_fonte_pagadora=dados.get("idFontePagadora"),
+                    id_convenio=dados.get("idConvenio"),
+                )
 
-                try:
-
-                    _conn_lo = pymysql.connect(**DB_CONFIG)
-
-                    _cur_lo = _conn_lo.cursor(pymysql.cursors.DictCursor)
-
-                    _cur_lo.execute(
-                        "SELECT IdInstituicao AS id, NomFantasia AS nome FROM newdb.fatinstituicao WHERE Local = 1 AND Inativo = 0 LIMIT 1"
+                if id_local_origem_inferido:
+                    dados["idLocalOrigem"] = int(id_local_origem_inferido)
+                    logger.info(
+                        f"[SalvarAdmissao] 💾 Local de origem inferido pelo histórico real: {dados['idLocalOrigem']}"
                     )
-
-                    _row_lo = _cur_lo.fetchone()
-
-                    _cur_lo.close()
-
-                    _conn_lo.close()
-
-                    if _row_lo:
-
-                        dados["idLocalOrigem"] = int(_row_lo["id"])
-
-                        logger.info(
-                            f"[SalvarAdmissao] idLocalOrigem não informado, usando fallback Local=1: ID={_row_lo['id']}, Nome={_row_lo['nome']}"
-                        )
-
-                except Exception as _e_lo:
-
-                    logger.error(
-                        f"[SalvarAdmissao] Erro ao definir fallback de idLocalOrigem: {_e_lo}"
+                elif dados.get("idFontePagadora"):
+                    dados["idLocalOrigem"] = int(dados["idFontePagadora"])
+                    logger.info(
+                        f"[SalvarAdmissao] 💾 Local de origem alinhado com a fonte pagadora atual: {dados['idLocalOrigem']}"
+                    )
+                else:
+                    dados.pop("idLocalOrigem", None)
+                    logger.info(
+                        "[SalvarAdmissao] ℹ️ idLocalOrigem ausente/placeholder; campo será omitido para preservar o valor atual no apLIS"
                     )
 
         else:
@@ -8122,6 +8189,21 @@ def salvar_admissao():
             logger.warning(f"[SalvarAdmissao] âŒ {erro_msg}")
 
             return jsonify({"sucesso": 0, "erro": erro_msg}), 400
+
+        id_local_final = dados.get("idLocalOrigem")
+        if not id_local_final:
+            id_local_final = inferir_id_local_origem_por_historico(
+                id_fonte_pagadora=dados.get("idFontePagadora"),
+                id_convenio=dados.get("idConvenio"),
+            )
+
+        if not id_local_final:
+            id_local_final = dados.get("idFontePagadora") or 1
+
+        dados["idLocalOrigem"] = int(id_local_final)
+        logger.info(
+            f"[SalvarAdmissao] Garantia final idLocalOrigem={dados['idLocalOrigem']}"
+        )
 
         logger.info(
             f"[SalvarAdmissao] Dados finais para apLIS: {json.dumps(dados, indent=2, ensure_ascii=False)[:1000]}"
@@ -14240,7 +14322,10 @@ def executar_scheduler_manual():
         )
 
     thread = threading.Thread(
-        target=executar_processamento_automatico, name="scheduler-manual", daemon=True
+        target=executar_processamento_automatico,
+        kwargs={"origem_disparo": "manual_endpoint"},
+        name="scheduler-manual",
+        daemon=True,
     )
     thread.start()
 
@@ -14261,12 +14346,14 @@ def scheduler_status():
     """Retorna status do scheduler e proxima execucao"""
     try:
         job = _scheduler.get_job("processamento_4am") if _scheduler else None
+        job_local = _scheduler.get_job("atualizacao_local_origem_6am") if _scheduler else None
         return (
             jsonify(
                 {
                     "sucesso": 1,
                     "ativo": job is not None,
                     "proximo_execucao": str(job.next_run_time) if job else None,
+                    "proxima_atualizacao_local_origem": str(job_local.next_run_time) if job_local else None,
                     "scheduler_running": _scheduler.running if _scheduler else False,
                 }
             ),
@@ -14459,7 +14546,7 @@ if __name__ == "__main__":
     logger.info("")
 
     # ========================================
-    # Inicializar APScheduler (4h30 da manha)
+    # Inicializar APScheduler
     # ========================================
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
@@ -14469,7 +14556,7 @@ if __name__ == "__main__":
         _scheduler.add_job(
             executar_processamento_automatico,
             trigger="cron",
-            day_of_week="mon-fri",  # Seg a sex; segunda pega requisicoes de sexta
+            day_of_week="mon-fri",
             hour=4,
             minute=30,
             id="processamento_4am",
@@ -14477,11 +14564,26 @@ if __name__ == "__main__":
             misfire_grace_time=3600,
             max_instances=1,
         )
+        _scheduler.add_job(
+            atualizar_cache_local_origem_do_banco,
+            trigger="cron",
+            hour=6,
+            minute=0,
+            id="atualizacao_local_origem_6am",
+            name="Atualizacao diaria do local de origem 6h",
+            misfire_grace_time=3600,
+            max_instances=1,
+        )
         _scheduler.start()
-        logger.info("[SCHEDULER] Agendamento 4h30 configurado com sucesso")
+        logger.info("[SCHEDULER] Processamento automático 4h30 configurado")
+        logger.info("[SCHEDULER] Atualização do local de origem agendada para 6h diariamente")
         logger.info(
-            "[SCHEDULER] Proxima execucao: %s",
+            "[SCHEDULER] Proxima execucao processamento: %s",
             _scheduler.get_job("processamento_4am").next_run_time,
+        )
+        logger.info(
+            "[SCHEDULER] Proxima atualizacao local origem: %s",
+            _scheduler.get_job("atualizacao_local_origem_6am").next_run_time,
         )
         logger.info("[SCHEDULER] Endpoint manual: POST /api/scheduler/executar")
         logger.info("[SCHEDULER] Status: GET /api/scheduler/status")

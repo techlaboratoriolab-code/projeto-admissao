@@ -26,9 +26,114 @@ SYSTEM_USER_NAME = "Sistema Automatico (4h)"
 # URL base do proprio Flask (chamadas internas)
 FLASK_BASE_URL = "http://localhost:5000"
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SCHEDULER_LOGS_DIR = os.path.join(BASE_DIR, "logs", "scheduler_execucoes")
+SCHEDULER_SUMMARY_LOG = os.path.join(BASE_DIR, "logs", "scheduler_execucoes.log")
+
 # Lock global para evitar execucao dupla (APScheduler interno + disparar_4h.ps1)
 _job_lock = threading.Lock()
 _job_running = False
+
+
+def _garantir_diretorios_logs_scheduler():
+    os.makedirs(SCHEDULER_LOGS_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(SCHEDULER_SUMMARY_LOG), exist_ok=True)
+
+
+def _novo_contexto_execucao(origem_disparo):
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + str(uuid.uuid4())[:8]
+    return {
+        "run_id": run_id,
+        "origem_disparo": origem_disparo,
+        "inicio": datetime.now().isoformat(),
+        "fim": None,
+        "duracao_segundos": None,
+        "status": "em_andamento",
+        "sessao_id": None,
+        "metricas": {
+            "total_itens": 0,
+            "itens_processados": 0,
+            "itens_com_erro": 0,
+            "itens_com_sucesso": 0,
+        },
+        "eventos": [],
+        "erros": [],
+    }
+
+
+def _registrar_evento_execucao(ctx, etapa, mensagem, nivel="info", extra=None):
+    evento = {
+        "timestamp": datetime.now().isoformat(),
+        "etapa": etapa,
+        "nivel": nivel.upper(),
+        "mensagem": mensagem,
+    }
+    if extra is not None:
+        evento["extra"] = extra
+    ctx["eventos"].append(evento)
+
+    prefixo = f"[SCHEDULER][RUN={ctx['run_id']}][{etapa}] {mensagem}"
+    if nivel == "error":
+        logger.error(prefixo)
+    elif nivel == "warning":
+        logger.warning(prefixo)
+    else:
+        logger.info(prefixo)
+
+
+def _registrar_erro_execucao(ctx, etapa, mensagem, exc=None, extra=None):
+    erro = {
+        "timestamp": datetime.now().isoformat(),
+        "etapa": etapa,
+        "mensagem": mensagem,
+        "extra": extra or {},
+    }
+    if exc is not None:
+        erro["exception"] = str(exc)
+        erro["traceback"] = traceback.format_exc()
+    ctx["erros"].append(erro)
+    _registrar_evento_execucao(ctx, etapa, mensagem, nivel="error", extra=erro.get("extra"))
+
+
+def _finalizar_contexto_execucao(ctx, status, motivo=None):
+    fim = datetime.now()
+    inicio = datetime.fromisoformat(ctx["inicio"])
+    duracao = (fim - inicio).total_seconds()
+    ctx["fim"] = fim.isoformat()
+    ctx["duracao_segundos"] = round(duracao, 2)
+    ctx["status"] = status
+    if motivo:
+        ctx["motivo_finalizacao"] = motivo
+
+
+def _persistir_relatorio_execucao(ctx):
+    _garantir_diretorios_logs_scheduler()
+
+    arquivo_relatorio = os.path.join(SCHEDULER_LOGS_DIR, f"run_{ctx['run_id']}.json")
+    with open(arquivo_relatorio, "w", encoding="utf-8") as f:
+        json.dump(ctx, f, ensure_ascii=False, indent=2)
+
+    resumo = {
+        "run_id": ctx["run_id"],
+        "inicio": ctx.get("inicio"),
+        "fim": ctx.get("fim"),
+        "status": ctx.get("status"),
+        "origem_disparo": ctx.get("origem_disparo"),
+        "sessao_id": ctx.get("sessao_id"),
+        "duracao_segundos": ctx.get("duracao_segundos"),
+        "total_itens": ctx.get("metricas", {}).get("total_itens", 0),
+        "itens_com_sucesso": ctx.get("metricas", {}).get("itens_com_sucesso", 0),
+        "itens_com_erro": ctx.get("metricas", {}).get("itens_com_erro", 0),
+        "qtd_eventos": len(ctx.get("eventos", [])),
+        "qtd_erros": len(ctx.get("erros", [])),
+        "arquivo_relatorio": arquivo_relatorio,
+    }
+
+    with open(SCHEDULER_SUMMARY_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(resumo, ensure_ascii=False) + "\n")
+
+    logger.info("[SCHEDULER] Relatorio salvo em %s", arquivo_relatorio)
+    logger.info("[SCHEDULER] Resumo append em %s", SCHEDULER_SUMMARY_LOG)
 
 
 def _normalizar_codigo_requisicao(codigo):
@@ -144,7 +249,7 @@ def _buscar_requisicoes_disponiveis(limite=15, max_tentativas=4):
     raise Exception(f"Falha ao buscar requisicoes disponiveis apos retries: {ultimo_erro}")
 
 
-def executar_processamento_automatico():
+def executar_processamento_automatico(origem_disparo="agendado"):
     """
     Entry point chamado pelo APScheduler as 4h.
     Replica o fluxo do frontend processarTodasRequisicoes:
@@ -160,32 +265,43 @@ def executar_processamento_automatico():
         return
     _job_running = True
     try:
-        _executar_processamento_interno()
+        _executar_processamento_interno(origem_disparo=origem_disparo)
     finally:
         _job_running = False
         _job_lock.release()
 
 
-def _executar_processamento_interno():
+def _executar_processamento_interno(origem_disparo="agendado"):
     """Logica real do processamento, chamada com lock adquirido."""
+    ctx = _novo_contexto_execucao(origem_disparo)
     logger.info("=" * 80)
     logger.info("[SCHEDULER] INICIO PROCESSAMENTO AUTOMATICO - %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     logger.info("=" * 80)
+    _registrar_evento_execucao(ctx, "inicio", "Processamento automatico iniciado", extra={"origem_disparo": origem_disparo})
 
     # Fim de semana nao processa - requisicoes de sexta sao processadas na segunda
     dia_semana = datetime.now().weekday()
     if dia_semana in (5, 6):  # Sabado=5, Domingo=6
         logger.info("[SCHEDULER] Fim de semana - pulando processamento. Requisicoes serao processadas na segunda-feira.")
+        _registrar_evento_execucao(ctx, "regra_negocio", "Execucao pulada por fim de semana", extra={"dia_semana": dia_semana})
+        _finalizar_contexto_execucao(ctx, "pulado", motivo="fim_de_semana")
+        _persistir_relatorio_execucao(ctx)
         return
 
     try:
         from supabase_client import supabase_manager
     except Exception as e:
         logger.error("[SCHEDULER] Erro ao importar supabase_client: %s", e)
+        _registrar_erro_execucao(ctx, "bootstrap", "Erro ao importar supabase_client", exc=e)
+        _finalizar_contexto_execucao(ctx, "erro", motivo="import_supabase")
+        _persistir_relatorio_execucao(ctx)
         return
 
     if not supabase_manager or not supabase_manager.is_connected():
         logger.error("[SCHEDULER] Supabase nao conectado. Abortando.")
+        _registrar_evento_execucao(ctx, "bootstrap", "Supabase nao conectado; execucao abortada", nivel="error")
+        _finalizar_contexto_execucao(ctx, "erro", motivo="supabase_desconectado")
+        _persistir_relatorio_execucao(ctx)
         return
 
     sb = supabase_manager.client
@@ -214,9 +330,19 @@ def _executar_processamento_interno():
             if sessao_bloqueante:
                 logger.warning("[SCHEDULER] Sessao ativa de HOJE encontrada (id=%s, por=%s). Abortando.",
                                sessao_bloqueante['id'], sessao_bloqueante.get('iniciado_por_nome'))
+                _registrar_evento_execucao(
+                    ctx,
+                    "validacao_sessao",
+                    "Execucao abortada por sessao ativa de hoje",
+                    nivel="warning",
+                    extra={"sessao_bloqueante_id": sessao_bloqueante['id']},
+                )
+                _finalizar_contexto_execucao(ctx, "pulado", motivo="sessao_ativa_hoje")
+                _persistir_relatorio_execucao(ctx)
                 return
             else:
                 logger.info("[SCHEDULER] Sessoes ativas encontradas sao de dias anteriores. Prosseguindo.")
+                _registrar_evento_execucao(ctx, "validacao_sessao", "Sessoes antigas detectadas, execucao autorizada")
 
         # =============================================
         # ETAPA 1: Buscar requisicoes disponiveis
@@ -224,9 +350,12 @@ def _executar_processamento_interno():
         logger.info("[SCHEDULER] Etapa 1: Buscando requisicoes disponiveis...")
 
         requisicoes = _buscar_requisicoes_disponiveis(limite=15, max_tentativas=4)
+        _registrar_evento_execucao(ctx, "etapa_1", "Busca de requisicoes concluida", extra={"qtd_requisicoes": len(requisicoes)})
 
         if not requisicoes:
             logger.info("[SCHEDULER] Nenhuma requisicao pendente. Finalizando.")
+            _finalizar_contexto_execucao(ctx, "sem_itens", motivo="nenhuma_requisicao_pendente")
+            _persistir_relatorio_execucao(ctx)
             return
 
         # =============================================
@@ -269,12 +398,15 @@ def _executar_processamento_interno():
             logger.info("[SCHEDULER] Dedup 0085/0200: %d -> %d requisicoes (removidos %d pares duplicados)",
                         len(requisicoes), len(requisicoes_dedup), len(requisicoes) - len(requisicoes_dedup))
         requisicoes = requisicoes_dedup
+        ctx["metricas"]["total_itens"] = len(requisicoes)
 
         # =============================================
         # ETAPA 2: Criar sessao no Supabase
         # =============================================
         sessao_id = str(uuid.uuid4())
+        ctx["sessao_id"] = sessao_id
         logger.info("[SCHEDULER] Etapa 2: Criando sessao %s com %d itens", sessao_id, len(requisicoes))
+        _registrar_evento_execucao(ctx, "etapa_2", "Sessao criada para processamento", extra={"sessao_id": sessao_id, "total_itens": len(requisicoes)})
 
         sb.table('fila_sessao').insert({
             'id': sessao_id,
@@ -304,10 +436,14 @@ def _executar_processamento_interno():
         result_insert = sb.table('fila_admissao').insert(itens_para_inserir).execute()
         itens_inseridos = result_insert.data or []
         logger.info("[SCHEDULER] %d itens inseridos na fila", len(itens_inseridos))
+        _registrar_evento_execucao(ctx, "etapa_3", "Itens inseridos na fila", extra={"itens_inseridos": len(itens_inseridos)})
 
         if not itens_inseridos:
             logger.error("[SCHEDULER] Falha ao inserir itens no Supabase")
             sb.table('fila_sessao').update({'status': 'cancelado'}).eq('id', sessao_id).execute()
+            _registrar_evento_execucao(ctx, "etapa_3", "Nenhum item inserido; sessao cancelada", nivel="error", extra={"sessao_id": sessao_id})
+            _finalizar_contexto_execucao(ctx, "erro", motivo="falha_insercao_itens")
+            _persistir_relatorio_execucao(ctx)
             return
 
         # =============================================
@@ -325,6 +461,7 @@ def _executar_processamento_interno():
                 raise Exception(f"Código de requisição inválido no item da fila: {item.get('cod_requisicao')}")
 
             logger.info("[SCHEDULER] [%d/%d] Processando requisicao %s...", i + 1, total, cod)
+            _registrar_evento_execucao(ctx, "etapa_4", "Inicio de processamento de item", extra={"indice": i + 1, "total": total, "cod_requisicao": cod, "item_id": item_id})
 
             try:
                 # Marcar como processando
@@ -393,12 +530,24 @@ def _executar_processamento_interno():
                 })
 
                 processados += 1
+                ctx["metricas"]["itens_com_sucesso"] = processados
+                ctx["metricas"]["itens_processados"] = i + 1
                 logger.info("[SCHEDULER] [%d/%d] %s processado com sucesso!", i + 1, total, cod)
+                _registrar_evento_execucao(ctx, "etapa_4", "Item processado com sucesso", extra={"indice": i + 1, "total": total, "cod_requisicao": cod, "qtd_imagens": len(imagens), "qtd_ocr_ok": len(resultados_ocr)})
 
             except Exception as e:
                 erros += 1
+                ctx["metricas"]["itens_com_erro"] = erros
+                ctx["metricas"]["itens_processados"] = i + 1
                 logger.error("[SCHEDULER] [%d/%d] ERRO em %s: %s", i + 1, total, cod, e)
                 logger.error(traceback.format_exc())
+                _registrar_erro_execucao(
+                    ctx,
+                    "etapa_4",
+                    "Erro ao processar item",
+                    exc=e,
+                    extra={"indice": i + 1, "total": total, "cod_requisicao": cod, "item_id": item_id},
+                )
                 _atualizar_item(sb, item_id, {
                     'status': 'erro',
                     'erro': str(e)[:500]
@@ -420,10 +569,15 @@ def _executar_processamento_interno():
         logger.info("=" * 80)
         logger.info("[SCHEDULER] CONCLUIDO: %d/%d processados, %d erros", processados, total, erros)
         logger.info("=" * 80)
+        _finalizar_contexto_execucao(ctx, "concluido")
+        _persistir_relatorio_execucao(ctx)
 
     except Exception as e:
         logger.error("[SCHEDULER] ERRO FATAL: %s", e)
         logger.error(traceback.format_exc())
+        _registrar_erro_execucao(ctx, "fatal", "Erro fatal na execucao do scheduler", exc=e)
+        _finalizar_contexto_execucao(ctx, "erro", motivo="erro_fatal")
+        _persistir_relatorio_execucao(ctx)
 
 
 # ===================================================================

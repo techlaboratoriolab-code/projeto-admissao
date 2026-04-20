@@ -38,6 +38,7 @@ const AdmissionView = () => {
     dtaColeta: new Date().toISOString().split('T')[0],
     idConvenio: '',
     idFontePagadora: '',
+    idLocalOrigem: '',
     idMedico: '',
     idExame: '',
     examesConvenio: '',
@@ -53,6 +54,7 @@ const AdmissionView = () => {
   const [patientData, setPatientData] = useState(null);
   const [camposProtegidos, setCamposProtegidos] = useState(new Set()); // campos editados manualmente pelo usuário
   const [transicionandoRequisicao, setTransicionandoRequisicao] = useState(false); // timer entre requisições
+  const [detalheProcessamentoOCR, setDetalheProcessamentoOCR] = useState('');
   const [requisicaoData, setRequisicaoData] = useState(null);
   const [sincronizacaoInfo, setSincronizacaoInfo] = useState(null);
   const [sincronizarCorrespondenteNoSalvar, setSincronizarCorrespondenteNoSalvar] = useState(null); // null = perguntar, true/false = escolha manual
@@ -208,6 +210,11 @@ const AdmissionView = () => {
   const [filaErrosConfirmacao, setFilaErrosConfirmacao] = useState([]);
   const [nomesUsuariosPorId, setNomesUsuariosPorId] = useState({});
   const autoStopRef = useRef(false);
+  const temItensParaContinuar = filaRequisicoes.some((item) => (
+    item?.status === 'pendente'
+    || item?.status === 'erro'
+    || item?.status === 'processando'
+  ));
 
   const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -453,7 +460,7 @@ const AdmissionView = () => {
             age: `${idade} anos`,
             birthDate: formatarData(data.paciente.dtaNasc),
             recordNumber: data.requisicao.codRequisicao,
-            origin: '',
+            origin: valorTextoValido(data.localOrigem?.nome),
             payingSource: valorTextoValido(data.fontePagadora?.nome),
             insurance: valorTextoValido(data.convenio?.nome),
             doctorName: data.medico?.nome || 'Não informado',
@@ -500,6 +507,7 @@ const AdmissionView = () => {
             idConvenio: data.requisicao.idConvenio?.toString() || data.convenio?.id?.toString() || '',
             convenio: data.requisicao.convenio || data.convenio?.nome || '',
             idFontePagadora: data.requisicao.idFontePagadora?.toString() || data.fontePagadora?.id?.toString() || '',
+            idLocalOrigem: data.requisicao.idLocalOrigem?.toString() || data.localOrigem?.id?.toString() || '',
             fontePagadora: data.requisicao.fontePagadora || data.fontePagadora?.nome || '',
             idMedico: data.requisicao.idMedico?.toString() || '',
             numGuia: data.requisicao.numGuia || '',
@@ -2027,6 +2035,8 @@ const AdmissionView = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    patientCardRef.current?.saveIfEditing();
+    await new Promise(resolve => setTimeout(resolve, 0));
     setLoading(true);
     setMessage(null);
 
@@ -2212,12 +2222,21 @@ const AdmissionView = () => {
         idConvenio: safeParseInt(formData.idConvenio),
         convenio: valorTextoValido(formData.convenio) || valorTextoValido(patientData?.insurance) || '',
         idFontePagadora: safeParseInt(formData.idFontePagadora),
+        idLocalOrigem:
+          safeParseInt(formData.idLocalOrigem) ||
+          safeParseInt(requisicaoData?.requisicao?.idLocalOrigem) ||
+          safeParseInt(requisicaoData?.idLocalOrigem) ||
+          safeParseInt(formData.idFontePagadora) ||
+          safeParseInt(requisicaoData?.requisicao?.idFontePagadora) ||
+          safeParseInt(requisicaoData?.idFontePagadora),
         idMedico: safeParseInt(formData.idMedico), // Buscado pelo CRM durante OCR
         idExame: idsExames[0], // Primeiro exame como principal
         examesConvenio: idsExames, // Array com todos os IDs
         numGuia: formData.numGuia || patientData?.numGuia || '',
         matConvenio: matConvenioFinal,
+        validadeMatricula: valorTextoValido(formData.validadeMatricula) || valorTextoValido(patientData?.insuranceCardValidity) || '',
         fontePagadora: valorTextoValido(formData.fontePagadora) || valorTextoValido(patientData?.payingSource) || '',
+        localOrigem: valorTextoValido(patientData?.origin) || undefined,
         sexo: formData.sexo || patientData?.gender || patientData?.sexo || '',
         codRequisicaoCorrespondente: codigoCorrespondenteDetectado || null,
         sincronizarCorrespondente,
@@ -2231,10 +2250,10 @@ const AdmissionView = () => {
         tem_senha: !!usuario?.aplis_senha
       });
 
-      // 🆕 SEMPRE incluir CPF, nome e data de nascimento (para criar novo paciente OU atualizar existente no apLIS)
+      // SEMPRE enviar os dados visíveis da interface para evitar payload incompleto
       if (patientData) {
         if (patientData.cpf) {
-          dados.NumCPF = patientData.cpf.replace(/\D/g, ''); // Remove formatação
+          dados.NumCPF = patientData.cpf.replace(/\D/g, '');
           console.log('[SALVAR]   ✓ CPF:', dados.NumCPF);
         }
         if (patientData.name) {
@@ -2242,20 +2261,34 @@ const AdmissionView = () => {
           console.log('[SALVAR]   ✓ Nome:', dados.NomPaciente);
         }
         if (patientData.birthDate) {
-          // Converter de DD/MM/YYYY para YYYY-MM-DD
-          const partes = patientData.birthDate.split('/');
-          if (partes.length === 3) {
-            dados.DtaNasc = `${partes[2]}-${partes[1]}-${partes[0]}`;
+          const dataNascimentoIso = converterDataParaISO(patientData.birthDate);
+          if (dataNascimentoIso) {
+            dados.DtaNasc = dataNascimentoIso;
             console.log('[SALVAR]   ✓ Data Nascimento:', dados.DtaNasc);
           }
         }
+        if (patientData.phone) {
+          dados.TelCelular = patientData.phone.replace(/\D/g, '');
+          console.log('[SALVAR]   ✓ Telefone:', dados.TelCelular);
+        }
+        if (patientData.rg) {
+          dados.RGNumero = patientData.rg;
+          console.log('[SALVAR]   ✓ RG:', dados.RGNumero);
+        }
+        if (patientData.address) {
+          dados.DscEndereco = patientData.address;
+          console.log('[SALVAR]   ✓ Endereço:', dados.DscEndereco);
+        }
+        if (patientData.email) {
+          dados.Email = patientData.email;
+          console.log('[SALVAR]   ✓ Email:', dados.Email);
+        }
       }
 
-      // 🆕 Se idPaciente estiver vazio, incluir dados adicionais do paciente para criação automática
+      // Se idPaciente estiver vazio, confirmar criação automática quando CPF não estiver validado
       if (!dados.idPaciente && patientData) {
-        console.log('[SALVAR] 🆕 idPaciente não informado - incluindo dados adicionais do paciente para criação automática');
+        console.log('[SALVAR] 🆕 idPaciente não informado - será usada criação automática do paciente');
         
-        // ⚠️ AVISO: Verificar se CPF foi validado na Receita Federal
         if (patientData.cpf && !receitaFederalStatus?.validado) {
           const confirmar = window.confirm(
             `⚠️ ATENÇÃO: CPF NÃO VALIDADO NA RECEITA FEDERAL\n\n` +
@@ -2278,28 +2311,6 @@ const AdmissionView = () => {
           
           console.log('[SALVAR] ⚠️ Usuário confirmou cadastro mesmo sem validação do CPF');
         }
-        
-        if (patientData.phone) {
-          dados.TelCelular = patientData.phone.replace(/\D/g, ''); // Remove formatação
-          console.log('[SALVAR]   ✓ Telefone:', dados.TelCelular);
-        }
-        
-        if (patientData.rg) {
-          dados.RGNumero = patientData.rg;
-          console.log('[SALVAR]   ✓ RG:', dados.RGNumero);
-        }
-
-        if (patientData.address) {
-          dados.DscEndereco = patientData.address;
-          console.log('[SALVAR]   ✓ Endereço:', dados.DscEndereco);
-        }
-
-        if (patientData.email) {
-          dados.Email = patientData.email;
-          console.log('[SALVAR]   ✓ Email:', dados.Email);
-        }
-
-        console.log('[SALVAR] 📋 Dados adicionais do paciente incluídos para criação automática');
       }
 
       console.log('[SALVAR] 🔍 Valor de idPaciente após processamento:');
@@ -2504,6 +2515,27 @@ const AdmissionView = () => {
 
     setRequisicaoData(data.requisicao);
     setImagens(data.imagens || []);
+    setFormData(prev => ({
+      ...prev,
+      codRequisicao: resolverCodigoCanonico(prev.codRequisicao, data?.requisicao?.codRequisicao, codRequisicao),
+      dtaColeta: converterDataParaISO(data?.requisicao?.dtaColeta) || prev.dtaColeta,
+      idPaciente: prev.idPaciente || (data?.paciente?.idPaciente || data?.paciente?.CodPaciente)?.toString() || '',
+      idConvenio: prev.idConvenio || data?.requisicao?.idConvenio?.toString() || data?.convenio?.id?.toString() || '',
+      idFontePagadora: prev.idFontePagadora || data?.requisicao?.idFontePagadora?.toString() || data?.fontePagadora?.id?.toString() || '',
+      idLocalOrigem: prev.idLocalOrigem || data?.requisicao?.idLocalOrigem?.toString() || data?.localOrigem?.id?.toString() || '',
+      idMedico: prev.idMedico || data?.requisicao?.idMedico?.toString() || '',
+      convenio: valorTextoValido(prev.convenio) || valorTextoValido(data?.convenio?.nome) || '',
+      fontePagadora: valorTextoValido(prev.fontePagadora) || valorTextoValido(data?.fontePagadora?.nome) || '',
+      numGuia: prev.numGuia || data?.requisicao?.numGuia || '',
+      dadosClinicos: prev.dadosClinicos || data?.requisicao?.dadosClinicos || '',
+      sexo: prev.sexo || data?.paciente?.sexo || data?.paciente?.DesSexo || ''
+    }));
+    setPatientData(prev => ({
+      ...prev,
+      origin: prev?.origin || valorTextoValido(data?.localOrigem?.nome) || '',
+      payingSource: prev?.payingSource || valorTextoValido(data?.fontePagadora?.nome) || '',
+      insurance: prev?.insurance || valorTextoValido(data?.convenio?.nome) || ''
+    }));
 
     const imagensParaProcessar = data.imagens || [];
     const dadosOCRColetados = [];
@@ -2515,6 +2547,7 @@ const AdmissionView = () => {
 
     console.log(`[AUTO-OCR] ${imagensParaProcessar.length} imagens para processar`);
     setMessage({ type: 'info', text: `Analisando ${imagensParaProcessar.length} imagens com OCR...` });
+    setDetalheProcessamentoOCR(`Imagens 0/${imagensParaProcessar.length}`);
 
     setDadosOCRConsolidados([]);
     setImagensProcessadas(new Set());
@@ -2531,6 +2564,7 @@ const AdmissionView = () => {
       const img = imagensParaProcessar[i];
       console.log(`[AUTO-OCR] Processando imagem ${i + 1}/${imagensParaProcessar.length}: ${img.nome}`);
       setMessage({ type: 'info', text: `Processando ${i + 1}/${imagensParaProcessar.length}: ${img.nome}` });
+      setDetalheProcessamentoOCR(`Imagem ${i + 1}/${imagensParaProcessar.length}: ${img.nome}`);
 
       try {
         let tentativas = 0;
@@ -2607,17 +2641,22 @@ const AdmissionView = () => {
     if (dadosOCRColetados.length > 0) {
       console.log('[AUTO-OCR] Consolidando resultados...');
       setMessage({ type: 'info', text: 'Gerando JSON consolidado...' });
+      setDetalheProcessamentoOCR('Consolidando resultados do OCR...');
       await new Promise(resolve => setTimeout(resolve, 1500));
       await consolidarResultados(dadosOCRColetados);
+      setDetalheProcessamentoOCR('');
       return dadosOCRColetados;
     }
 
+    setDetalheProcessamentoOCR('');
     return null;
   };
 
   // Versão do handleSubmit sem confirmações (para modo automático)
   const handleSubmitAutomatico = async (codRequisicaoForcado = null) => {
     console.log('[AUTO-SAVE] Iniciando salvamento automático...');
+    patientCardRef.current?.saveIfEditing();
+    await new Promise(resolve => setTimeout(resolve, 0));
     setLoading(true);
     setMessage({ type: 'info', text: 'Salvando admissão automaticamente...' });
 
@@ -2718,12 +2757,21 @@ const AdmissionView = () => {
         idConvenio: safeParseInt(formData.idConvenio),
         convenio: valorTextoValido(formData.convenio) || valorTextoValido(patientData?.insurance) || '',
         idFontePagadora: safeParseInt(formData.idFontePagadora),
+        idLocalOrigem:
+          safeParseInt(formData.idLocalOrigem) ||
+          safeParseInt(requisicaoData?.requisicao?.idLocalOrigem) ||
+          safeParseInt(requisicaoData?.idLocalOrigem) ||
+          safeParseInt(formData.idFontePagadora) ||
+          safeParseInt(requisicaoData?.requisicao?.idFontePagadora) ||
+          safeParseInt(requisicaoData?.idFontePagadora),
         idMedico: safeParseInt(formData.idMedico),
         idExame: idsExames[0],
         examesConvenio: idsExames,
         numGuia: formData.numGuia || patientData?.numGuia || '',
         matConvenio: matConvenioFinal,
+        validadeMatricula: valorTextoValido(formData.validadeMatricula) || valorTextoValido(patientData?.insuranceCardValidity) || '',
         fontePagadora: valorTextoValido(formData.fontePagadora) || valorTextoValido(patientData?.payingSource) || '',
+        localOrigem: valorTextoValido(patientData?.origin) || undefined,
         sexo: formData.sexo || patientData?.gender || patientData?.sexo || '',
         codRequisicaoCorrespondente: codigoCorrespondenteDetectado || null,
         sincronizarCorrespondente,
@@ -2732,23 +2780,22 @@ const AdmissionView = () => {
         aplis_senha: usuario?.aplis_senha || null
       };
 
-      // SEMPRE incluir CPF, nome e data de nascimento (para criar novo paciente OU atualizar existente)
+      // SEMPRE incluir os dados visíveis da interface no payload final
       if (patientData) {
         if (patientData.cpf) dados.NumCPF = patientData.cpf.replace(/\D/g, '');
         if (patientData.name) dados.NomPaciente = patientData.name;
         if (patientData.birthDate) {
-          const partes = patientData.birthDate.split('/');
-          if (partes.length === 3) dados.DtaNasc = `${partes[2]}-${partes[1]}-${partes[0]}`;
+          const dataNascimentoIso = converterDataParaISO(patientData.birthDate);
+          if (dataNascimentoIso) dados.DtaNasc = dataNascimentoIso;
         }
-      }
-
-      // Se idPaciente vazio, incluir dados adicionais do paciente para criação automática
-      if (!dados.idPaciente && patientData) {
-        console.log('[AUTO-SAVE] idPaciente vazio - incluindo dados adicionais do paciente para criação automática');
         if (patientData.phone) dados.TelCelular = patientData.phone.replace(/\D/g, '');
         if (patientData.rg) dados.RGNumero = patientData.rg;
         if (patientData.address) dados.DscEndereco = patientData.address;
         if (patientData.email) dados.Email = patientData.email;
+      }
+
+      if (!dados.idPaciente && patientData) {
+        console.log('[AUTO-SAVE] idPaciente vazio - será usada criação automática do paciente');
       }
 
       if (imagensProcessadas.size > 0 || dadosOCRConsolidados.length > 0) {
@@ -2825,6 +2872,7 @@ const AdmissionView = () => {
       dtaColeta: new Date().toISOString().split('T')[0],
       idConvenio: '',
       idFontePagadora: '',
+      idLocalOrigem: '',
       idMedico: '',
       idExame: '',
       examesConvenio: '',
@@ -2859,12 +2907,42 @@ const AdmissionView = () => {
     console.log('[AUTO] Sessão resetada com sucesso.');
   };
 
+  const continuarAnaliseDeOndeParou = async () => {
+    if (!sessaoAtiva?.id) {
+      setMessage({ type: 'error', text: 'Nenhuma sessão ativa encontrada para continuar.' });
+      return;
+    }
+
+    if (!temItensParaContinuar) {
+      setMessage({ type: 'info', text: 'Não há itens pendentes para continuar nesta sessão.' });
+      return;
+    }
+
+    autoStopRef.current = false;
+    setFilaRevisaoIndice(-1);
+    setMessage({ type: 'info', text: `Continuando análise da sessão ${sessaoAtiva.id} a partir dos itens pendentes...` });
+    await processarTodasRequisicoes(sessaoAtiva.id, { somentePendentes: true });
+  };
+
 
   const iniciarModoAutomatico = async () => {
     console.log('[AUTO] Iniciando modo automático...');
 
+    const primeiroIndiceRevisavel = filaRequisicoes.findIndex((item) => (
+      item?.status === 'processado'
+      || item?.status === 'salvo'
+      || item?.status === 'pulado'
+      || (item?.status === 'em_revisao' && (item?.revisado_por === usuario?.id || isAdmin))
+    ));
+
     // Verificar se já existe sessão ativa de OUTRO usuário
     if (sessaoAtiva && (filaStatus === 'processando' || filaStatus === 'revisao') && !euSouProcessador && !isAdmin) {
+      if (filaStatus === 'revisao' && primeiroIndiceRevisavel >= 0) {
+        setMessage({ type: 'info', text: 'Sessão automática encontrada. Carregando a primeira requisição para revisão...' });
+        await carregarRequisicaoDaFila(primeiroIndiceRevisavel);
+        return;
+      }
+
       setMessage({ type: 'error', text: `Já existe uma sessão ativa iniciada por ${sessaoAtiva.iniciado_por_nome}` });
       return;
     }
@@ -3069,6 +3147,7 @@ const AdmissionView = () => {
     } else {
       await atualizarSessao({ status: 'revisao', itens_processados: total });
     }
+    setDetalheProcessamentoOCR('');
     setFilaRevisaoIndice(-1);
     limparFormulario();
     setMessage({ type: 'success', text: `OCR concluído! Revise e aprove cada requisição.` });
@@ -3208,6 +3287,7 @@ const AdmissionView = () => {
             convenio: valorTextoValido(prev.convenio) || valorTextoValido(apiReq.convenio) || valorTextoValido(apiConv.nome) || '',
             idMedico: prev.idMedico || apiReq.idMedico?.toString() || '',
             idFontePagadora: prev.idFontePagadora || apiReq.idFontePagadora?.toString() || apiFonteP.id?.toString() || '',
+            idLocalOrigem: prev.idLocalOrigem || apiReq.idLocalOrigem?.toString() || apiLocal.id?.toString() || '',
             fontePagadora: valorTextoValido(prev.fontePagadora) || valorTextoValido(apiReq.fontePagadora) || valorTextoValido(apiFonteP.nome) || '',
             idPaciente: prev.idPaciente || (apiPac.idPaciente || apiPac.CodPaciente)?.toString() || '',
             dadosClinicos: prev.dadosClinicos || apiReq.dadosClinicos || '',
@@ -3259,6 +3339,19 @@ const AdmissionView = () => {
       setTransicionandoRequisicao(false);
     }
   };
+
+  useEffect(() => {
+    if (filaStatus !== 'revisao') return;
+    if (filaRevisaoIndice >= 0) return;
+    if (transicionandoRequisicao) return;
+    if (!filaRequisicoes.length) return;
+
+    const primeiroIndiceRevisavel = filaRequisicoes.findIndex((item) => item?.status === 'processado');
+
+    if (primeiroIndiceRevisavel < 0) return;
+
+    carregarRequisicaoDaFila(primeiroIndiceRevisavel);
+  }, [filaStatus, filaRevisaoIndice, filaRequisicoes, transicionandoRequisicao]);
 
   // Aprovar requisição: salvar no APLIS + marcar no Supabase
   const aprovarRequisicao = async () => {
@@ -3921,6 +4014,8 @@ const AdmissionView = () => {
       matConvenio: updatedPatient.insuranceCardNumber !== undefined ? updatedPatient.insuranceCardNumber : prev.matConvenio,
       validadeMatricula: updatedPatient.insuranceCardValidity !== undefined ? updatedPatient.insuranceCardValidity : prev.validadeMatricula,
       examesConvenio: updatedPatient.exams !== undefined ? updatedPatient.exams : prev.examesConvenio,
+      convenio: updatedPatient.insurance !== undefined ? updatedPatient.insurance : prev.convenio,
+      fontePagadora: updatedPatient.payingSource !== undefined ? updatedPatient.payingSource : prev.fontePagadora,
       numGuia: updatedPatient.numGuia !== undefined ? updatedPatient.numGuia : prev.numGuia,
       sexo: updatedPatient.gender || updatedPatient.sexo || prev.sexo,
     }));
@@ -4294,7 +4389,7 @@ const AdmissionView = () => {
 
           {/* Barra de controle */}
           <div className="flex flex-wrap gap-2 items-center">
-            {(filaStatus === 'idle' || filaStatus === 'concluido') && (
+            {isAdmin && (filaStatus === 'idle' || filaStatus === 'concluido') && (
               <button
                 type="button"
                 onClick={iniciarModoAutomatico}
@@ -4306,7 +4401,19 @@ const AdmissionView = () => {
               </button>
             )}
 
-            {(filaStatus === 'processando' || filaStatus === 'buscando_fila') && euSouProcessador && (
+            {isAdmin && sessaoAtiva && temItensParaContinuar && (filaStatus === 'processando' || filaStatus === 'revisao' || filaStatus === 'buscando_fila') && (
+              <button
+                type="button"
+                onClick={continuarAnaliseDeOndeParou}
+                disabled={loading || loadingRequisicao || transicionandoRequisicao}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+                Continuar Análise
+              </button>
+            )}
+
+            {isAdmin && (filaStatus === 'processando' || filaStatus === 'buscando_fila') && euSouProcessador && (
               <button
                 type="button"
                 onClick={() => { autoStopRef.current = true; }}
@@ -4317,7 +4424,7 @@ const AdmissionView = () => {
               </button>
             )}
 
-            {(filaStatus === 'processando' || filaStatus === 'revisao' || filaStatus === 'buscando_fila') && (
+            {isAdmin && (filaStatus === 'processando' || filaStatus === 'revisao' || filaStatus === 'buscando_fila') && (
               <button
                 type="button"
                 onClick={resetarSessao}
@@ -4337,9 +4444,16 @@ const AdmissionView = () => {
             )}
 
             {filaStatus === 'processando' && (
-              <span className="text-blue-600 dark:text-blue-400 text-sm font-semibold">
-                Processando OCR {(sessaoAtiva?.itens_processados || filaIndice) + 1}/{filaRequisicoes.length}
-              </span>
+              <div className="flex flex-col">
+                <span className="text-blue-600 dark:text-blue-400 text-sm font-semibold">
+                  Processando OCR {(sessaoAtiva?.itens_processados || filaIndice) + 1}/{filaRequisicoes.length}
+                </span>
+                {detalheProcessamentoOCR && (
+                  <span className="text-blue-500 dark:text-blue-300 text-xs">
+                    {detalheProcessamentoOCR}
+                  </span>
+                )}
+              </div>
             )}
 
             {filaStatus === 'revisao' && (

@@ -7,12 +7,11 @@
   "build": {
     "env": {
       "CI": "false",
-      "NODE_OPTIONS": "--openssl-legacy-provider",
-      "REACT_APP_API_URL": "/api"
+      "NODE_OPTIONS": "--openssl-legacy-provider"
     }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "https://automacaolab.ngrok.dev/api/$1" },
+    { "source": "/api/(.*)", "destination": "https://scrubbier-songless-connor.ngrok-free.dev/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [

@@ -14,14 +14,22 @@
  *    USE_NGROK = true
  */
 
-// Em produção no Vercel, sempre usar proxy same-origin (/api) para evitar CORS com ngrok.
-const isVercelHost =
-  typeof window !== 'undefined' && window.location.hostname.endsWith('vercel.app');
+const isBrowser = typeof window !== 'undefined';
+const currentHostname = isBrowser ? window.location.hostname : '';
+const currentPort = isBrowser ? window.location.port : '';
 
-// URL do backend — em Vercel usa base vazia (rotas ja incluem /api no codigo).
-export const API_BASE_URL = isVercelHost
-  ? ''
-  : (process.env.REACT_APP_API_URL || 'http://localhost:5000');
+const isLocalReactDev =
+  isBrowser &&
+  (currentHostname === 'localhost' || currentHostname === '127.0.0.1') &&
+  currentPort === '3000';
+
+const envApiBaseUrl = String(process.env.REACT_APP_API_URL || '').trim();
+
+// URL do backend:
+// - se houver REACT_APP_API_URL configurada, ela tem prioridade;
+// - no React dev local (localhost:3000), usa o backend em localhost:5000;
+// - em acesso público/ngrok/IP local/backend integrado, usa same-origin (/api).
+export const API_BASE_URL = envApiBaseUrl || (isLocalReactDev ? 'http://localhost:5000' : '');
 
 // Wrapper do fetch que adiciona headers necessários para o ngrok
 export const apiFetch = (url, options = {}) => {
