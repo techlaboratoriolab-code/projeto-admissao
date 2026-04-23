@@ -134,6 +134,26 @@ const AdmissionView = () => {
     }
   };
 
+  const parseApiJson = async (response, contexto = 'API') => {
+    const contentType = String(response?.headers?.get('content-type') || '').toLowerCase();
+    const raw = await response.text();
+
+    if (!raw || !raw.trim()) {
+      return {};
+    }
+
+    try {
+      return JSON.parse(raw);
+    } catch (error) {
+      const preview = raw.slice(0, 160).replace(/\s+/g, ' ').trim();
+      const isHtml = contentType.includes('text/html') || /^<!doctype|^<html/i.test(preview);
+      const detalhe = isHtml
+        ? 'resposta HTML recebida no lugar de JSON'
+        : 'resposta não retornou JSON válido';
+      throw new Error(`${contexto}: ${detalhe} (HTTP ${response.status}). Prévia: ${preview}`);
+    }
+  };
+
   const codigoCorrespondenteSelecionado = resolverCodigoCanonico(
     codigoCorrespondenteManual,
     sincronizacaoInfo?.tipo === 'OCR' ? sincronizacaoInfo?.codigoCorrespondente : ''
@@ -183,7 +203,7 @@ const AdmissionView = () => {
 
     try {
       const response = await apiFetch(`${API_BASE_URL}/api/requisicao/${codigo}`);
-      const data = await response.json();
+      const data = await parseApiJson(response, '[CODIGO] buscar código canônico');
       if (!response.ok) return '';
 
       const codigoApi = normalizarCodigoRequisicao(data?.requisicao?.codRequisicao);
@@ -239,7 +259,7 @@ const AdmissionView = () => {
       setFilaErrosConfirmacao((prev) => {
         const jaExiste = prev.some((erro) => erro.text === message.text);
         if (jaExiste) return prev;
-        return [...prev, { id, text: message.text }];
+        return [...prev, { id, text: message.text }].slice(-3);
       });
       return;
     }
@@ -256,6 +276,17 @@ const AdmissionView = () => {
 
     return undefined;
   }, [message]);
+
+  // Evita travamento da tela quando erros se acumulam em loop.
+  useEffect(() => {
+    if (filaErrosConfirmacao.length === 0) return undefined;
+
+    const timer = setTimeout(() => {
+      setFilaErrosConfirmacao((prev) => prev.slice(1));
+    }, 15000);
+
+    return () => clearTimeout(timer);
+  }, [filaErrosConfirmacao]);
 
   const resolverNomeUsuarioPorId = (valorSalvoPor) => {
     const bruto = String(valorSalvoPor || '').trim();
@@ -338,6 +369,26 @@ const AdmissionView = () => {
   };
 
   // Buscar dados da requisição quando código é alterado
+  const carregarImagensDiretoS3 = async (codRequisicao) => {
+    if (!codRequisicao) return [];
+
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/api/imagens/${codRequisicao}`);
+      const data = await response.json();
+      const imagensS3 = Array.isArray(data?.imagens) ? data.imagens : [];
+
+      if (response.ok && imagensS3.length > 0) {
+        setImagens(imagensS3);
+        setRequisicaoData((prev) => prev || { codRequisicao });
+        return imagensS3;
+      }
+    } catch (error) {
+      console.warn('[IMG-S3] Falha ao carregar imagens direto do S3:', error);
+    }
+
+    return [];
+  };
+
   const buscarRequisicao = async (codRequisicao) => {
     if (!codRequisicao || codRequisicao.length < 10) return;
 
@@ -647,20 +698,36 @@ const AdmissionView = () => {
           });
         }
       } else {
+        const imagensS3 = await carregarImagensDiretoS3(codigoSolicitado);
+        if (imagensS3.length > 0) {
+          setMessage({
+            type: 'warning',
+            text: `Requisição ${codigoSolicitado} indisponível no apLIS. Imagens carregadas do S3.`
+          });
+        } else {
+          setMessage({
+            type: 'error',
+            text: data.erro || 'Requisição não encontrada'
+          });
+          setPatientData(null);
+          setImagens([]);
+        }
+      }
+    } catch (error) {
+      const imagensS3 = await carregarImagensDiretoS3(codigoSolicitado);
+      if (imagensS3.length > 0) {
+        setMessage({
+          type: 'warning',
+          text: `Requisição ${codigoSolicitado} indisponível no apLIS. Imagens carregadas do S3.`
+        });
+      } else {
         setMessage({
           type: 'error',
-          text: data.erro || 'Requisição não encontrada'
+          text: `Erro ao buscar requisição: ${error.message}`
         });
         setPatientData(null);
         setImagens([]);
       }
-    } catch (error) {
-      setMessage({
-        type: 'error',
-        text: `Erro ao buscar requisição: ${error.message}`
-      });
-      setPatientData(null);
-      setImagens([]);
     } finally {
       setLoadingRequisicao(false);
     }
@@ -2151,7 +2218,7 @@ const AdmissionView = () => {
         body: JSON.stringify({ nomes_exames: nomesExames })
       });
 
-      const resultBusca = await responseBusca.json();
+      const resultBusca = await parseApiJson(responseBusca, '[SALVAR] buscar IDs dos exames');
       console.log('[SALVAR] Resultado da busca de IDs:', resultBusca);
 
       if (!resultBusca.sucesso || !resultBusca.resultados) {
@@ -2500,10 +2567,23 @@ const AdmissionView = () => {
 
     // 1. Buscar imagens da requisição
     const reqController = new AbortController();
-    const reqTimeout = setTimeout(() => reqController.abort(), 90000);
+    const reqTimeout = setTimeout(() => reqController.abort('timeout_busca_requisicao'), 90000);
     let response;
     try {
       response = await apiFetch(`${API_BASE_URL}/api/requisicao/${codRequisicao}`, { signal: reqController.signal });
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        throw new Error(`Timeout ao buscar requisição ${codRequisicao} (90s). Verifique API/túnel.`);
+      }
+
+      if (error instanceof TypeError) {
+        throw new Error(
+          `Falha de rede/CORS ao buscar requisição ${codRequisicao}. `
+          + 'Verifique REACT_APP_API_URL, rewrite do Vercel e se o ngrok está ativo.'
+        );
+      }
+
+      throw error;
     } finally {
       clearTimeout(reqTimeout);
     }
@@ -2583,7 +2663,7 @@ const AdmissionView = () => {
 
           try {
             const ocrController = new AbortController();
-            const ocrTimeout = setTimeout(() => ocrController.abort(), 180000);
+            const ocrTimeout = setTimeout(() => ocrController.abort('timeout_ocr'), 180000);
             let ocrResponse;
             try {
               ocrResponse = await apiFetch(`${API_BASE_URL}/api/ocr/processar`, {
@@ -2592,6 +2672,19 @@ const AdmissionView = () => {
                 body: JSON.stringify({ imagemUrl: img.url, imagemNome: img.nome }),
                 signal: ocrController.signal
               });
+            } catch (fetchError) {
+              if (fetchError?.name === 'AbortError') {
+                throw new Error(`Timeout no OCR da imagem ${img.nome} (180s)`);
+              }
+
+              if (fetchError instanceof TypeError) {
+                throw new Error(
+                  `Falha de rede/CORS ao processar OCR da imagem ${img.nome}. `
+                  + 'Verifique API/túnel ngrok e conectividade.'
+                );
+              }
+
+              throw fetchError;
             } finally {
               clearTimeout(ocrTimeout);
             }
@@ -2718,7 +2811,7 @@ const AdmissionView = () => {
         body: JSON.stringify({ nomes_exames: nomesExames })
       });
 
-      const resultBusca = await responseBusca.json();
+      const resultBusca = await parseApiJson(responseBusca, '[AUTO-SAVE] buscar IDs dos exames');
       if (!resultBusca.sucesso || !resultBusca.resultados) {
         throw new Error('Erro ao buscar IDs dos exames');
       }
@@ -3179,18 +3272,34 @@ const AdmissionView = () => {
     return s;
   };
 
+  const encontrarProximoIndiceRevisavel = (indiceAtual = -1) => {
+    return filaRequisicoes.findIndex((req, idx) => idx > indiceAtual && (
+      req?.status === 'processado'
+      || req?.status === 'salvo'
+      || req?.status === 'pulado'
+      || (req?.status === 'em_revisao' && (req?.revisado_por === usuario?.id || isAdmin))
+    ));
+  };
+
+  const comTimeout = (promise, timeoutMs, fallback = false) => {
+    return Promise.race([
+      promise,
+      new Promise((resolve) => setTimeout(() => resolve(fallback), timeoutMs))
+    ]);
+  };
+
   // Carregar uma requisição processada no formulário para revisão (com lock)
   const carregarRequisicaoDaFila = async (indice) => {
     try {
     // Limpar estado anterior e aguardar propagação antes de carregar novo
     setTransicionandoRequisicao(true);
     limparFormulario();
-    await new Promise(resolve => setTimeout(resolve, 500));
 
     resetarEstadoCorrespondencia();
     const item = filaRequisicoes[indice];
     if (!item) {
       console.warn('[AUTO] Item não encontrado:', indice);
+      setTransicionandoRequisicao(false);
       return;
     }
 
@@ -3218,6 +3327,7 @@ const AdmissionView = () => {
       console.log(`[AUTO] Sem snapshot - carregando via API: ${codRequisicao}`);
       setFilaRevisaoIndice(indice);
       setFormData(prev => ({ ...prev, codRequisicao: codRequisicaoCanonico || '' }));
+      setTransicionandoRequisicao(false);
       if (codRequisicao) {
         await buscarRequisicao(codRequisicao);
       }
@@ -3227,6 +3337,7 @@ const AdmissionView = () => {
 
     if (!formSnapshot) {
       console.warn('[AUTO] Requisição não tem dados para carregar:', indice);
+      setTransicionandoRequisicao(false);
       return;
     }
     console.log(`[AUTO] Carregando requisição ${codRequisicao} para revisão...`);
@@ -3237,9 +3348,10 @@ const AdmissionView = () => {
     // Adquirir lock no Supabase apenas para usuários não-admin
     // Admin visualiza/revisa sem travar o item para outros usuários
     if (item.id && !jaFinalizado && !isAdmin) {
-      const lockOk = await adquirirLockRevisao(item.id);
+      const lockOk = await comTimeout(adquirirLockRevisao(item.id), 1500, false);
       if (!lockOk) {
-        setMessage({ type: 'error', text: `Item sendo revisado por ${item.revisado_por_nome || 'outro usuário'}` });
+        setMessage({ type: 'error', text: `Item em revisão por outro usuário ou lock indisponível. Tente novamente.` });
+        setTransicionandoRequisicao(false);
         return;
       }
     }
@@ -3248,7 +3360,7 @@ const AdmissionView = () => {
     if (!isAdmin && !jaFinalizado && filaRevisaoIndice >= 0 && filaRevisaoIndice !== indice) {
       const itemAnterior = filaRequisicoes[filaRevisaoIndice];
       if (itemAnterior?.id && itemAnterior.status === 'em_revisao') {
-        await liberarLockRevisao(itemAnterior.id);
+        void liberarLockRevisao(itemAnterior.id);
       }
     }
 
@@ -3257,22 +3369,64 @@ const AdmissionView = () => {
     setPatientData(patientSnapshot);
     if (resultado) setResultadoConsolidadoFinal(resultado);
 
+    const salvoPorItem = resolverNomeUsuarioPorId(item.salvo_por || item.salvoPor);
+    const statusVisualizacao = item.status === 'salvo'
+      ? (salvoPorItem ? `Salvo no apLIS por ${salvoPorItem}` : 'Salvo no apLIS')
+      : 'Pulado';
+
+    const msgLabel = jaFinalizado
+      ? `Visualizando (${statusVisualizacao}): ${codRequisicao} — ${patientSnapshot?.name || item.paciente_nome || 'Paciente'}`
+      : `Revisando: ${codRequisicao} — ${patientSnapshot?.name || item.paciente_nome || 'Paciente'}`;
+    setMessage({ type: jaFinalizado ? 'success' : 'info', text: msgLabel });
+
+    // Libera a UI imediatamente: hidratação pesada roda em segundo plano.
+    setTransicionandoRequisicao(false);
+
     // Buscar dados frescos da API (imagens + complementar snapshot com dados incompletos às 4h30)
     if (codRequisicao) {
-      try {
-        const imgResp = await apiFetch(`${API_BASE_URL}/api/requisicao/${codRequisicao}`);
-        const imgData = await imgResp.json();
-        if (imgResp.ok) {
+      void (async () => {
+        try {
+          const imgResp = await apiFetch(`${API_BASE_URL}/api/requisicao/${codRequisicao}`);
+          const imgData = await parseApiJson(imgResp, `[AUTO] carregar requisição ${codRequisicao}`);
           const apiReq = imgData.requisicao || {};
           const apiPac = imgData.paciente || {};
           const apiConv = imgData.convenio || {};
           const apiFonteP = imgData.fontePagadora || {};
           const apiMed = imgData.medico || {};
           const apiLocal = imgData.localOrigem || {};
+          const temImagens = Array.isArray(imgData.imagens) && imgData.imagens.length > 0;
 
-          if (imgData.imagens) {
+          if (temImagens) {
             setImagens(imgData.imagens);
             setRequisicaoData(apiReq || null);
+          }
+
+          if (!imgResp.ok && !temImagens) {
+            const imagensS3 = await carregarImagensDiretoS3(codRequisicao);
+            if (imagensS3.length > 0) {
+              setMessage({
+                type: 'warning',
+                text: `Requisição ${codRequisicao} indisponível no apLIS. Imagens carregadas direto do S3.`
+              });
+              return;
+            }
+
+            const detalhe = imgData?.erro || `HTTP ${imgResp.status}`;
+            console.warn(`[AUTO] Requisição ${codRequisicao} indisponível:`, detalhe);
+
+            const proximoIndice = encontrarProximoIndiceRevisavel(indice);
+
+            setMessage({
+              type: 'error',
+              text: proximoIndice >= 0
+                ? `Requisição ${codRequisicao} indisponível no apLIS. Pulando para a próxima.`
+                : `Requisição ${codRequisicao} indisponível no apLIS.`
+            });
+
+            if (proximoIndice >= 0) {
+              setTimeout(() => carregarRequisicaoDaFila(proximoIndice), 100);
+            }
+            return;
           }
 
           // Enriquecer formData: IDs que podem estar vazios no snapshot (APLIS incompleto às 4h30)
@@ -3317,21 +3471,22 @@ const AdmissionView = () => {
               gender: prev?.gender || apiPac.sexo || apiPac.DesSexo || '',
             }));
           }
+        } catch (e) {
+          console.warn('[AUTO] Erro ao buscar dados atualizados:', e);
+          if (codRequisicao) {
+            const imagensS3 = await carregarImagensDiretoS3(codRequisicao);
+            if (imagensS3.length > 0) {
+              setMessage({
+                type: 'warning',
+                text: `Requisição ${codRequisicao} com resposta inválida da API. Imagens carregadas direto do S3.`
+              });
+            }
+          }
         }
-      } catch (e) {
-        console.warn('[AUTO] Erro ao buscar dados atualizados:', e);
-      }
+      })();
     }
 
-    const salvoPorItem = resolverNomeUsuarioPorId(item.salvo_por || item.salvoPor);
-    const statusVisualizacao = item.status === 'salvo'
-      ? (salvoPorItem ? `Salvo no apLIS por ${salvoPorItem}` : 'Salvo no apLIS')
-      : 'Pulado';
-
-    const msgLabel = jaFinalizado
-      ? `Visualizando (${statusVisualizacao}): ${codRequisicao} — ${patientSnapshot?.name || item.paciente_nome || 'Paciente'}`
-      : `Revisando: ${codRequisicao} — ${patientSnapshot?.name || item.paciente_nome || 'Paciente'}`;
-    setMessage({ type: jaFinalizado ? 'success' : 'info', text: msgLabel });
+    return;
     } catch (error) {
       console.error('[AUTO] Erro ao carregar requisição da fila:', error);
       setMessage({ type: 'error', text: `Erro ao carregar requisição: ${error.message}` });
@@ -3423,7 +3578,12 @@ const AdmissionView = () => {
       console.log(`[AUTO] ${codRequisicaoFinal} salvo!`);
 
       limparFormulario();
-      setFilaRevisaoIndice(-1);
+      const proximoIndice = encontrarProximoIndiceRevisavel(filaRevisaoIndice);
+      if (proximoIndice >= 0) {
+        await carregarRequisicaoDaFila(proximoIndice);
+      } else {
+        setFilaRevisaoIndice(-1);
+      }
 
     } catch (error) {
       console.error(`[AUTO] Erro ao salvar ${codRequisicaoFinal}:`, error);
@@ -3448,8 +3608,13 @@ const AdmissionView = () => {
     }]);
 
     limparFormulario();
-    setFilaRevisaoIndice(-1);
-    setMessage({ type: 'info', text: 'Requisição pulada. Selecione outra para revisar.' });
+    const proximoIndice = encontrarProximoIndiceRevisavel(filaRevisaoIndice);
+    if (proximoIndice >= 0) {
+      await carregarRequisicaoDaFila(proximoIndice);
+    } else {
+      setFilaRevisaoIndice(-1);
+      setMessage({ type: 'info', text: 'Requisição pulada. Não há mais itens para revisar.' });
+    }
   };
 
   // ========== FIM MODO AUTOMÁTICO ==========
@@ -4219,7 +4384,7 @@ const AdmissionView = () => {
     try {
       const anoAtual = new Date().getFullYear();
       const response = await apiFetch(`${API_BASE_URL}/api/historico/lotes-recentes?limite=30&ano=${anoAtual}&status=${encodeURIComponent(filtroStatusLote)}`);
-      const data = await response.json();
+      const data = await parseApiJson(response, '[HISTORICO] lotes recentes');
 
       if (response.ok && data?.sucesso === 1) {
         const lotes = Array.isArray(data?.lotes) ? data.lotes : [];
@@ -5213,7 +5378,7 @@ const AdmissionView = () => {
                         body: JSON.stringify({ nomes_exames: nomesExames })
                       });
 
-                      const result = await response.json();
+                      const result = await parseApiJson(response, '[BUSCAR IDS MANUAL] buscar IDs dos exames');
                       console.log('[BUSCAR IDS MANUAL] Resultado completo:', JSON.stringify(result, null, 2));
 
                       if (result.sucesso && result.resultados) {
@@ -5433,11 +5598,11 @@ const AdmissionView = () => {
 
       {/* Pop-up obrigatório para erros */}
       {filaErrosConfirmacao.length > 0 && (
-        <div className="fixed inset-0 z-[12000] bg-black/55 backdrop-blur-[1px] flex items-center justify-center px-4">
-          <div className="w-full max-w-lg rounded-2xl border border-red-400/60 bg-white dark:bg-neutral-900 shadow-2xl overflow-hidden animate-slideUp">
+        <div className="fixed top-5 right-5 z-[12000] w-[min(560px,calc(100vw-24px))]">
+          <div className="w-full rounded-2xl border border-red-400/60 bg-white dark:bg-neutral-900 shadow-2xl overflow-hidden animate-slideUp">
             <div className="px-5 py-4 bg-red-600 text-white flex items-center gap-3">
               <span className="text-lg font-black">⚠</span>
-              <h3 className="text-base font-bold">Erro detectado — confirmação obrigatória</h3>
+              <h3 className="text-base font-bold">Erro detectado</h3>
             </div>
             <div className="px-5 py-4">
               <p className="text-sm text-slate-800 dark:text-neutral-100 whitespace-pre-line leading-6">
@@ -5455,7 +5620,7 @@ const AdmissionView = () => {
                 onClick={() => setFilaErrosConfirmacao((prev) => prev.slice(1))}
                 className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition-colors"
               >
-                Confirmar visualização
+                Fechar
               </button>
             </div>
           </div>

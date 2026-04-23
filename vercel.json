@@ -11,7 +11,7 @@
     }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "https://scrubbier-songless-connor.ngrok-free.dev/api/$1" },
+    { "source": "/api/(.*)", "destination": "https://automacaolab.ngrok.dev/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [

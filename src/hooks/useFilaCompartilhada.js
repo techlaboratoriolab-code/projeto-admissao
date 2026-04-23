@@ -276,7 +276,7 @@ export function useFilaCompartilhada() {
         }
 
         if (meuLockRef.current && meuLockRef.current !== itemId) {
-          await liberarLockRevisao(meuLockRef.current);
+          void liberarLockRevisao(meuLockRef.current);
         }
 
         meuLockRef.current = itemId;
@@ -303,7 +303,7 @@ export function useFilaCompartilhada() {
       if (data === true) {
         // Liberar lock anterior se existir
         if (meuLockRef.current && meuLockRef.current !== itemId) {
-          await liberarLockRevisao(meuLockRef.current);
+          void liberarLockRevisao(meuLockRef.current);
         }
         meuLockRef.current = itemId;
         return true;

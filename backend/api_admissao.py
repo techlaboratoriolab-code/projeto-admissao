@@ -1,58 +1,40 @@
 ﻿"""
-
 API Backend para Sistema de Admissão
+Conecta interface React com apLIS.
 
-Conecta interface React com apLIS
-
+Estrutura de módulos:
+  db.py          — context manager de conexão MySQL e queries comuns
+  cache.py       — caches em memória de médicos, convênios e instituições (CSV)
+  aplis_client.py — cliente apLIS com retry/backoff
 """
 
-from flask import Flask, request, jsonify, send_file
-
-from flask_cors import CORS
-
-import requests
-
-import json 
-
-from datetime import datetime, timedelta
-
+import csv
+import json
+import logging
 import os
-
+import re
 import sys
-
-from dotenv import load_dotenv
+import tempfile
+import time
+import traceback
+from collections import deque
+from datetime import datetime, timedelta
+from logging.handlers import RotatingFileHandler
+from urllib.parse import quote
 
 import boto3
-
-import tempfile
-import re
-
-import vertexai
-
-from vertexai.generative_models import GenerativeModel, Part
-
-import logging
-
-from logging.handlers import RotatingFileHandler
-
-import time
-
-from collections import deque
-
-import csv
-
 import pymysql
-
+import requests
+import vertexai
 from dateutil.relativedelta import relativedelta
-
-# Importar prompts de OCR (arquivo separado para organização)
+from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask_cors import CORS
+from vertexai.generative_models import GenerativeModel, Part
+from dotenv import load_dotenv
 
 from prompts_ocr import gerar_prompt_ocr
 
-# Carregar variáveis de ambiente do arquivo .env na pasta backend
-
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
-
 
 # ============================================
 
@@ -76,19 +58,26 @@ except ImportError as e:
 
     supabase_manager = None
 
-
 # Configurar encoding UTF-8 para o console do Windows (evita erros com emojis)
 
 if sys.platform == "win32":
 
     if hasattr(sys.stdout, "reconfigure"):
 
-        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     if hasattr(sys.stderr, "reconfigure"):
 
-        sys.stderr.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+
+class SafeConsoleFormatter(logging.Formatter):
+    """Evita quebra de logging quando o terminal não suporta emojis/unicode."""
+
+    def format(self, record):
+        msg = super().format(record)
+        target_encoding = getattr(sys.stdout, "encoding", None) or "cp1252"
+        return msg.encode(target_encoding, errors="replace").decode(target_encoding)
 
 # ========================================
 
@@ -102,7 +91,6 @@ LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
 
 os.makedirs(LOG_DIR, exist_ok=True)
 
-
 # Configurar logging
 
 logging.basicConfig(
@@ -111,13 +99,11 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-
 # Logger principal
 
 logger = logging.getLogger("api_admissao")
 
 logger.setLevel(logging.DEBUG)
-
 
 # Handler para arquivo (rotação automática)
 
@@ -125,6 +111,7 @@ file_handler = RotatingFileHandler(
     os.path.join(LOG_DIR, "api_admissao.log"),
     maxBytes=10 * 1024 * 1024,  # 10MB
     backupCount=5,
+    encoding="utf-8",
 )
 
 file_handler.setLevel(logging.DEBUG)
@@ -135,7 +122,6 @@ file_handler.setFormatter(
     )
 )
 
-
 # Handler para console (colorido)
 
 console_handler = logging.StreamHandler(sys.stdout)
@@ -143,14 +129,15 @@ console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setLevel(logging.INFO)
 
 console_handler.setFormatter(
-    logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+    SafeConsoleFormatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 )
 
+# Evita duplicação de logs no root logger (e conflitos de encoding em handlers globais).
+logger.propagate = False
 
 logger.addHandler(file_handler)
 
 logger.addHandler(console_handler)
-
 
 # Configurar Vertex AI
 
@@ -158,55 +145,25 @@ GOOGLE_PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID", "spry-catcher-449921-h8")
 
 GOOGLE_LOCATION = os.getenv("GOOGLE_LOCATION", "us-central1")
 
-GOOGLE_CREDENTIALS_PATH = os.getenv(
-    "GOOGLE_APPLICATION_CREDENTIALS",
-    r"C:\Users\Windows 11\Downloads\spry-catcher-449921-h8-bbc989e73ec4 (1).json",
-)
+GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 
-# Fallback: se o caminho configurado não existe, tentar o caminho padrão do Downloads
-
-_FALLBACK_CREDENTIALS = (
-    r"C:\Users\Windows 11\Downloads\spry-catcher-449921-h8-bbc989e73ec4 (1).json"
-)
-
-if GOOGLE_CREDENTIALS_PATH and not os.path.exists(GOOGLE_CREDENTIALS_PATH):
-
-    if os.path.exists(_FALLBACK_CREDENTIALS):
-
-        print(f"[AVISO] Credenciais não encontradas em: {GOOGLE_CREDENTIALS_PATH}")
-
-        print(f"[AVISO] Usando fallback: {_FALLBACK_CREDENTIALS}")
-
-        GOOGLE_CREDENTIALS_PATH = _FALLBACK_CREDENTIALS
-
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _FALLBACK_CREDENTIALS
-
-    else:
-
-        print(
-            f"[ERRO] Arquivo de credenciais Google não encontrado: {GOOGLE_CREDENTIALS_PATH}"
-        )
-
-        print(f"[ERRO] OCR via Vertex AI não estará disponível!")
-
-elif GOOGLE_CREDENTIALS_PATH and os.path.exists(GOOGLE_CREDENTIALS_PATH):
-
+if GOOGLE_CREDENTIALS_PATH and os.path.exists(GOOGLE_CREDENTIALS_PATH):
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_CREDENTIALS_PATH
-
-    print(f"[OK] Credenciais Google encontradas: {GOOGLE_CREDENTIALS_PATH}")
-
+    logger.info("[Vertex AI] Credenciais: %s", GOOGLE_CREDENTIALS_PATH)
+elif GOOGLE_CREDENTIALS_PATH:
+    logger.warning("[Vertex AI] Credenciais não encontradas: %s", GOOGLE_CREDENTIALS_PATH)
+else:
+    logger.warning("[Vertex AI] GOOGLE_APPLICATION_CREDENTIALS não configurado — OCR indisponível")
 
 # Inicializar Vertex AI
 
 vertexai.init(project=GOOGLE_PROJECT_ID, location=GOOGLE_LOCATION)
-
 
 # Configurações da API de CPF (Receita Federal)
 
 CPF_API_BASE_URL = "https://ws.hubdodesenvolvedor.com.br/v2/cpf/"
 
 CPF_API_TOKEN = os.getenv("CPF_API_TOKEN", "")
-
 
 # ========================================
 
@@ -221,9 +178,7 @@ DB_CONFIG = {
     "charset": "utf8mb4",
 }
 
-
 COD_REQUISICAO_REGEX = re.compile(r"^(0085|0200)\d{9}$")
-
 
 def codigo_requisicao_valido(codigo):
 
@@ -234,7 +189,6 @@ def codigo_requisicao_valido(codigo):
     codigo_str = str(codigo).strip()
 
     return COD_REQUISICAO_REGEX.fullmatch(codigo_str) is not None
-
 
 def buscar_ids_banco(cod_requisicao):
     """
@@ -318,7 +272,6 @@ def buscar_ids_banco(cod_requisicao):
 
         return {"IdConvenio": None, "IdFontePagadora": None, "IdLocalOrigem": None}
 
-
 def buscar_dados_paciente_via_api(cod_requisicao):
     """
 
@@ -326,13 +279,9 @@ def buscar_dados_paciente_via_api(cod_requisicao):
 
     E faz lookup reverso para encontrar os IDs de Convênio, Fonte Pagadora e Local de Origem
 
-
-
     Args:
 
         cod_requisicao: Código da requisição
-
-
 
     Returns:
 
@@ -543,19 +492,14 @@ def buscar_dados_paciente_via_api(cod_requisicao):
 
         return None
 
-
 def buscar_dados_completos_paciente(cod_paciente):
     """
 
     Busca TODOS os dados do paciente direto do banco de dados (FALLBACK)
 
-
-
     Args:
 
         cod_paciente: Código do paciente
-
-
 
     Returns:
 
@@ -657,7 +601,6 @@ def buscar_dados_completos_paciente(cod_paciente):
 
         return None
 
-
 def buscar_requisicao_correspondente(cod_requisicao):
     """
 
@@ -667,17 +610,11 @@ def buscar_requisicao_correspondente(cod_requisicao):
 
     - Se começa com 0200 â†’ busca correspondente 085
 
-
-
     Retorna dados do PACIENTE da requisição correspondente para sincronização
-
-
 
     Args:
 
         cod_requisicao: Código da requisição (ex: '0085075767003' ou '0200051495002')
-
-
 
     Returns:
 
@@ -875,13 +812,10 @@ def buscar_requisicao_correspondente(cod_requisicao):
 
         return None
 
-
 def buscar_requisicao_correspondente_aplis(cod_requisicao):
     """
 
     Busca requisição correspondente DIRETO DO APLIS (sem depender do banco local)
-
-
 
     Regra:
 
@@ -889,21 +823,15 @@ def buscar_requisicao_correspondente_aplis(cod_requisicao):
 
     - Se começa com 0200 â†’ busca 0085 com mesmo sufixo
 
-
-
     Exemplo:
 
     - 0085075447003 â†’ 0200075447003
 
     - 0200051653008 â†’ 0085051653008
 
-
-
     Args:
 
         cod_requisicao: Código da requisição
-
-
 
     Returns:
 
@@ -1028,32 +956,24 @@ def buscar_requisicao_correspondente_aplis(cod_requisicao):
 
         return None
 
-
 # ========================================
 
 # FUNÃ‡ÃƒO PARA CALCULAR DATA DE NASCIMENTO A PARTIR DA IDADE
 
 # ========================================
 
-
 def calcular_data_nascimento_por_idade(idade_formatada):
     """
 
     Calcula a data de nascimento a partir da idade formatada.
 
-
-
     Args:
 
         idade_formatada (str): Idade no formato "48 anos", "48 anos 10 meses" ou "48 anos 10 meses 10 dias"
 
-
-
     Returns:
 
         str: Data de nascimento no formato YYYY-MM-DD ou None se não conseguir calcular
-
-
 
     Exemplos:
 
@@ -1131,13 +1051,11 @@ def calcular_data_nascimento_por_idade(idade_formatada):
 
         return None
 
-
 # ========================================
 
 # RATE LIMITER PARA VERTEX AI
 
 # ========================================
-
 
 class VertexAIRateLimiter:
     """
@@ -1213,7 +1131,6 @@ class VertexAIRateLimiter:
             f"[RATE LIMIT] Requisições no último minuto: {len(self.request_times)}/{self.max_rpm}"
         )
 
-
 # Instância global do rate limiter
 
 # Configuração balanceada para evitar 429
@@ -1230,7 +1147,6 @@ _token_stats = {
     "correcao": {"input": 0, "output": 0, "chamadas": 0},
     "iniciado_em": None,
 }
-
 
 def _registrar_tokens(tipo, response):
     """Extrai e acumula tokens de uma resposta do Vertex AI."""
@@ -1264,7 +1180,6 @@ def _registrar_tokens(tipo, response):
     except Exception as e:
         logger.warning("[TOKENS] Erro ao registrar tokens: %s", e)
 
-
 # Pasta build do React (um nivel acima do backend/)
 REACT_BUILD_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "build"
@@ -1295,7 +1210,6 @@ CORS(
     },
 )
 
-
 # ========================================
 
 # REGISTRAR BLUEPRINTS
@@ -1318,7 +1232,6 @@ except ImportError as e:
         f"[AVISO] Não foi possível registrar blueprint de autenticação legado: {e}"
     )
 
-
 # Blueprint de autenticação Supabase (nova - compartilhada com outro sistema)
 
 try:
@@ -1335,13 +1248,11 @@ except ImportError as e:
         f"[AVISO] Não foi possível registrar blueprint de autenticação Supabase: {e}"
     )
 
-
 # ========================================
 
 # MIDDLEWARE DE LOGGING E CORS
 
 # ========================================
-
 
 @app.before_request
 def log_request_info():
@@ -1417,7 +1328,6 @@ def log_request_info():
 
     logger.info("=" * 80)
 
-
 @app.after_request
 def log_response_info(response):
     """Log de todas as respostas enviadas + garante headers CORS"""
@@ -1462,7 +1372,6 @@ def log_response_info(response):
 
     return response
 
-
 @app.errorhandler(Exception)
 def handle_exception(e):
     """Log de erros não tratados e retorna JSON com CORS"""
@@ -1494,15 +1403,6 @@ def handle_exception(e):
         500,
     )
 
-    return (
-        jsonify(
-            {
-                "erro": f"{type(e).__name__}: {str(e)}",
-                "detalhes": "Erro interno do servidor - verifique os logs",
-            }
-        ),
-        500,
-    )
 
 
 # Diretório temporário para imagens
@@ -1511,6 +1411,78 @@ TEMP_IMAGES_DIR = os.path.join(tempfile.gettempdir(), "admissao_images")
 
 os.makedirs(TEMP_IMAGES_DIR, exist_ok=True)
 
+S3_IMAGE_KEY_CACHE = {}
+
+def url_proxy_imagem(filename):
+    """Monta uma URL estável para servir a imagem pelo próprio backend."""
+    try:
+        proto = request.headers.get("X-Forwarded-Proto", request.scheme)
+        host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host")
+        if host:
+            return f"{proto}://{host}/api/imagem/{quote(filename)}"
+    except RuntimeError:
+        pass
+    return f"/api/imagem/{quote(filename)}"
+
+def registrar_imagem_s3(s3_client, key, filename):
+    """Registra e tenta baixar a imagem para o cache local."""
+    S3_IMAGE_KEY_CACHE[filename] = key
+    arquivo_path = os.path.join(TEMP_IMAGES_DIR, filename)
+
+    if os.path.exists(arquivo_path):
+        return arquivo_path
+
+    try:
+        s3_client.download_file(S3_BUCKET, key, arquivo_path)
+        logger.info(f"[IMG] Imagem em cache local: {filename}")
+    except Exception as e:
+        logger.warning(f"[IMG] Falha ao baixar {filename} para cache local: {e}")
+
+    return arquivo_path
+
+def buscar_imagens_s3_por_codigo(cod_requisicao):
+    """Busca imagens do código diretamente no S3 e devolve URLs estáveis do backend."""
+    imagens = []
+    s3_client = get_s3_client()
+    cod_requisicao = str(cod_requisicao or '').strip()
+
+    if not s3_client or not cod_requisicao:
+        return imagens
+
+    try:
+        prefixo_lab = cod_requisicao[:4] if len(cod_requisicao) >= 4 else '0040'
+        caminho_s3_base = f"lab/Arquivos/Foto/{prefixo_lab}/{cod_requisicao}"
+        logger.info(f"[IMG] Buscando imagens em: {caminho_s3_base}")
+
+        response_s3 = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=caminho_s3_base)
+        for obj in response_s3.get('Contents', []):
+            key = obj.get('Key', '')
+            filename = key.split('/')[-1]
+            if not filename or not filename.startswith(cod_requisicao):
+                continue
+
+            try:
+                url_s3 = s3_client.generate_presigned_url(
+                    'get_object',
+                    Params={'Bucket': S3_BUCKET, 'Key': key},
+                    ExpiresIn=43200,
+                )
+                registrar_imagem_s3(s3_client, key, filename)
+                imagens.append({
+                    'nome': filename,
+                    'url': url_proxy_imagem(filename),
+                    'urlS3': url_s3,
+                    'tamanho': obj.get('Size'),
+                    'dataCadastro': obj.get('LastModified').isoformat() if obj.get('LastModified') else None,
+                })
+            except Exception as e:
+                logger.error(f"[IMG] Erro ao preparar imagem {filename}: {e}")
+
+        logger.info(f"[IMG] Total de imagens encontradas para {cod_requisicao}: {len(imagens)}")
+    except Exception as e:
+        logger.error(f"[IMG] Erro ao buscar imagens da requisição {cod_requisicao}: {e}")
+
+    return imagens
 
 # ========================================
 
@@ -1525,8 +1497,6 @@ MEDICOS_CACHE = {}  # {CRM_UF: {id, nome, crm, uf}}
 CONVENIOS_CACHE = {}  # {IdConvenio: {id, nome}}
 
 INSTITUICOES_CACHE = {}  # {IdInstituicao: {id, nome}}
-
-
 
 def carregar_medicos_csv():
     """Carrega médicos do CSV para cache em memória"""
@@ -1571,7 +1541,6 @@ def carregar_medicos_csv():
 
         logger.error(f"[CSV] Erro ao carregar médicos: {e}")
 
-
 def carregar_convenios_csv():
     """Carrega convênios do CSV para cache em memória"""
 
@@ -1610,7 +1579,6 @@ def carregar_convenios_csv():
     except Exception as e:
 
         logger.error(f"[CSV] Erro ao carregar convênios: {e}")
-
 
 def carregar_instituicoes_csv():
     """Carrega instituições do CSV para cache em memória"""
@@ -1676,7 +1644,6 @@ def carregar_instituicoes_csv():
 
         logger.error(f"[CSV] Erro ao carregar instituições: {e}")
 
-
 def atualizar_cache_local_origem_do_banco():
     """Atualiza diariamente o cache de local de origem a partir do banco."""
 
@@ -1693,7 +1660,6 @@ def atualizar_cache_local_origem_do_banco():
         logger.error(f"[LOCAL_ORIGEM] Erro ao atualizar cache do banco: {e}")
         return False
 
-
 def buscar_medico_por_crm(crm, uf):
     """Busca médico no cache por CRM e UF"""
 
@@ -1701,25 +1667,20 @@ def buscar_medico_por_crm(crm, uf):
 
     return MEDICOS_CACHE.get(chave)
 
-
 def buscar_convenio_por_id(id_convenio):
     """Busca convênio no cache por ID"""
 
     return CONVENIOS_CACHE.get(str(id_convenio))
-
 
 def buscar_instituicao_por_id(id_instituicao):
     """Busca instituição no cache por ID"""
 
     return INSTITUICOES_CACHE.get(str(id_instituicao))
 
-
 def buscar_instituicao_por_nome(nome_busca):
     """
 
     Busca instituição no cache por nome (busca parcial, case-insensitive)
-
-
 
     Estratégia de busca:
 
@@ -1729,13 +1690,9 @@ def buscar_instituicao_por_nome(nome_busca):
 
     3. Busca parcial
 
-
-
     Args:
 
         nome_busca (str): Nome ou parte do nome da instituição
-
-
 
     Returns:
 
@@ -1834,7 +1791,6 @@ def buscar_instituicao_por_nome(nome_busca):
     )
 
     return None
-
 
 def obter_id_convenio_default():
     """
@@ -1952,7 +1908,6 @@ def obter_id_convenio_default():
     )
 
     return int(primeiro_id)
-
 
 def obter_id_instituicao_default():
     """
@@ -2083,7 +2038,6 @@ def obter_id_instituicao_default():
 
     return int(primeiro_id)
 
-
 def inferir_id_local_origem_por_historico(id_fonte_pagadora=None, id_convenio=None):
     """Infere o local de origem mais provável a partir do histórico real já salvo."""
 
@@ -2148,19 +2102,14 @@ def inferir_id_local_origem_por_historico(id_fonte_pagadora=None, id_convenio=No
 
     return None
 
-
 def buscar_instituicao_por_nome(nome_busca):
     """
 
     Busca instituição (fonte pagadora) por nome (busca parcial, case-insensitive)
 
-
-
     Args:
 
         nome_busca (str): Nome ou parte do nome da instituição
-
-
 
     Returns:
 
@@ -2206,13 +2155,10 @@ def buscar_instituicao_por_nome(nome_busca):
 
     return None
 
-
 def obter_id_medico_default():
     """
 
     Busca um ID de médico válido para usar como default
-
-
 
     Returns:
 
@@ -2237,7 +2183,6 @@ def obter_id_medico_default():
     logger.info(f"[Default] âœ… Médico default: ID={primeiro_id}, Nome={primeiro_nome}")
 
     return int(primeiro_id)
-
 
 def _buscar_id_por_nome_convenio(nome_convenio):
     """Helper: Busca ID do convênio nos CSVs usando o NOME (lookup reverso)"""
@@ -2303,7 +2248,6 @@ def _buscar_id_por_nome_convenio(nome_convenio):
     )
 
     return None
-
 
 def _buscar_id_por_nome_instituicao(nome_instituicao):
     """Helper: Busca ID da instituição nos CSVs usando o NOME (lookup reverso)"""
@@ -2376,7 +2320,6 @@ def _buscar_id_por_nome_instituicao(nome_instituicao):
         return int(id_inst_db)
 
     return None
-
 
 def _buscar_id_convenio_por_nome_banco(nome_convenio):
     """Fallback: busca IdConvenio direto no banco por nome de convênio."""
@@ -2497,7 +2440,6 @@ def _buscar_id_convenio_por_nome_banco(nome_convenio):
 
     return None
 
-
 def _buscar_id_fonte_pagadora_por_nome_banco(nome_fonte):
     """Fallback: busca IdInstituicao direto no banco por nome de fonte pagadora (FontePagadora=1)."""
 
@@ -2588,7 +2530,6 @@ def _buscar_id_fonte_pagadora_por_nome_banco(nome_fonte):
             conn.close()
 
     return None
-
 
 def _buscar_convenio_nome(id_convenio):
     """Helper: Busca nome do convênio nos CSVs usando o ID"""
@@ -2712,7 +2653,6 @@ def _buscar_convenio_nome(id_convenio):
     logger.info(f"[Helper] ðŸ“¤ Retornando None (não encontrado)")
 
     return None
-
 
 def _buscar_instituicao_nome(id_instituicao):
     """Helper: Busca nome da instituição nos CSVs usando o ID"""
@@ -2868,7 +2808,6 @@ def _buscar_instituicao_nome(id_instituicao):
 
     return None
 
-
 # Carregar CSVs na inicialização
 
 logger.info("[INIT] Carregando dados dos CSVs...")
@@ -2878,8 +2817,6 @@ carregar_medicos_csv()
 carregar_convenios_csv()
 
 carregar_instituicoes_csv()
-
-
 
 # Configurações apLIS - USAR VARIÁVEIS DE AMBIENTE
 
@@ -2891,7 +2828,6 @@ APLIS_PASSWORD = os.getenv("APLIS_SENHA", "")  # âš ️ CONFIGURE NO .env
 
 APLIS_HEADERS = {"Content-Type": "application/json"}
 
-
 # Configurações AWS S3
 
 S3_CONFIG = {
@@ -2901,7 +2837,6 @@ S3_CONFIG = {
 }
 
 S3_BUCKET = os.getenv("S3_BUCKET_NAME", "aplis2")
-
 
 def get_s3_client():
     """Cria cliente S3"""
@@ -2918,13 +2853,10 @@ def get_s3_client():
 
         return None
 
-
 def fazer_requisicao_aplis(cmd, dat, aplis_usuario=None, aplis_senha=None):
     """
 
     Função genérica para fazer requisições ao apLIS usando a metodologia requisicaoListar
-
-
 
     Args:
 
@@ -2935,8 +2867,6 @@ def fazer_requisicao_aplis(cmd, dat, aplis_usuario=None, aplis_senha=None):
         aplis_usuario (str, optional): Usuário do apLIS (usa padrão do .env se não fornecido)
 
         aplis_senha (str, optional): Senha do apLIS (usa padrão do .env se não fornecido)
-
-
 
     Returns:
 
@@ -2962,44 +2892,90 @@ def fazer_requisicao_aplis(cmd, dat, aplis_usuario=None, aplis_senha=None):
         f"[apLIS] Payload completo: {json.dumps(payload, indent=2, ensure_ascii=False)}"
     )
 
+    max_tentativas = 6
+    tentativa = 0
+    ultimo_status_code = None
+    ultimo_texto = ""
+
     try:
+        while tentativa < max_tentativas:
+            tentativa += 1
 
-        response = requests.post(
-            APLIS_URL, auth=(usuario, senha), headers=APLIS_HEADERS, data=data
-        )
-
-        logger.info(f"[apLIS] Status Code: {response.status_code}")
-
-        try:
-
-            resposta_json = response.json()
-
-            logger.info(
-                f"[apLIS] Resposta JSON completa: {json.dumps(resposta_json, indent=2, ensure_ascii=False)}"
+            response = requests.post(
+                APLIS_URL,
+                auth=(usuario, senha),
+                headers=APLIS_HEADERS,
+                data=data,
+                timeout=45,
             )
 
-            if resposta_json.get("dat") and resposta_json["dat"].get("sucesso") == 1:
+            ultimo_status_code = response.status_code
+            ultimo_texto = (response.text or "").strip()
 
-                logger.info(f"[apLIS] Requisição bem-sucedida para comando: {cmd}")
+            logger.info(
+                f"[apLIS] Status Code: {response.status_code} (tentativa {tentativa}/{max_tentativas})"
+            )
 
-                return resposta_json
+            # Retry com backoff para limitação temporária do apLIS.
+            if response.status_code in (429, 502, 503, 504) and tentativa < max_tentativas:
+                espera = min(30, 2 ** tentativa)
+                logger.warning(
+                    f"[apLIS] HTTP {response.status_code} em {cmd}. Retry em {espera}s..."
+                )
+                time.sleep(espera)
+                continue
 
-            else:
+            try:
 
-                logger.warning(f"[apLIS] Resposta com sucesso != 1: {resposta_json}")
+                resposta_json = response.json()
 
-                return resposta_json
+                logger.info(
+                    f"[apLIS] Resposta JSON completa: {json.dumps(resposta_json, indent=2, ensure_ascii=False)}"
+                )
 
-        except ValueError:
+                if resposta_json.get("dat") and resposta_json["dat"].get("sucesso") == 1:
 
-            logger.error(f"[apLIS] Resposta não está em JSON: {response.text}")
+                    logger.info(f"[apLIS] Requisição bem-sucedida para comando: {cmd}")
 
-            return {
-                "erro": "Resposta inválida do apLIS",
-                "texto": response.text,
-                "sucesso": 0,
-                "dat": {},
-            }
+                    return resposta_json
+
+                else:
+
+                    logger.warning(f"[apLIS] Resposta com sucesso != 1: {resposta_json}")
+
+                    return resposta_json
+
+            except ValueError:
+
+                logger.error(f"[apLIS] Resposta não está em JSON: {response.text}")
+
+                texto_upper = (response.text or "").upper()
+                if (
+                    ("429" in texto_upper or "TOO MANY REQUESTS" in texto_upper)
+                    and tentativa < max_tentativas
+                ):
+                    espera = min(30, 2 ** tentativa)
+                    logger.warning(
+                        f"[apLIS] Resposta não-JSON com indício de rate limit em {cmd}. Retry em {espera}s..."
+                    )
+                    time.sleep(espera)
+                    continue
+
+                return {
+                    "erro": "Resposta inválida do apLIS",
+                    "texto": response.text,
+                    "status_code": response.status_code,
+                    "sucesso": 0,
+                    "dat": {},
+                }
+
+        return {
+            "erro": f"Falha após {max_tentativas} tentativas no apLIS",
+            "status_code": ultimo_status_code,
+            "texto": ultimo_texto,
+            "sucesso": 0,
+            "dat": {},
+        }
 
     except requests.exceptions.RequestException as e:
 
@@ -3013,19 +2989,14 @@ def fazer_requisicao_aplis(cmd, dat, aplis_usuario=None, aplis_senha=None):
 
         return {"erro": f"Erro inesperado: {str(e)}", "sucesso": 0, "dat": {}}
 
-
 def extrair_credenciais_usuario(request):
     """
 
     Extrai credenciais do apLIS do usuário a partir do corpo da requisição.
 
-
-
     Args:
 
         request: Request do Flask
-
-
 
     Returns:
 
@@ -3055,21 +3026,16 @@ def extrair_credenciais_usuario(request):
 
         return None, None
 
-
 def consultar_cpf_receita_federal(cpf, data_nascimento):
     """
 
     Consulta CPF na API da Receita Federal (HubDoDesenvolvedor)
-
-
 
     Args:
 
         cpf (str): CPF no formato XXX.XXX.XXX-XX ou apenas números
 
         data_nascimento (str): Data de nascimento no formato DD/MM/YYYY ou YYYY-MM-DD
-
-
 
     Returns:
 
@@ -3245,7 +3211,6 @@ def consultar_cpf_receita_federal(cpf, data_nascimento):
 
         return None
 
-
 def validar_e_corrigir_dados_cpf(dados_aplis, dados_sistema_antigo=None):
     """
 
@@ -3253,15 +3218,11 @@ def validar_e_corrigir_dados_cpf(dados_aplis, dados_sistema_antigo=None):
 
     Prioriza dados da Receita Federal sobre dados do apLIS.
 
-
-
     Args:
 
         dados_aplis (dict): Dados vindos do apLIS
 
         dados_sistema_antigo (dict): Dados do sistema antigo (opcional)
-
-
 
     Returns:
 
@@ -3465,13 +3426,10 @@ def validar_e_corrigir_dados_cpf(dados_aplis, dados_sistema_antigo=None):
             },
         }
 
-
 def salvar_admissao_aplis(dados_admissao, aplis_usuario=None, aplis_senha=None):
     """
 
     Salva uma admissão/requisição no apLIS usando a nova metodologia genérica
-
-
 
     Args:
 
@@ -3493,21 +3451,16 @@ def salvar_admissao_aplis(dados_admissao, aplis_usuario=None, aplis_senha=None):
         "admissaoSalvar", dados_admissao, aplis_usuario, aplis_senha
     )
 
-
 def buscar_dados_paciente_sistema_antigo(cod_paciente=None, cpf=None):
     """
 
     Busca dados COMPLETOS do paciente buscando requisições ANTIGAS do mesmo paciente
-
-
 
     ESTRATÃ‰GIA: Como o `requisicaoListar` do sistema novo não retorna dados completos
 
     do paciente (dtaNasc, RG, endereço), buscamos requisições antigas (com 1+ dia de atraso)
 
     para obter esses dados complementares que podem ter sido salvos anteriormente.
-
-
 
     Dados que buscamos:
 
@@ -3521,15 +3474,11 @@ def buscar_dados_paciente_sistema_antigo(cod_paciente=None, cpf=None):
 
     - Endereço completo
 
-
-
     Args:
 
         cod_paciente (str): Código do paciente
 
         cpf (str): CPF do paciente
-
-
 
     Returns:
 
@@ -3711,15 +3660,12 @@ def buscar_dados_paciente_sistema_antigo(cod_paciente=None, cpf=None):
 
         return None
 
-
 def listar_requisicoes_aplis(
     id_evento, periodo_ini, periodo_fim, ordenar="IdRequisicao", paginaAtual=1
 ):
     """
 
     Lista requisições do apLIS usando requisicaoListar
-
-
 
     Args:
 
@@ -3732,8 +3678,6 @@ def listar_requisicoes_aplis(
         ordenar (str): Campo para ordenação (padrão: IdRequisicao)
 
         paginaAtual (int): Número da página a buscar (padrão: 1)
-
-
 
     Returns:
 
@@ -3755,17 +3699,12 @@ def listar_requisicoes_aplis(
 
     return fazer_requisicao_aplis("requisicaoListar", dat)
 
-
 def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquecer=True):
     """
 
     Lista requisições do apLIS com dados PRIMÁRIOS + complementares enriquecidos
 
-
-
     ⭐ AGORA BUSCA TODAS AS PÁGINAS - Não fica limitado aos primeiros 50 registros!
-
-
 
     Esta função integra as duas metodologias:
 
@@ -3781,8 +3720,6 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
 
        - ID do médico
 
-
-
     2. COMPLEMENTAR (enriquecimento): Adiciona informações complementares
 
        - Dados do médico completos
@@ -3795,8 +3732,6 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
 
        - Dados clínicos
 
-
-
     Args:
 
         id_evento (str): ID do evento
@@ -3806,8 +3741,6 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
         periodo_fim (str): Data final (YYYY-MM-DD)
 
         enriquecer (bool): Se deve buscar dados complementares (padrão: True)
-
-
 
     Returns:
 
@@ -4162,22 +4095,17 @@ def listar_requisicoes_detalhadas(id_evento, periodo_ini, periodo_fim, enriquece
 
         return {"dat": {"sucesso": 0, "erro": str(e), "modo": "detalhado_enriquecido"}}
 
-
 @app.route("/api/requisicoes/listar", methods=["POST"])
 def listar_requisicoes():
     """
 
     Lista requisições do apLIS com dados PRIMÁRIOS e COMPLEMENTARES
 
-
-
     Esta função integra duas metodologias:
 
     1. PRIMÁRIA: Dados básicos e importantes (requisição, CPF, paciente)
 
     2. COMPLEMENTAR: Informações adicionais (médico, convênio, local origem, etc)
-
-
 
     Exemplo de requisição:
 
@@ -4192,8 +4120,6 @@ def listar_requisicoes():
         "enriquecer": true  # (opcional, padrão: true) - Se deve buscar dados complementares
 
     }
-
-
 
     Resposta:
 
@@ -4293,14 +4219,11 @@ def listar_requisicoes():
             500,
         )
 
-
 @app.route("/api/requisicao/<cod_requisicao>", methods=["GET"])
 def buscar_requisicao(cod_requisicao):
     """
 
     âœ… INTEGRALIZADO: Busca dados COMPLETOS de uma requisição
-
-
 
     AGORA INTEGRA:
 
@@ -4311,8 +4234,6 @@ def buscar_requisicao(cod_requisicao):
     3. IMAGENS: Do S3 (AWS)
 
     4. DADOS OCR: Vazios até processamento (preenchidos depois)
-
-
 
     Retorna estrutura única com todos os dados necessários para o frontend.
 
@@ -4400,6 +4321,27 @@ def buscar_requisicao(cod_requisicao):
                     logger.warning(
                         f"[BuscarIntegrado] âš ️ Ignorando resultados aproximados para evitar carregar requisição errada"
                     )
+                    imagens_parciais = buscar_imagens_s3_por_codigo(cod_requisicao_str)
+                    if imagens_parciais:
+                        return (
+                            jsonify(
+                                {
+                                    "sucesso": 1,
+                                    "parcial": True,
+                                    "mensagem": "Requisição não localizada no apLIS, mas as imagens foram recuperadas do S3.",
+                                    "requisicao": {"codRequisicao": cod_requisicao_str},
+                                    "paciente": {},
+                                    "medico": {},
+                                    "convenio": {"id": None, "nome": ""},
+                                    "fontePagadora": {"id": None, "nome": ""},
+                                    "localOrigem": {"id": None, "nome": ""},
+                                    "imagens": imagens_parciais,
+                                    "dadosOCR": {"status": "pendente", "consolidado": None},
+                                }
+                            ),
+                            200,
+                        )
+
                     return (
                         jsonify(
                             {
@@ -4471,88 +4413,8 @@ def buscar_requisicao(cod_requisicao):
 
                 # PASSO 2: Buscar imagens no S3
 
-                imagens = []
-
                 s3_client = get_s3_client()
-
-                if s3_client:
-
-                    try:
-
-                        prefixo_lab = (
-                            cod_requisicao[:4] if len(cod_requisicao) >= 4 else "0040"
-                        )
-
-                        caminho_s3_base = (
-                            f"lab/Arquivos/Foto/{prefixo_lab}/{cod_requisicao}"
-                        )
-
-                        logger.info(
-                            f"[BuscarIntegrado][S3] Buscando imagens em: {caminho_s3_base}"
-                        )
-
-                        response_s3 = s3_client.list_objects_v2(
-                            Bucket=S3_BUCKET, Prefix=caminho_s3_base
-                        )
-
-                        if "Contents" in response_s3:
-
-                            for obj in response_s3["Contents"]:
-
-                                key = obj["Key"]
-
-                                filename = key.split("/")[-1]
-
-                                if not filename or not filename.startswith(
-                                    cod_requisicao
-                                ):
-
-                                    continue
-
-                                try:
-
-                                    url_local = s3_client.generate_presigned_url(
-                                        "get_object",
-                                        Params={"Bucket": S3_BUCKET, "Key": key},
-                                        ExpiresIn=43200,
-                                    )
-
-                                    imagens.append(
-                                        {
-                                            "nome": filename,
-                                            "url": url_local,
-                                            "tamanho": obj["Size"],
-                                            "dataCadastro": obj[
-                                                "LastModified"
-                                            ].isoformat(),
-                                        }
-                                    )
-
-                                except Exception as e:
-
-                                    logger.error(
-                                        f"[BuscarIntegrado][S3] Erro ao processar {filename}: {e}"
-                                    )
-
-                            logger.info(
-                                f"[BuscarIntegrado][S3] ✅ Encontradas {len(imagens)} imagens"
-                            )
-
-                        else:
-
-                            logger.info(
-                                f"[BuscarIntegrado][S3] Nenhuma imagem em {caminho_s3_base}"
-                            )
-
-                    except Exception as e:
-
-                        logger.error(
-                            f"[BuscarIntegrado][S3] Erro ao buscar imagens: {str(e)}"
-                        )
-
-                else:
-
-                    logger.warning("[BuscarIntegrado][S3] Cliente S3 não disponível")
+                imagens = buscar_imagens_s3_por_codigo(cod_requisicao)
 
                 # PASSO 3: ðŸ†• BUSCAR DADOS DO requisicaoResultado (SEMPRE tentar, independente do status)
 
@@ -5432,16 +5294,19 @@ def buscar_requisicao(cod_requisicao):
                                         continue
 
                                     try:
-                                        url_local = s3_client.generate_presigned_url(
+                                        url_s3 = s3_client.generate_presigned_url(
                                             "get_object",
                                             Params={"Bucket": S3_BUCKET, "Key": key},
                                             ExpiresIn=3600,
                                         )
 
+                                        registrar_imagem_s3(s3_client, key, filename)
+
                                         imagens.append(
                                             {
                                                 "nome": filename,
-                                                "url": url_local,
+                                                "url": url_proxy_imagem(filename),
+                                                "urlS3": url_s3,
                                                 "tamanho": obj["Size"],
                                                 "dataCadastro": obj[
                                                     "LastModified"
@@ -5827,6 +5692,31 @@ def buscar_requisicao(cod_requisicao):
                 f"[BuscarIntegrado]    4. Problema de permissão/acesso na API apLIS"
             )
 
+            imagens_parciais = buscar_imagens_s3_por_codigo(cod_requisicao)
+            if imagens_parciais:
+                return (
+                    jsonify(
+                        {
+                            "sucesso": 1,
+                            "parcial": True,
+                            "mensagem": "Requisição não encontrada no apLIS, mas as imagens foram recuperadas do S3.",
+                            "codRequisicao": cod_requisicao,
+                            "requisicao": {"codRequisicao": cod_requisicao},
+                            "paciente": {},
+                            "medico": {},
+                            "convenio": {"id": None, "nome": ""},
+                            "fontePagadora": {"id": None, "nome": ""},
+                            "localOrigem": {"id": None, "nome": ""},
+                            "imagens": imagens_parciais,
+                            "dadosOCR": {"status": "pendente", "consolidado": None},
+                            "sugestoes": [
+                                "As imagens foram carregadas; revise manualmente os demais campos se necessário"
+                            ],
+                        }
+                    ),
+                    200,
+                )
+
             return (
                 jsonify(
                     {
@@ -5864,6 +5754,28 @@ def buscar_requisicao(cod_requisicao):
                 f"[BuscarIntegrado] Código {cod_requisicao} não encontrado na lista integrada"
             )
 
+            imagens_parciais = buscar_imagens_s3_por_codigo(cod_requisicao)
+            if imagens_parciais:
+                return (
+                    jsonify(
+                        {
+                            "sucesso": 1,
+                            "parcial": True,
+                            "mensagem": "Requisição não localizada na integração, mas as imagens foram encontradas.",
+                            "codRequisicao": cod_requisicao,
+                            "requisicao": {"codRequisicao": cod_requisicao},
+                            "paciente": {},
+                            "medico": {},
+                            "convenio": {"id": None, "nome": ""},
+                            "fontePagadora": {"id": None, "nome": ""},
+                            "localOrigem": {"id": None, "nome": ""},
+                            "imagens": imagens_parciais,
+                            "dadosOCR": {"status": "pendente", "consolidado": None}
+                        }
+                    ),
+                    200,
+                )
+
             return (
                 jsonify(
                     {
@@ -5879,78 +5791,7 @@ def buscar_requisicao(cod_requisicao):
 
         # PASSO 3: Buscar imagens no S3
 
-        imagens = []
-
-        s3_client = get_s3_client()
-
-        if s3_client:
-
-            try:
-
-                prefixo_lab = cod_requisicao[:4] if len(cod_requisicao) >= 4 else "0040"
-
-                caminho_s3_base = f"lab/Arquivos/Foto/{prefixo_lab}/{cod_requisicao}"
-
-                logger.info(
-                    f"[BuscarIntegrado][S3] Buscando imagens em: {caminho_s3_base}"
-                )
-
-                response_s3 = s3_client.list_objects_v2(
-                    Bucket=S3_BUCKET, Prefix=caminho_s3_base
-                )
-
-                if "Contents" in response_s3:
-
-                    for obj in response_s3["Contents"]:
-
-                        key = obj["Key"]
-
-                        filename = key.split("/")[-1]
-
-                        if not filename or not filename.startswith(cod_requisicao):
-
-                            continue
-
-                        try:
-
-                            url_local = s3_client.generate_presigned_url(
-                                "get_object",
-                                Params={"Bucket": S3_BUCKET, "Key": key},
-                                ExpiresIn=43200,
-                            )
-
-                            imagens.append(
-                                {
-                                    "nome": filename,
-                                    "url": url_local,
-                                    "tamanho": obj["Size"],
-                                    "dataCadastro": obj["LastModified"].isoformat(),
-                                }
-                            )
-
-                        except Exception as e:
-
-                            logger.error(
-                                f"[BuscarIntegrado][S3] Erro ao processar {filename}: {e}"
-                            )
-
-                    logger.info(
-                        f"[BuscarIntegrado][S3] âœ… Encontradas {len(imagens)} imagens"
-                    )
-
-                else:
-
-                    logger.info(
-                        f"[BuscarIntegrado][S3] Nenhuma imagem em {caminho_s3_base}"
-                    )
-
-            except Exception as e:
-
-                logger.error(f"[BuscarIntegrado][S3] Erro ao buscar imagens: {str(e)}")
-
-        else:
-
-            logger.warning("[BuscarIntegrado][S3] Cliente S3 não disponível")
+        imagens = buscar_imagens_s3_por_codigo(cod_requisicao)
 
         # PASSO 4: Montar resposta INTEGRADA com estrutura compatível com o frontend
 
@@ -5977,7 +5818,6 @@ def buscar_requisicao(cod_requisicao):
         logger.info(f"[BuscarIntegrado] ðŸ” FALLBACK - IDs vindos da integração:")
 
         logger.info(f"[BuscarIntegrado]   - idConvenio: {id_convenio_fallback}")
-
 
         logger.info(
             f"[BuscarIntegrado]   - idFontePagadora: {id_fonte_pagadora_fallback}"
@@ -6085,7 +5925,6 @@ def buscar_requisicao(cod_requisicao):
             500,
         )
 
-
 @app.route("/api/debug/csv-dados", methods=["GET"])
 def debug_csv_dados():
     """
@@ -6125,7 +5964,6 @@ def debug_csv_dados():
         200,
     )
 
-
 @app.route("/api/requisicoes/disponiveis", methods=["POST"])
 def requisicoes_disponiveis():
     """
@@ -6135,8 +5973,6 @@ def requisicoes_disponiveis():
     Lista os códigos de requisição disponíveis para testar
 
     Ãštil quando o usuário não sabe qual código buscar
-
-
 
     Requisição:
 
@@ -6315,7 +6151,6 @@ def requisicoes_disponiveis():
             ),
             500,
         )
-
 
 @app.route("/api/admissao/salvar", methods=["POST"])
 def salvar_admissao():
@@ -8115,9 +7950,17 @@ def salvar_admissao():
                         erro_msg = (
                             resposta_paciente.get("dat", {}).get("msg")
                             or resposta_paciente.get("dat", {}).get("msgErro")
+                            or resposta_paciente.get("dat", {}).get("erro")
                             or resposta_paciente.get("msg")
+                            or resposta_paciente.get("mensagem")
+                            or resposta_paciente.get("erro")
+                            or resposta_paciente.get("texto")
                             or "Erro desconhecido"
                         )
+                        if erro_msg == "Resposta inválida do apLIS":
+                            detalhe_aplis = resposta_paciente.get("texto") or resposta_paciente.get("status_code")
+                            if detalhe_aplis:
+                                erro_msg = f"{erro_msg}: {detalhe_aplis}"
 
                         cod_erro = resposta_paciente.get("dat", {}).get("codErro")
 
@@ -8220,7 +8063,6 @@ def salvar_admissao():
         logger.info(f"[SalvarAdmissao]   - idPaciente: {dados.get('idPaciente')}")
 
         logger.info(f"[SalvarAdmissao]   - idMedico: {dados.get('idMedico')}")
-
 
         logger.info(f"[SalvarAdmissao]   - dtaColeta: {dados.get('dtaColeta')}")
 
@@ -8489,6 +8331,9 @@ def salvar_admissao():
 
                         erro_msg = (
                             resultado_correspondente.get("dat", {}).get("msg")
+                            or resultado_correspondente.get("dat", {}).get("msgErro")
+                            or resultado_correspondente.get("erro")
+                            or resultado_correspondente.get("texto")
                             or "Erro desconhecido"
                         )
 
@@ -8846,7 +8691,6 @@ def salvar_admissao():
 
         return jsonify({"sucesso": 0, "erro": f"Erro no servidor: {str(e)}"}), 500
 
-
 @app.route("/api/convenios/buscar-por-nome", methods=["POST"])
 def buscar_convenio_por_nome():
     """
@@ -8930,7 +8774,6 @@ def buscar_convenio_por_nome():
             500,
         )
 
-
 @app.route("/api/admissao/validar", methods=["POST"])
 def validar_dados():
     """
@@ -9009,14 +8852,11 @@ def validar_dados():
 
         return jsonify({"valido": False, "erros": [f"Erro ao validar: {str(e)}"]}), 500
 
-
 @app.route("/api/admissao/validar-cpf", methods=["POST"])
 def validar_cpf_endpoint():
     """
 
     Valida CPF na Receita Federal
-
-
 
     Recebe:
 
@@ -9031,8 +8871,6 @@ def validar_cpf_endpoint():
             "data_nascimento_ocr": "01/01/1990" (opcional - do OCR)
 
         }
-
-
 
     Retorna:
 
@@ -9183,7 +9021,6 @@ def validar_cpf_endpoint():
             500,
         )
 
-
 @app.route("/", methods=["GET"])
 def index():
     """
@@ -9219,7 +9056,6 @@ def index():
         200,
     )
 
-
 @app.route("/api/health", methods=["GET"])
 def health_check():
     """
@@ -9238,7 +9074,6 @@ def health_check():
         ),
         200,
     )
-
 
 @app.route("/api/admissao/teste", methods=["GET"])
 def teste_conexao():
@@ -9276,6 +9111,27 @@ def teste_conexao():
             500,
         )
 
+@app.route("/api/imagens/<cod_requisicao>", methods=["GET"])
+def listar_imagens_requisicao(cod_requisicao):
+    """Retorna apenas as imagens da requisição diretamente do S3."""
+    try:
+        imagens = buscar_imagens_s3_por_codigo(cod_requisicao)
+        if imagens:
+            return jsonify({
+                "sucesso": 1,
+                "codRequisicao": cod_requisicao,
+                "imagens": imagens,
+                "quantidade": len(imagens),
+            }), 200
+        return jsonify({
+            "sucesso": 0,
+            "codRequisicao": cod_requisicao,
+            "erro": "Nenhuma imagem encontrada no S3",
+            "imagens": [],
+        }), 404
+    except Exception as e:
+        logger.error(f"[IMG] Erro ao listar imagens da requisição {cod_requisicao}: {e}")
+        return jsonify({"sucesso": 0, "erro": str(e), "imagens": []}), 500
 
 @app.route("/api/imagem/<filename>", methods=["GET"])
 def servir_imagem(filename):
@@ -9288,6 +9144,17 @@ def servir_imagem(filename):
     try:
 
         arquivo_path = os.path.join(TEMP_IMAGES_DIR, filename)
+
+        if not os.path.exists(arquivo_path):
+            key = S3_IMAGE_KEY_CACHE.get(filename)
+            if key:
+                try:
+                    s3_client = get_s3_client()
+                    if s3_client:
+                        s3_client.download_file(S3_BUCKET, key, arquivo_path)
+                        logger.info(f"[IMG] Imagem restaurada do S3 sob demanda: {filename}")
+                except Exception as s3_error:
+                    logger.error(f"[IMG] Falha ao restaurar {filename} do S3: {s3_error}")
 
         if os.path.exists(arquivo_path):
 
@@ -9313,12 +9180,11 @@ def servir_imagem(filename):
 
         else:
 
-            return jsonify({"erro": "Imagem não encontrada"}), 404
+            return jsonify({"erro": "Imagem não encontrada", "arquivo": filename}), 404
 
     except Exception as e:
 
         return jsonify({"erro": str(e)}), 500
-
 
 @app.route("/api/ocr/teste", methods=["GET"])
 def teste_ocr():
@@ -9348,7 +9214,6 @@ def teste_ocr():
             ),
             500,
         )
-
 
 @app.route("/api/ocr/processar", methods=["POST"])
 def processar_ocr():
@@ -10271,7 +10136,6 @@ def processar_ocr():
             500,
         )
 
-
 def corrigir_portugues(texto):
     """
 
@@ -10293,11 +10157,7 @@ Mantenha o significado original.
 
 Retorne SOMENTE o texto corrigido, sem explicações.
 
-
-
 Texto: {texto}
-
-
 
 Texto corrigido:"""
 
@@ -10317,7 +10177,6 @@ Texto corrigido:"""
         print(f"[CORREÃ‡ÃƒO] Erro ao corrigir: {e}")
 
         return texto  # Retorna original se falhar
-
 
 # ============================================
 
@@ -10475,7 +10334,6 @@ MAPEAMENTO_EXAMES = {
     # FATURAMENTO EXTERNO
     "FAT. EXT. CITO.": 46,
 }
-
 
 def identificar_tipo_exame_backend(nome):
     """
@@ -10716,19 +10574,14 @@ def identificar_tipo_exame_backend(nome):
 
     return "DESCONHECIDO", None
 
-
 def buscar_dados_requisicao_simples(cod_requisicao):
     """
 
     Busca dados básicos de uma requisição do apLIS (versão simplificada para consolidação)
 
-
-
     Args:
 
         cod_requisicao: Código da requisição
-
-
 
     Returns:
 
@@ -10819,7 +10672,6 @@ def buscar_dados_requisicao_simples(cod_requisicao):
         logger.error(traceback.format_exc())
 
         return None
-
 
 @app.route("/api/consolidar-resultados", methods=["POST"])
 def consolidar_resultados():
@@ -12400,7 +12252,6 @@ def consolidar_resultados():
             500,
         )
 
-
 @app.route("/api/exames/buscar-por-nome", methods=["POST"])
 def buscar_exames_por_nome():
     """
@@ -12527,7 +12378,6 @@ def buscar_exames_por_nome():
 
         return jsonify({"sucesso": 0, "erro": f"Erro ao buscar exames: {str(e)}"}), 500
 
-
 def limpar_imagens_temporarias():
     """
 
@@ -12551,13 +12401,11 @@ def limpar_imagens_temporarias():
 
         print(f"[AVISO] Erro ao limpar imagens temporarias: {e}")
 
-
 # ========================================
 
 # ENDPOINTS DE CONSULTA AOS CSVs
 
 # ========================================
-
 
 @app.route("/api/medicos", methods=["GET"])
 def listar_medicos():
@@ -12579,7 +12427,6 @@ def listar_medicos():
         logger.error(f"[API] Erro ao listar médicos: {e}")
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
-
 
 @app.route("/api/medicos/<crm>/<uf>", methods=["GET"])
 def buscar_medico(crm, uf):
@@ -12608,7 +12455,6 @@ def buscar_medico(crm, uf):
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
-
 @app.route("/api/convenios", methods=["GET"])
 def listar_convenios():
     """Lista todos os convênios do CSV"""
@@ -12633,7 +12479,6 @@ def listar_convenios():
         logger.error(f"[API] Erro ao listar convênios: {e}")
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
-
 
 @app.route("/api/convenios/<id_convenio>", methods=["GET"])
 def buscar_convenio_endpoint(id_convenio):
@@ -12661,7 +12506,6 @@ def buscar_convenio_endpoint(id_convenio):
         logger.error(f"[API] Erro ao buscar convênio: {e}")
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
-
 
 @app.route("/api/fontes-pagadoras", methods=["GET"])
 def listar_fontes_pagadoras():
@@ -12717,7 +12561,6 @@ def listar_fontes_pagadoras():
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
-
 @app.route("/api/instituicoes", methods=["GET"])
 def listar_instituicoes():
     """Lista todas as instituições do CSV"""
@@ -12742,7 +12585,6 @@ def listar_instituicoes():
         logger.error(f"[API] Erro ao listar instituições: {e}")
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
-
 
 @app.route("/api/instituicoes/<id_instituicao>", methods=["GET"])
 def buscar_instituicao_endpoint(id_instituicao):
@@ -12774,21 +12616,17 @@ def buscar_instituicao_endpoint(id_instituicao):
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
-
 # ============================================
 
 # ROTAS DO SUPABASE - HISTÃ“RICO DE REQUISIÃ‡Ã•ES
 
 # ============================================
 
-
 @app.route("/api/historico/salvar", methods=["POST"])
 def salvar_requisicao_historico():
     """
 
     Salva uma requisição processada no histórico (Supabase)
-
-
 
     Body:
 
@@ -12856,7 +12694,6 @@ def salvar_requisicao_historico():
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
-
 @app.route("/api/historico/<cod_requisicao>", methods=["GET"])
 def buscar_requisicao_historico(cod_requisicao):
     """Busca uma requisição específica no histórico"""
@@ -12882,7 +12719,6 @@ def buscar_requisicao_historico(cod_requisicao):
         logger.error(f"[HISTORICO] Erro ao buscar: {e}")
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
-
 
 @app.route("/api/historico/listar", methods=["GET"])
 def listar_requisicoes_historico():
@@ -12912,7 +12748,6 @@ def listar_requisicoes_historico():
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
-
 @app.route("/api/historico/buscar-cpf/<cpf>", methods=["GET"])
 def buscar_por_cpf_historico(cpf):
     """Busca requisições por CPF do paciente"""
@@ -12938,7 +12773,6 @@ def buscar_por_cpf_historico(cpf):
         logger.error(f"[HISTORICO] Erro ao buscar por CPF: {e}")
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
-
 
 @app.route("/api/historico/buscar-lote/<lote>", methods=["GET"])
 def buscar_por_lote_historico(lote):
@@ -13074,7 +12908,6 @@ def buscar_por_lote_historico(lote):
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
-
 @app.route("/api/historico/lotes-recentes", methods=["GET"])
 def listar_lotes_recentes_historico():
     """Lista lotes mais recentes com data e quantidade para seleção na UI"""
@@ -13177,7 +13010,6 @@ def listar_lotes_recentes_historico():
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
-
 @app.route("/api/paciente/buscar-por-cpf", methods=["POST"])
 def buscar_paciente_por_cpf():
     """
@@ -13192,22 +13024,17 @@ def buscar_paciente_por_cpf():
 
     return buscar_paciente()  # Redireciona para a nova função
 
-
 @app.route("/api/buscar-paciente", methods=["POST"])
 def buscar_paciente():
     """
 
     Busca paciente no banco de dados MySQL e na API do apLIS pelo CPF ou Nome Completo
 
-
-
     FLUXO DE BUSCA:
 
     1. Busca no banco MySQL local (mais rápido)
 
     2. Se não encontrar, busca na API do apLIS
-
-
 
     Aceita: { "cpf": "12345678900" } OU { "nome": "Kaua Larsson Lopes de Sousa" }
 
@@ -13505,7 +13332,6 @@ def buscar_paciente():
             jsonify({"sucesso": 0, "erro": f"Erro ao buscar paciente: {str(e)}"}),
             500,
         )
-
 
 @app.route("/api/paciente/criar", methods=["POST"])
 def criar_paciente():
@@ -13964,7 +13790,6 @@ def criar_paciente():
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
-
 @app.route("/api/paciente/<id_paciente>", methods=["PUT"])
 def atualizar_paciente(id_paciente):
     """Atualiza dados de um paciente"""
@@ -14086,7 +13911,6 @@ def atualizar_paciente(id_paciente):
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
-
 @app.route("/api/requisicao/<cod_requisicao>", methods=["PUT"])
 def atualizar_requisicao(cod_requisicao):
     """Atualiza dados de uma requisição"""
@@ -14203,13 +14027,11 @@ def atualizar_requisicao(cod_requisicao):
 
         return jsonify({"sucesso": 0, "erro": str(e)}), 500
 
-
 # ============================================================================
 
 # ROTAS DE WEBHOOK - WhatsApp/WAHA Integration
 
 # ============================================================================
-
 
 @app.route("/webhook", methods=["POST", "GET"])
 def webhook_principal():
@@ -14247,7 +14069,6 @@ def webhook_principal():
 
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/webhook/<path:subpath>", methods=["POST", "GET"])
 def webhook_subpath(subpath):
     """
@@ -14283,7 +14104,6 @@ def webhook_subpath(subpath):
 
         return jsonify({"error": str(e)}), 500
 
-
 # ========================================
 
 # REGISTRAR ROTAS DE DROPDOWNS
@@ -14300,11 +14120,9 @@ except Exception as e:
 
     logger.error(f"[ERRO] Falha ao registrar rotas de dropdowns: {e}")
 
-
 # ========================================
 # SCHEDULER - PROCESSAMENTO AUTOMATICO
 # ========================================
-
 
 @app.route("/api/scheduler/executar", methods=["POST"])
 def executar_scheduler_manual():
@@ -14340,7 +14158,6 @@ def executar_scheduler_manual():
         200,
     )
 
-
 @app.route("/api/scheduler/status", methods=["GET"])
 def scheduler_status():
     """Retorna status do scheduler e proxima execucao"""
@@ -14370,7 +14187,6 @@ def scheduler_status():
             500,
         )
 
-
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve_react(path):
@@ -14380,7 +14196,6 @@ def serve_react(path):
     if path and os.path.exists(caminho_arquivo):
         return send_from_directory(REACT_BUILD_DIR, path)
     return send_from_directory(REACT_BUILD_DIR, "index.html")
-
 
 @app.route("/api/tokens/status", methods=["GET"])
 def tokens_status():
@@ -14406,10 +14221,8 @@ def tokens_status():
         200,
     )
 
-
 # Referencia global ao scheduler (inicializado no __main__)
 _scheduler = None
-
 
 if __name__ == "__main__":
 

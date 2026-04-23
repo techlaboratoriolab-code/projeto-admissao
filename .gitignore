@@ -58,6 +58,32 @@ backend/logs/
 
 # Others
 nul
+
+# Virtual envs
+.venv/
+venv/
+
+# Vercel
+.vercel/
+
+# Claude / AI
+.claude/
+
+# Local bat overrides
+*.local.bat
+
+# Google credentials
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!render.yaml
+!render.homolog.yaml
+!railway.json
+!vercel.json
+
+# Python cache
+traceback
 .claude/
 
 # Batch scripts temporários

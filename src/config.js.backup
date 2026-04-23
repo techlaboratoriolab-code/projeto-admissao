@@ -14,69 +14,41 @@
  *    USE_NGROK = true
  */
 
-// URL do ngrok para o backend (atualize quando o ngrok gerar uma nova URL)
-const NGROK_API_URL = 'https://automacaolab.ngrok.dev';
+const isBrowser = typeof window !== 'undefined';
+const currentHostname = isBrowser ? window.location.hostname : '';
+const currentPort = isBrowser ? window.location.port : '';
 
-// 🌐 CONFIGURAÇÃO DE REDE LOCAL
-// IMPORTANTE: Descubra seu IP local:
-// 1. Abra o CMD (Prompt de Comando)
-// 2. Digite: ipconfig
-// 3. Procure por "Endereço IPv4" (exemplo: 192.168.1.100)
-// 4. Cole o IP aqui embaixo:
-const NETWORK_IP = '192.168.1.100'; // ⚠️ ATUALIZE COM SEU IP LOCAL!
+const isLocalHost =
+  isBrowser &&
+  (currentHostname === 'localhost' || currentHostname === '127.0.0.1');
 
-// URLs disponíveis
-const NETWORK_API_URL = `http://${NETWORK_IP}:5000`; // Rede local
-const LOCAL_API_URL = 'http://localhost:5000'; // Apenas esta máquina
+const isReactDevServer = currentPort === '3000';
 
-// 🎯 CONFIGURAR MODO DE ACESSO
-const USE_NGROK = false;  // true = Usar ngrok (internet)
-const USE_NETWORK = true; // true = Usar rede local (outras pessoas na mesma rede)
+const envApiBaseUrl = String(process.env.REACT_APP_API_URL || '').trim();
 
-// URL base da API (selecionada automaticamente)
-export const API_BASE_URL = USE_NGROK
-  ? NGROK_API_URL
-  : (USE_NETWORK ? NETWORK_API_URL : LOCAL_API_URL);
+// URL do backend:
+// - REACT_APP_API_URL tem prioridade;
+// - em desenvolvimento React (porta 3000), usa o mesmo host na porta 5000;
+// - em produção/publicação, usa same-origin (/api) para aproveitar rewrites/proxy.
+export const API_BASE_URL = envApiBaseUrl || (isReactDevServer
+  ? `${isBrowser ? window.location.protocol : 'http:'}//${currentHostname || 'localhost'}:5000`
+  : '');
 
 // Wrapper do fetch que adiciona headers necessários para o ngrok
 export const apiFetch = (url, options = {}) => {
-  const headers = {
+  const urlString = String(url || '');
+  const usarHeaderNgrok = /\.ngrok(-free)?\.app|\.ngrok\.dev/i.test(urlString);
+  const mergedHeaders = {
+    ...(usarHeaderNgrok ? { 'ngrok-skip-browser-warning': 'true' } : {}),
     ...(options.headers || {}),
-    ...(USE_NGROK ? { 'ngrok-skip-browser-warning': 'true' } : {}),
   };
-  return fetch(url, { ...options, headers });
+
+  return fetch(url, {
+    ...options,
+    headers: mergedHeaders,
+  });
 };
-
-// Logs para debug
-console.log('='.repeat(80));
-console.log('🔧 CONFIGURAÇÃO DA API');
-console.log('='.repeat(80));
-
-let modo = 'LOCALHOST (apenas esta máquina)';
-if (USE_NGROK) {
-  modo = 'NGROK (internet - qualquer lugar)';
-} else if (USE_NETWORK) {
-  modo = 'REDE LOCAL (outras pessoas na mesma rede WiFi/LAN)';
-}
-
-console.log(`📍 Modo: ${modo}`);
-console.log(`🌐 URL da API: ${API_BASE_URL}`);
-
-if (USE_NETWORK && NETWORK_IP === '192.168.1.100') {
-  console.warn('⚠️ ATENÇÃO: Você precisa configurar seu IP local!');
-  console.warn('⚠️ Abra o CMD, digite "ipconfig" e encontre seu "Endereço IPv4"');
-  console.warn('⚠️ Depois atualize NETWORK_IP em src/config.js');
-}
-
-console.log(`✅ Configuração carregada com sucesso!`);
-console.log('='.repeat(80));
 
 export default {
   API_BASE_URL,
-  USE_NGROK,
-  USE_NETWORK,
-  NGROK_API_URL,
-  NETWORK_API_URL,
-  LOCAL_API_URL,
-  NETWORK_IP
 };

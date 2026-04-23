@@ -18,23 +18,42 @@ const isBrowser = typeof window !== 'undefined';
 const currentHostname = isBrowser ? window.location.hostname : '';
 const currentPort = isBrowser ? window.location.port : '';
 
-const isLocalReactDev =
+const isLocalHost =
   isBrowser &&
-  (currentHostname === 'localhost' || currentHostname === '127.0.0.1') &&
-  currentPort === '3000';
+  (currentHostname === 'localhost' || currentHostname === '127.0.0.1');
+
+const isReactDevServer = currentPort === '3000';
 
 const envApiBaseUrl = String(process.env.REACT_APP_API_URL || '').trim();
+const envApiIsNgrok = (() => {
+  if (!envApiBaseUrl) return false;
+
+  try {
+    const hostname = new URL(envApiBaseUrl).hostname;
+    return /\.ngrok(-free)?\.app$|\.ngrok\.dev$/i.test(hostname);
+  } catch {
+    return /\.ngrok(-free)?\.app|\.ngrok\.dev/i.test(envApiBaseUrl);
+  }
+})();
+
+// Em produção, evitar chamadas diretas browser -> ngrok para não depender de CORS.
+// Nestes casos, usa /api para aproveitar rewrite/proxy da própria hospedagem.
+const usarProxyMesmoComEnv = isBrowser && !isReactDevServer && envApiIsNgrok;
 
 // URL do backend:
-// - se houver REACT_APP_API_URL configurada, ela tem prioridade;
-// - no React dev local (localhost:3000), usa o backend em localhost:5000;
-// - em acesso público/ngrok/IP local/backend integrado, usa same-origin (/api).
-export const API_BASE_URL = envApiBaseUrl || (isLocalReactDev ? 'http://localhost:5000' : '');
+// - REACT_APP_API_URL tem prioridade;
+// - em desenvolvimento React (porta 3000), usa o mesmo host na porta 5000;
+// - em produção/publicação, usa same-origin (/api) para aproveitar rewrites/proxy.
+export const API_BASE_URL = (usarProxyMesmoComEnv ? '' : envApiBaseUrl) || (isReactDevServer
+  ? `${isBrowser ? window.location.protocol : 'http:'}//${currentHostname || 'localhost'}:5000`
+  : '');
 
 // Wrapper do fetch que adiciona headers necessários para o ngrok
 export const apiFetch = (url, options = {}) => {
+  const urlString = String(url || '');
+  const usarHeaderNgrok = /\.ngrok(-free)?\.app|\.ngrok\.dev/i.test(urlString);
   const mergedHeaders = {
-    'ngrok-skip-browser-warning': 'true',
+    ...(usarHeaderNgrok ? { 'ngrok-skip-browser-warning': 'true' } : {}),
     ...(options.headers || {}),
   };
 
