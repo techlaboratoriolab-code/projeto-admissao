@@ -1481,6 +1481,42 @@ def buscar_imagens_s3_por_codigo(cod_requisicao):
 
     return imagens
 
+def buscar_key_s3_por_filename(filename):
+    """Resolve a chave S3 de uma imagem quando o cache em memória está vazio."""
+    s3_client = get_s3_client()
+    if not s3_client or not filename:
+        return None
+
+    # Nome esperado começa com o código da requisição (13 dígitos: 0085/0200 + 9)
+    match = re.match(r"^(0085\d{9}|0200\d{9})", str(filename).strip())
+    if not match:
+        return None
+
+    cod_requisicao = match.group(1)
+    prefixo_lab = cod_requisicao[:4]
+    caminho_s3_base = f"lab/Arquivos/Foto/{prefixo_lab}/{cod_requisicao}"
+    key_exata = f"{caminho_s3_base}/{filename}"
+
+    # 1) Tentar chave exata (mais rápido)
+    try:
+        s3_client.head_object(Bucket=S3_BUCKET, Key=key_exata)
+        return key_exata
+    except Exception:
+        pass
+
+    # 2) Fallback por listagem e comparação case-insensitive do filename final
+    try:
+        response_s3 = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=caminho_s3_base)
+        for obj in response_s3.get("Contents", []):
+            key = obj.get("Key", "")
+            nome_obj = key.split("/")[-1]
+            if nome_obj.lower() == str(filename).lower():
+                return key
+    except Exception as e:
+        logger.warning(f"[IMG] Falha ao resolver key S3 para {filename}: {e}")
+
+    return None
+
 # ========================================
 
 # CACHE DE MÉDICOS, CONVÊNIOS E INSTITUIÇÕES (CSVs)
@@ -9144,6 +9180,11 @@ def servir_imagem(filename):
 
         if not os.path.exists(arquivo_path):
             key = S3_IMAGE_KEY_CACHE.get(filename)
+            if not key:
+                key = buscar_key_s3_por_filename(filename)
+                if key:
+                    S3_IMAGE_KEY_CACHE[filename] = key
+
             if key:
                 try:
                     s3_client = get_s3_client()
