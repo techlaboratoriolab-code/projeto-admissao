@@ -62,6 +62,11 @@ const AdmissionView = () => {
   const [receitaFederalStatus, setReceitaFederalStatus] = useState(null); // 🆕 Status da validação da Receita Federal
   const [validandoCPF, setValidandoCPF] = useState(false);
 
+  // Modal de imuno-histoquímica: abre após salvar pedidos com biopsia + imuno
+  // { codRequisicaoOrigem, snapshotPatient, snapshotForm }
+  const [modalImuno, setModalImuno] = useState(null);
+  const [criandoImuno, setCriandoImuno] = useState(false);
+
   // 🆕 Estados para histórico de requisições do Supabase
   const [mostrarHistorico, setMostrarHistorico] = useState(false);
   const [requisicoesHistoricoIncompletas, setRequisicoesHistoricoIncompletas] = useState([]);
@@ -195,6 +200,59 @@ const AdmissionView = () => {
     const temImuno = texto.includes('imuno') || texto.includes('himuno') || texto.includes('imunohisto');
 
     return temBiopsia && temImuno;
+  };
+
+  /**
+   * Abre o modal perguntando se o usuário quer criar uma requisição de imuno-histoquímica.
+   * Captura snapshots do paciente e formulário atuais para pré-preencher o novo pedido.
+   */
+  const abrirModalImuno = (codRequisicaoOrigem, snapshotPatient, snapshotForm) => {
+    setModalImuno({ codRequisicaoOrigem, snapshotPatient, snapshotForm });
+  };
+
+  /**
+   * Pré-preenche o formulário com os dados do paciente já cadastrado e o exame
+   * "Imunohistoquimica" para o usuário inserir apenas o código da nova requisição.
+   */
+  const criarRequisicaoImuno = () => {
+    if (!modalImuno) return;
+    const { snapshotPatient, snapshotForm } = modalImuno;
+    setCriandoImuno(true);
+
+    limparFormulario();
+
+    // Restaurar dados do paciente
+    if (snapshotPatient) {
+      setPatientData(snapshotPatient);
+    }
+
+    // Pré-preencher formulário com dados cadastrais do pedido anterior,
+    // mas com código e exame em branco para o usuário informar o da imuno
+    setFormData(prev => ({
+      ...prev,
+      codRequisicao: '',
+      idPaciente: snapshotForm?.idPaciente || '',
+      idConvenio: snapshotForm?.idConvenio || '',
+      idFontePagadora: snapshotForm?.idFontePagadora || '',
+      idLocalOrigem: snapshotForm?.idLocalOrigem || '',
+      idMedico: snapshotForm?.idMedico || '',
+      dtaColeta: snapshotForm?.dtaColeta || prev.dtaColeta,
+      numGuia: '',
+      matConvenio: snapshotForm?.matConvenio || '',
+      validadeMatricula: snapshotForm?.validadeMatricula || '',
+      convenio: snapshotForm?.convenio || '',
+      fontePagadora: snapshotForm?.fontePagadora || '',
+      sexo: snapshotForm?.sexo || '',
+      dadosClinicos: '',
+      examesConvenio: 'Imunohistoquimica',
+    }));
+
+    setModalImuno(null);
+    setCriandoImuno(false);
+
+    // Feedback e scroll ao topo para o usuário informar o código da imuno
+    setMessage({ type: 'info', text: 'Formulário pré-preenchido para Imuno-histoquímica. Informe o Código da Requisição e salve.' });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const buscarCodigoCanonicoNaApi = async (codigoInformado) => {
@@ -2508,17 +2566,19 @@ const AdmissionView = () => {
           }
         }
 
-        if (precisaCadastrarImuno) {
-          mensagemSucesso += '\n\n⚠️ Lembrete: pedido com BIOPSIA + IMUNO. Realize o cadastro de IMUNO tambem.';
-          if (tipoMensagem === 'success') {
-            tipoMensagem = 'warning';
-          }
-        }
-
         setMessage({
           type: tipoMensagem,
           text: mensagemSucesso
         });
+
+        if (precisaCadastrarImuno) {
+          // Abrir modal perguntando se quer criar requisição de imuno-histoquímica
+          abrirModalImuno(
+            result.codRequisicao || formData.codRequisicao,
+            patientData,
+            formData
+          );
+        }
 
         // Atualizar código da requisição se foi criada uma nova
         if (!formData.codRequisicao && result.codRequisicao) {
@@ -2666,10 +2726,11 @@ const AdmissionView = () => {
             const ocrTimeout = setTimeout(() => ocrController.abort('timeout_ocr'), 180000);
             let ocrResponse;
             try {
+              const imagemUrlOCR = img.urlS3 || img.url;
               ocrResponse = await apiFetch(`${API_BASE_URL}/api/ocr/processar`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imagemUrl: img.url, imagemNome: img.nome }),
+                body: JSON.stringify({ imagemUrl: imagemUrlOCR, imagemNome: img.nome }),
                 signal: ocrController.signal
               });
             } catch (fetchError) {
@@ -3568,21 +3629,28 @@ const AdmissionView = () => {
       }]);
 
       if (saveResult?.alertaCadastroImuno) {
-        setMessage({
-          type: 'warning',
-          text: `${codRequisicaoFinal} salvo com sucesso! Lembrete: pedido com BIOPSIA + IMUNO, realizar cadastro de IMUNO tambem.`
-        });
+        setMessage({ type: 'success', text: `${codRequisicaoFinal} salvo com sucesso!` });
+        // Capturar snapshot antes de limpar o formulário para pré-preencher a imuno
+        const snapshotPatient = patientData;
+        const snapshotForm = formData;
+        limparFormulario();
+        const proximoIndice = encontrarProximoIndiceRevisavel(filaRevisaoIndice);
+        if (proximoIndice >= 0) {
+          await carregarRequisicaoDaFila(proximoIndice);
+        } else {
+          setFilaRevisaoIndice(-1);
+        }
+        // Abrir modal DEPOIS de avançar a fila
+        abrirModalImuno(codRequisicaoFinal, snapshotPatient, snapshotForm);
       } else {
         setMessage({ type: 'success', text: `${codRequisicaoFinal} salvo com sucesso!` });
-      }
-      console.log(`[AUTO] ${codRequisicaoFinal} salvo!`);
-
-      limparFormulario();
-      const proximoIndice = encontrarProximoIndiceRevisavel(filaRevisaoIndice);
-      if (proximoIndice >= 0) {
-        await carregarRequisicaoDaFila(proximoIndice);
-      } else {
-        setFilaRevisaoIndice(-1);
+        limparFormulario();
+        const proximoIndice = encontrarProximoIndiceRevisavel(filaRevisaoIndice);
+        if (proximoIndice >= 0) {
+          await carregarRequisicaoDaFila(proximoIndice);
+        } else {
+          setFilaRevisaoIndice(-1);
+        }
       }
 
     } catch (error) {
@@ -5525,7 +5593,7 @@ const AdmissionView = () => {
 
                         <button
                           type="button"
-                          onClick={(e) => { e.stopPropagation(); processarOCR(img.url, img.nome, false); }}
+                          onClick={(e) => { e.stopPropagation(); processarOCR(img.urlS3 || img.url, img.nome, false); }}
                           disabled={loadingOCR || processado}
                           className={`w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed
                             ${processado
@@ -5627,6 +5695,72 @@ const AdmissionView = () => {
         </div>
       )}
 
+      {/* ───── Modal: Criar requisição de Imuno-histoquímica ───── */}
+      {modalImuno && (
+        <div className="fixed inset-0 z-[11000] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fadeIn">
+          <div className="w-[min(480px,calc(100vw-32px))] rounded-2xl bg-white dark:bg-neutral-900 shadow-[0_20px_60px_rgba(0,0,0,0.4)] overflow-hidden animate-slideUp border border-amber-400/30">
+
+            {/* Cabeçalho */}
+            <div className="px-6 py-4 bg-gradient-to-r from-amber-500 to-orange-500 flex items-center gap-3">
+              <span className="text-2xl">🔬</span>
+              <div>
+                <h2 className="text-white font-bold text-base leading-tight">Imuno-histoquímica detectada</h2>
+                <p className="text-amber-100 text-xs mt-0.5">Pedido com biópsia + imuno</p>
+              </div>
+            </div>
+
+            {/* Corpo */}
+            <div className="px-6 py-5 space-y-4">
+              <p className="text-sm text-slate-700 dark:text-neutral-200 leading-relaxed">
+                O pedido <span className="font-bold text-amber-600 dark:text-amber-400">{modalImuno.codRequisicaoOrigem}</span> foi salvo com sucesso e contém um exame de <strong>biópsia + imuno-histoquímica</strong>.
+              </p>
+              <p className="text-sm text-slate-700 dark:text-neutral-200 leading-relaxed">
+                Deseja criar uma <strong>requisição de Imuno-histoquímica</strong> separada para este mesmo paciente?
+              </p>
+              {modalImuno.snapshotPatient?.name && (
+                <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 px-4 py-3">
+                  <p className="text-xs text-amber-700 dark:text-amber-300 font-semibold uppercase tracking-wide mb-1">Paciente</p>
+                  <p className="text-sm font-bold text-slate-800 dark:text-neutral-100">{modalImuno.snapshotPatient.name}</p>
+                  {modalImuno.snapshotPatient.cpf && (
+                    <p className="text-xs text-slate-500 dark:text-neutral-400 mt-0.5">CPF: {modalImuno.snapshotPatient.cpf}</p>
+                  )}
+                </div>
+              )}
+              <p className="text-xs text-slate-500 dark:text-neutral-400">
+                O formulário será pré-preenchido com os dados do paciente e o exame <em>Imunohistoquimica</em>. Você precisará apenas informar o código da nova requisição.
+              </p>
+            </div>
+
+            {/* Rodapé */}
+            <div className="px-6 py-4 border-t border-slate-200 dark:border-neutral-700 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setModalImuno(null)}
+                className="px-4 py-2 rounded-lg border border-slate-300 dark:border-neutral-600 text-slate-600 dark:text-neutral-300 text-sm font-semibold hover:bg-slate-50 dark:hover:bg-neutral-800 transition-colors"
+              >
+                Ignorar
+              </button>
+              <button
+                type="button"
+                onClick={criarRequisicaoImuno}
+                disabled={criandoImuno}
+                className="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white text-sm font-bold transition-colors flex items-center gap-2"
+              >
+                {criandoImuno ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                    Preparando...
+                  </>
+                ) : (
+                  <>🔬 Criar Requisição de Imuno</>
+                )}
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
       {/* Modal para visualizar imagem ou PDF */}
       {imagemSelecionada && (
         <div className="fixed inset-0 w-screen h-screen bg-black/90 dark:bg-black/95 flex items-center justify-center z-[9999] animate-fadeIn" onClick={fecharModal}>
@@ -5664,7 +5798,7 @@ const AdmissionView = () => {
                     <button
                       className="bg-primary text-white border-0 px-5 py-2 rounded-lg text-sm font-semibold cursor-pointer transition-all shadow-[0_2px_8px_rgba(0,0,0,0.15)] hover:bg-primary-dark hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.25)] disabled:opacity-60 disabled:cursor-not-allowed"
                       onClick={() => {
-                        processarOCR(imagemSelecionada.url, imagemSelecionada.nome);
+                        processarOCR(imagemSelecionada.urlS3 || imagemSelecionada.url, imagemSelecionada.nome);
                         fecharModal();
                       }}
                       disabled={loadingOCR || imagensProcessadas.has(imagemSelecionada.nome)}

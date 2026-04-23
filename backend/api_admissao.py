@@ -1414,14 +1414,11 @@ os.makedirs(TEMP_IMAGES_DIR, exist_ok=True)
 S3_IMAGE_KEY_CACHE = {}
 
 def url_proxy_imagem(filename):
-    """Monta uma URL estável para servir a imagem pelo próprio backend."""
-    try:
-        proto = request.headers.get("X-Forwarded-Proto", request.scheme)
-        host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host")
-        if host:
-            return f"{proto}://{host}/api/imagem/{quote(filename)}"
-    except RuntimeError:
-        pass
+    """Monta URL de imagem no próprio backend, sempre relativa ao host atual.
+
+    Evita URL absoluta para ngrok, pois <img> não envia header customizado
+    (`ngrok-skip-browser-warning`) e pode receber página HTML do túnel.
+    """
     return f"/api/imagem/{quote(filename)}"
 
 def registrar_imagem_s3(s3_client, key, filename):
