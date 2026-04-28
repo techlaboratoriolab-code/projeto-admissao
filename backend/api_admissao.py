@@ -9230,7 +9230,7 @@ def teste_ocr():
 
     try:
 
-        model = GenerativeModel("gemini-2.5-flash")
+        model = GenerativeModel("gemini-2.5-pro")
 
         response = model.generate_content("Responda apenas: OK")
 
@@ -9238,7 +9238,7 @@ def teste_ocr():
             {
                 "sucesso": 1,
                 "resposta": response.text.strip(),
-                "modelo": "gemini-2.5-flash",
+                "modelo": "gemini-2.5-pro",
             }
         )
 
@@ -9361,9 +9361,9 @@ def processar_ocr():
                 400,
             )
 
-        # Criar modelo Gemini (usando 2.5 Flash - estável e com boa cota)
+        # Criar modelo Gemini Pro (Vertex AI)
 
-        model = GenerativeModel("gemini-2.5-flash")
+        model = GenerativeModel("gemini-2.5-pro")
 
         # Detectar mime type baseado na extensão
 
@@ -10187,7 +10187,7 @@ def corrigir_portugues(texto):
 
     try:
 
-        model = GenerativeModel("gemini-2.5-flash")
+        model = GenerativeModel("gemini-2.5-pro")
 
         prompt = f"""Corrija APENAS os erros de ortografia e gramática no texto abaixo.
 

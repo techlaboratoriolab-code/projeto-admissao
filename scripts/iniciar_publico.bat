@@ -41,7 +41,30 @@ start "Frontend (Porta 3000)" cmd /k "cd /d %~dp0.. && npx serve -s build -p 300
 timeout /t 3 /nobreak >nul
 
 echo [5/5] Iniciando Ngrok com domínio fixo...
-start "Ngrok Tunnel" cmd /k "ngrok http --domain=automacaolab.ngrok.dev 5000"
+set "NGROK_EXE=%LOCALAPPDATA%\Microsoft\WinGet\Packages\Ngrok.Ngrok_Microsoft.Winget.Source_8wekyb3d8bbwe\ngrok.exe"
+if exist "%NGROK_EXE%" (
+    echo [✓] Usando ngrok do winget: %NGROK_EXE%
+
+    if defined NGROK_AUTHTOKEN (
+        echo [i] Configurando authtoken do ngrok via variavel de ambiente NGROK_AUTHTOKEN...
+        "%NGROK_EXE%" config add-authtoken %NGROK_AUTHTOKEN% >nul 2>&1
+    ) else (
+        echo [!] NGROK_AUTHTOKEN nao definido. Se o tunel falhar com ERR_NGROK_4018, configure seu token.
+    )
+
+    start "Ngrok Tunnel" cmd /k ""%NGROK_EXE%" http --domain=automacaolab.ngrok.dev 5000"
+) else (
+    echo [!] Ngrok do winget não encontrado. Usando ngrok do PATH...
+
+    if defined NGROK_AUTHTOKEN (
+        echo [i] Configurando authtoken do ngrok via variavel de ambiente NGROK_AUTHTOKEN...
+        ngrok config add-authtoken %NGROK_AUTHTOKEN% >nul 2>&1
+    ) else (
+        echo [!] NGROK_AUTHTOKEN nao definido. Se o tunel falhar com ERR_NGROK_4018, configure seu token.
+    )
+
+    start "Ngrok Tunnel" cmd /k "ngrok http --domain=automacaolab.ngrok.dev 5000"
+)
 timeout /t 2 /nobreak >nul
 
 echo.

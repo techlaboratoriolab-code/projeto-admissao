@@ -159,6 +159,29 @@ const AdmissionView = () => {
     }
   };
 
+  const resolverUrlImagem = (url) => {
+    const valor = String(url || '').trim();
+    if (!valor) return '';
+
+    if (/^(https?:)?\/\//i.test(valor) || valor.startsWith('data:') || valor.startsWith('blob:')) {
+      return valor;
+    }
+
+    const base = String(API_BASE_URL || '').trim().replace(/\/+$/, '');
+    const path = valor.startsWith('/') ? valor : `/${valor}`;
+    return `${base}${path}` || path;
+  };
+
+  const normalizarImagens = (lista) => {
+    if (!Array.isArray(lista)) return [];
+
+    return lista.map((img) => ({
+      ...img,
+      url: resolverUrlImagem(img?.url),
+      urlS3: resolverUrlImagem(img?.urlS3),
+    }));
+  };
+
   const codigoCorrespondenteSelecionado = resolverCodigoCanonico(
     codigoCorrespondenteManual,
     sincronizacaoInfo?.tipo === 'OCR' ? sincronizacaoInfo?.codigoCorrespondente : ''
@@ -436,7 +459,7 @@ const AdmissionView = () => {
       const imagensS3 = Array.isArray(data?.imagens) ? data.imagens : [];
 
       if (response.ok && imagensS3.length > 0) {
-        setImagens(imagensS3);
+        setImagens(normalizarImagens(imagensS3));
         setRequisicaoData((prev) => prev || { codRequisicao });
         return imagensS3;
       }
@@ -743,7 +766,7 @@ const AdmissionView = () => {
 
         // Armazenar imagens
         if (data.imagens && data.imagens.length > 0) {
-          setImagens(data.imagens);
+          setImagens(normalizarImagens(data.imagens));
           setMessage({
             type: 'success',
             text: `Requisição encontrada! ${data.imagens.length} imagens carregadas. Dados em topografia gerados.`
@@ -2654,7 +2677,7 @@ const AdmissionView = () => {
     }
 
     setRequisicaoData(data.requisicao);
-    setImagens(data.imagens || []);
+    setImagens(normalizarImagens(data.imagens || []));
     setFormData(prev => ({
       ...prev,
       codRequisicao: resolverCodigoCanonico(prev.codRequisicao, data?.requisicao?.codRequisicao, codRequisicao),
@@ -3458,7 +3481,7 @@ const AdmissionView = () => {
           const temImagens = Array.isArray(imgData.imagens) && imgData.imagens.length > 0;
 
           if (temImagens) {
-            setImagens(imgData.imagens);
+            setImagens(normalizarImagens(imgData.imagens));
             setRequisicaoData(apiReq || null);
           }
 
